@@ -1,0 +1,38 @@
+[package]
+name = "xc"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+name = "xc"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0.67"
+async-trait = "0.1.59"
+base64 = "0.20.0"
+chrono = "0.4.23"
+futures = "0.3.25"
+freebsd = { path = "../freebsd", features = ["tokio"] }
+ipc = { path = "../ipc" }
+ipcidr = { path = "../ipcidr" }
+jail = "*"
+nix = { version = "0.25.0", features = ["term", "process", "event"] }
+oci_util = { path = "../oci_util" }
+paste = "1.0.11"
+pest = "2.6.0"
+pest_derive = "2.6.0"
+pty_process = { path = "../pty_process" }
+rand = "0.8.5"
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+rusqlite = { version = "0.28.0", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = { version = "0.10.6", features = ["asm"] }
+sysctl = "*"
+thiserror = "1.0.38"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tokio = { version = "^1.21", features = ["full"] }
+uuid = { version = "1.2.2", features = ["v4", "fast-rng"] }
+varutil = { path = "../varutil" }

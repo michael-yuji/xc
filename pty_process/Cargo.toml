@@ -1,0 +1,12 @@
+[package]
+name = "pty_process"
+version = "0.0.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+freebsd = { path = "../freebsd" }
+futures = "0.3.25"
+nix = { version = "0.25.0", features = ["term"] }
+tokio = { version = "^1.21", features = ["net", "process", "macros", "sync"] }

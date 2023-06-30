@@ -1,0 +1,28 @@
+[package]
+name = "xc-bin"
+version = "0.0.1"
+edition = "2021"
+
+[[bin]]
+name = "xc"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "3", features = ["derive"] }
+ipcidr = { path = "../ipcidr" }
+freebsd = { path = "../freebsd" }
+nix = { version = "0.25.0", features = ["term", "process", "event"] }
+oci_util = { path = "../oci_util" }
+ipc = { path = "../ipc" }
+pest = "2.6.0"
+pest_derive = "2.6.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+term-table = { git = "https://github.com/michael-yuji/term-table.git" }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+thiserror = "*"
+varutil = { path = "../varutil" }
+xc = { path = "../xc" }
+xcd = { path = "../xcd" }

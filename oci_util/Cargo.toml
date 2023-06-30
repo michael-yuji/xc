@@ -1,0 +1,19 @@
+[package]
+name = "oci_util"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.66"
+async-trait = "*"
+clap = { version = "3.1.15", features = ["derive"] }
+futures = "0.3.25"
+pest = "2.6.0"
+pest_derive = "2.6.0"
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = { version = "0.10.6", features = ["asm"] }
+thiserror = "*"
+tracing = "0.1"

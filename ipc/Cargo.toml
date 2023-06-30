@@ -1,0 +1,17 @@
+[package]
+name = "ipc"
+version = "0.0.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "*"
+anyhow = "*"
+freebsd = { path = "../freebsd" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tracing = "0.1"
+nix = { version = "0.25.0", features = ["event"] }
+tokio = { version = "^1.21", features = ["full"] }

@@ -1,0 +1,14 @@
+[package]
+name = "ipc-macro"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_tokenstream = "0.1"
+syn = { version = "1", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"

@@ -1,0 +1,8 @@
+[profile.release]
+debug = true
+
+[workspace]
+members = [
+  "freebsd", "ipcidr", "pty_process", "varutil", "xc", "xcd",
+  "oci_util", "ocitar", "xc-bin", "ipc-macro", "ipc"
+]
