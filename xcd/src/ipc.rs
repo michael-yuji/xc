@@ -21,8 +21,10 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+
 use crate::auth::Credential;
 use crate::context::ServerContext;
+use crate::image::push::{PushImageStatusDesc, PushImageError};
 use freebsd::libc::{EINVAL, EIO};
 use ipc::packet::codec::{Fd, FromPacket, List, Maybe};
 use ipc::proto::{enoent, ipc_err, GenericResult};
@@ -250,7 +252,7 @@ async fn upload_stat(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
     request: UploadStat,
-) -> GenericResult<crate::image::PushImageStatusDesc> {
+) -> GenericResult<PushImageStatusDesc> {
     //    let id = request.image_reference.to_string();
     let id = format!("{}->{}", request.image_reference, request.remote_reference);
     let state = context
@@ -769,7 +771,7 @@ async fn push_image(
     context: Arc<RwLock<ServerContext>>,
     load_context: &mut ConnectionContext<Variables>,
     request: PushImageRequest,
-) -> Result<PushImageResponse, ipc::proto::ErrResponse<crate::image::PushImageError>> {
+) -> Result<PushImageResponse, ipc::proto::ErrResponse<PushImageError>> {
     let ctx = context.read().await;
     ctx.push_image(request.image_reference, request.remote_reference)
         .await

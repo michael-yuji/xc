@@ -411,8 +411,8 @@ impl ServerContext {
         &self,
         reference: ImageReference,
         remote_reference: ImageReference,
-    ) -> Result<(), crate::image::PushImageError> {
-        _ = ImageManager::push_image(
+    ) -> Result<(), crate::image::push::PushImageError> {
+        _ = crate::image::push::push_image(
             self.image_manager.clone(),
             &self.config_manager.config().layers_dir,
             reference,
@@ -423,7 +423,8 @@ impl ServerContext {
     }
 
     pub(crate) async fn pull_image(&mut self, reference: &ImageReference) -> anyhow::Result<()> {
-        ImageManager::pull_image(self.image_manager.clone(), reference.clone()).await;
+        // XXX: handle pull image error
+        crate::image::pull::pull_image(self.image_manager.clone(), reference.clone()).await;
         Ok(())
     }
 }
