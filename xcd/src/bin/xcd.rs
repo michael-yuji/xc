@@ -37,7 +37,9 @@ pub fn register_panic_handler() {
 }
 
 fn main() {
-    register_panic_handler();
+    if std::env::var("XC_PANIC_COREDUMP").is_ok() {
+        register_panic_handler();
+    }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .thread_stack_size(10 * 1024 * 1024)
