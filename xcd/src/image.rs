@@ -432,14 +432,13 @@ impl ImageManager {
     pub async fn push_image(
         this: Arc<RwLock<Self>>,
         layers_dir: &str,
-//        registry: &str,
+        //        registry: &str,
         reference: ImageReference,
         remote_reference: ImageReference,
-//        name: &str,
-//        tag: &str,
+        //        name: &str,
+        //        tag: &str,
     ) -> Result<Receiver<Task<String, PushImageStatus>>, PushImageError> {
-
-//        let id = reference.to_string();
+        //        let id = reference.to_string();
         let id = format!("{reference}->{remote_reference}");
         let name = remote_reference.name;
         let tag = remote_reference.tag.to_string();
@@ -454,7 +453,8 @@ impl ImageManager {
                 .await
                 .map_err(|_| PushImageError::NoSuchLocalReference)?;
 
-            let registry = remote_reference.hostname
+            let registry = remote_reference
+                .hostname
                 .and_then(|registry| reg.get_registry_by_name(&registry))
                 .ok_or(PushImageError::RegistryNotFound)?;
 
@@ -478,7 +478,7 @@ impl ImageManager {
             let mut session = registry.new_session(name.to_string());
             let layers = record.manifest.layers().clone();
             let mut selections = Vec::new();
-//            let (tx, upload_status) = tokio::sync::watch::channel(UploadStat::default());
+            //            let (tx, upload_status) = tokio::sync::watch::channel(UploadStat::default());
 
             'layer_loop: for layer in layers.iter() {
                 let maps = {
@@ -528,7 +528,7 @@ impl ImageManager {
                 let path = std::path::Path::new(&path);
                 let file = std::fs::OpenOptions::new().read(true).open(path)?;
 
-//                let dedup_check = Ok::<bool, std::io::Error>(false);
+                //                let dedup_check = Ok::<bool, std::io::Error>(false);
                 let dedup_check = session.exists_digest(&map.archive_digest).await;
 
                 _ = emitter.use_try(|state| {
@@ -629,7 +629,9 @@ impl ImageManager {
             let reg = this.context.registries.lock().await;
             match reference.hostname {
                 None => reg.default_registry().expect("no default registry found"),
-                Some(name) => reg.get_registry_by_name(&name).expect("no such registry"),
+                Some(name) => reg
+                    .get_registry_by_name(&name)
+                    .unwrap_or_else(|| Registry::new(name, None)),
             }
         };
 
@@ -850,7 +852,7 @@ pub struct PushImageStatusDesc {
     pub fault: Option<String>,
 
     pub bytes: Option<usize>,
-    pub duration_secs: Option<u64>
+    pub duration_secs: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -862,23 +864,19 @@ pub struct PushImageStatus {
     pub push_manifest: bool,
     pub done: bool,
     pub fault: Option<String>,
-    pub upload_status: Option<Receiver<UploadStat>>
+    pub upload_status: Option<Receiver<UploadStat>>,
 }
 
 impl PushImageStatus {
     fn to_desc(&self) -> PushImageStatusDesc {
         let (bytes, duration_secs) = match &self.upload_status {
-            None => {
-                (None, None)
-            },
+            None => (None, None),
             Some(receiver) => {
                 let stat = receiver.borrow();
                 if let Some((bytes, elapsed)) = stat.started_at.and_then(|started_at| {
-                    stat.uploaded.map(|bytes| {
-                        (bytes, started_at.elapsed().unwrap().as_secs())
-                    })
-                })
-                {
+                    stat.uploaded
+                        .map(|bytes| (bytes, started_at.elapsed().unwrap().as_secs()))
+                }) {
                     (Some(bytes), Some(elapsed))
                 } else {
                     (None, None)
@@ -892,7 +890,8 @@ impl PushImageStatus {
             push_manifest: self.push_manifest,
             done: self.done,
             fault: self.fault.clone(),
-            bytes, duration_secs
+            bytes,
+            duration_secs,
         }
     }
 }

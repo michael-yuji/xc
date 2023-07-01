@@ -299,7 +299,7 @@ fn main() -> Result<(), ActionError> {
         } => {
             let req = PushImageRequest {
                 image_reference: image_reference.clone(),
-                remote_reference: new_image_reference.clone()
+                remote_reference: new_image_reference.clone(),
             };
             if let Ok(_res) = do_push_image(&mut conn, req)? {
                 let mut lines_count = 0;
@@ -311,7 +311,7 @@ fn main() -> Result<(), ActionError> {
 
                     let reqt = UploadStat {
                         image_reference: image_reference.clone(),
-                        remote_reference: new_image_reference.clone()
+                        remote_reference: new_image_reference.clone(),
                     };
                     let res = do_upload_stat(&mut conn, reqt)?.unwrap();
                     if let Some(error) = res.fault {
@@ -330,30 +330,33 @@ fn main() -> Result<(), ActionError> {
                             match i.cmp(&x) {
                                 Ordering::Less => eprintln!("{digest} ... done"),
                                 Ordering::Equal => {
-                                    let speed = res.duration_secs
-                                        .and_then(|secs| 
-                                                  res.bytes.map(|bytes| (bytes * 8) as f64/secs as f64));
-                                    let uploaded = res.bytes.map(|bytes| {
-                                        let bytes = bytes as f64;
-                                        if bytes > 1000000000.0 {
-                                            format!("{:.2} GB", bytes / 1000000000.0)
-                                        } else if bytes > 1000000.0 {
-                                            format!("{:.2} MB", bytes / 1000000.0)
-                                        } else if bytes > 1000.0 {
-                                            format!("{:.2} KB", bytes / 1000.0)
-                                        } else {
-                                            format!("{:.2} B", bytes)
-                                        }
-                                    }).unwrap_or_else(|| "".to_string());
+                                    let speed = res.duration_secs.and_then(|secs| {
+                                        res.bytes.map(|bytes| (bytes * 8) as f64 / secs as f64)
+                                    });
+                                    let uploaded = res
+                                        .bytes
+                                        .map(|bytes| {
+                                            let bytes = bytes as f64;
+                                            if bytes > 1000000000.0 {
+                                                format!("{:.2} GB", bytes / 1000000000.0)
+                                            } else if bytes > 1000000.0 {
+                                                format!("{:.2} MB", bytes / 1000000.0)
+                                            } else if bytes > 1000.0 {
+                                                format!("{:.2} KB", bytes / 1000.0)
+                                            } else {
+                                                format!("{:.2} B", bytes)
+                                            }
+                                        })
+                                        .unwrap_or_else(|| "".to_string());
                                     let label = match speed {
                                         None => "".to_string(),
                                         Some(speed) => {
                                             if speed > 1000000000.0 {
-                                                format!("{:.2} gbps", speed/1000000000.0)
+                                                format!("{:.2} gbps", speed / 1000000000.0)
                                             } else if speed > 1000000.0 {
-                                                format!("{:.2} mbps", speed/1000000.0)
+                                                format!("{:.2} mbps", speed / 1000000.0)
                                             } else if speed > 1000.0 {
-                                                format!("{:.2} kbps", speed/1000.0)
+                                                format!("{:.2} kbps", speed / 1000.0)
                                             } else {
                                                 format!("{:.2} bps", speed)
                                             }
@@ -598,7 +601,14 @@ impl<'a> TableSource for PrintManifest<'a> {
                 if self.0.ip_alloc.is_empty() {
                     None
                 } else {
-                    Some(self.0.ip_alloc.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","))
+                    Some(
+                        self.0
+                            .ip_alloc
+                            .iter()
+                            .map(|i| i.to_string())
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    )
                 }
             }
             _ => None,

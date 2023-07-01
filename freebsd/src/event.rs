@@ -40,7 +40,7 @@ extern "C" {
 pub type Notify = tokio::sync::Notify;
 
 /// Notify like construct but backed by non-blocking eventfd(2). The fd is than closed when this
-/// struct dropped. 
+/// struct dropped.
 ///
 /// There are few reason to use this instead of tokio::sync::Notify, one being since this is
 /// eventfd based, it can be send across processes. It can also use synchronously by calling

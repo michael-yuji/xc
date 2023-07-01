@@ -253,9 +253,7 @@ impl ProcessRunner {
                 let log_path = format!("/var/log/xc.{}.{}.log", self.container.id, id);
                 spawn_process_pty(cmd, &log_path, &socket_path)?
             }
-            StdioMode::Files { stdout, stderr } => {
-                spawn_process_files(&mut cmd, stdout, stderr)?
-            }
+            StdioMode::Files { stdout, stderr } => spawn_process_files(&mut cmd, stdout, stderr)?,
             StdioMode::Inherit => {
                 let out_path = format!("/var/log/xc.{}.{}.out.log", self.container.id, id);
                 let err_path = format!("/var/log/xc.{}.{}.err.log", self.container.id, id);
@@ -400,7 +398,8 @@ impl ProcessRunner {
                                         if inits.queue_processes_check_if_drain(
                                             stat.id(),
                                             &mut next_processes,
-                                        ) && !self.container.main_norun {
+                                        ) && !self.container.main_norun
+                                        {
                                             self.should_run_main = true;
                                         }
 

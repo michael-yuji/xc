@@ -195,7 +195,7 @@ pub fn exists_exec(
 pub enum CompressionFormat {
     Other,
     Zstd,
-    Gzip
+    Gzip,
 }
 
 pub trait CompressionFormatExt {
@@ -210,7 +210,7 @@ impl CompressionFormatExt for std::fs::File {
         if unsafe { freebsd::libc::pread(fd, magic.as_mut_ptr().cast(), 4, 0) } == -1 {
             Err(std::io::Error::last_os_error())
         } else if magic[..2] == [0x1f, 0x8b] {
-                Ok(CompressionFormat::Gzip)
+            Ok(CompressionFormat::Gzip)
         } else if magic == [0x28, 0xb5, 0x2f, 0xfd] {
             Ok(CompressionFormat::Zstd)
         } else {

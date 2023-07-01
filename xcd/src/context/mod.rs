@@ -410,13 +410,13 @@ impl ServerContext {
     pub(crate) async fn push_image(
         &self,
         reference: ImageReference,
-        remote_reference: ImageReference
+        remote_reference: ImageReference,
     ) -> Result<(), crate::image::PushImageError> {
         _ = ImageManager::push_image(
             self.image_manager.clone(),
             &self.config_manager.config().layers_dir,
             reference,
-            remote_reference
+            remote_reference,
         )
         .await?;
         Ok(())

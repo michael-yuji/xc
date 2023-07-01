@@ -44,7 +44,7 @@ use xc::container::request::{MountReq, NetworkAllocRequest};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
 use xc::res::network::Network;
-use xc::util::{gen_id, CompressionFormatExt, CompressionFormat};
+use xc::util::{gen_id, CompressionFormat, CompressionFormatExt};
 
 #[derive(FromPacket, Debug)]
 pub struct CreateChannelRequest {
@@ -242,7 +242,7 @@ async fn instantiate(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UploadStat {
     pub image_reference: ImageReference,
-    pub remote_reference: ImageReference
+    pub remote_reference: ImageReference,
 }
 
 #[ipc_method(method = "upload_stat")]
@@ -251,7 +251,7 @@ async fn upload_stat(
     local_context: &mut ConnectionContext<Variables>,
     request: UploadStat,
 ) -> GenericResult<crate::image::PushImageStatusDesc> {
-//    let id = request.image_reference.to_string();
+    //    let id = request.image_reference.to_string();
     let id = format!("{}->{}", request.image_reference, request.remote_reference);
     let state = context
         .read()
@@ -595,7 +595,7 @@ async fn fd_import(
     let content_type = match file.compression_format().expect("cannot read magic") {
         CompressionFormat::Gzip => "gzip",
         CompressionFormat::Zstd => "zstd",
-        CompressionFormat::Other => "plain"
+        CompressionFormat::Other => "plain",
     };
 
     info!("import: content_type is {content_type}");
@@ -771,16 +771,13 @@ async fn push_image(
     request: PushImageRequest,
 ) -> Result<PushImageResponse, ipc::proto::ErrResponse<crate::image::PushImageError>> {
     let ctx = context.read().await;
-    ctx.push_image(
-        request.image_reference,
-        request.remote_reference
-    )
-    .await
-    .map(|_| PushImageResponse {})
-    .map_err(|err| ipc::proto::ErrResponse {
-        value: err,
-        errno: 1,
-    })
+    ctx.push_image(request.image_reference, request.remote_reference)
+        .await
+        .map(|_| PushImageResponse {})
+        .map_err(|err| ipc::proto::ErrResponse {
+            value: err,
+            errno: 1,
+        })
 }
 
 #[allow(non_upper_case_globals)]

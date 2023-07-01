@@ -57,10 +57,7 @@ pub(crate) fn use_image_action(
             config,
         } => {
             use std::os::fd::AsRawFd;
-            let config_file = std::fs::OpenOptions::new()
-                .read(true)
-                .open(config)
-                .unwrap();
+            let config_file = std::fs::OpenOptions::new().read(true).open(config).unwrap();
             let config: xc::models::jail_image::JailConfig =
                 serde_json::from_reader(config_file).unwrap();
             let file = std::fs::OpenOptions::new().read(true).open(path).unwrap();

@@ -44,7 +44,9 @@ pub async fn xmain() -> Result<(), anyhow::Error> {
     let config_path = "/usr/local/etc/xc.conf";
     info!("loading configuration from {config_path}");
     match ConfigManager::load_from_path(config_path) {
-        Err(error) => { error!("{error:#?}"); },
+        Err(error) => {
+            error!("{error:#?}");
+        }
         Ok(config_manager) => {
             let xc_config = config_manager.config();
             let path = xc_config.socket_path.to_string();

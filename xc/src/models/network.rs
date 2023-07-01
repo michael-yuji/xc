@@ -81,7 +81,7 @@ impl std::fmt::Display for PortNum {
 pub enum NetProto {
     Tcp,
     Udp,
-    Sctp
+    Sctp,
 }
 
 impl std::fmt::Display for NetProto {
@@ -89,7 +89,7 @@ impl std::fmt::Display for NetProto {
         match self {
             Self::Tcp => write!(formatter, "tcp"),
             Self::Udp => write!(formatter, "udp"),
-            Self::Sctp => write!(formatter, "sctp")
+            Self::Sctp => write!(formatter, "sctp"),
         }
     }
 }
@@ -99,7 +99,7 @@ impl AsRef<str> for NetProto {
         match self {
             Self::Tcp => "tcp",
             Self::Udp => "udp",
-            Self::Sctp => "sctp"
+            Self::Sctp => "sctp",
         }
     }
 }
