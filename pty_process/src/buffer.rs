@@ -21,7 +21,6 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-use tokio::net::UnixStream;
 
 /// A buffer only capable of storeing fixed size data and retain only the last
 /// appended data.
@@ -130,64 +129,6 @@ impl<const N: usize> Buffer<N> {
                     let written1 = writer.write(&self.buffer[..curr_index])?;
                     Ok((written0 + written1, offset + written0 + written1))
                 }
-            }
-        }
-    }
-
-    pub fn read_to(
-        &self,
-        offset: usize,
-        writer: &mut UnixStream,
-    ) -> Result<(usize, usize), std::io::Error> {
-        if offset > self.input_count {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "client offset greater than total bytes received",
-            ));
-        }
-
-        // if the offset the client held is from way too early that we don't hold anymore, we can
-        // only gives all new ones
-        if self.input_count - offset >= N {
-            let start_index = self.input_count % N;
-            let len_to_bound = N - start_index;
-            let written = writer.try_write(&self.buffer[start_index..])?;
-            if written < len_to_bound {
-                Ok((written, self.input_count))
-            } else {
-                Ok((
-                    writer.try_write(&self.buffer[..(N - len_to_bound)])?,
-                    self.input_count,
-                ))
-            }
-        } else {
-            let prev_index = offset % N;
-            let curr_index = self.input_count % N;
-            if self.input_count < N {
-                let written = writer.try_write(&self.buffer[offset..self.input_count])?;
-                Ok((written, self.input_count))
-            } else if curr_index > prev_index {
-                let written = writer.try_write(&self.buffer[prev_index..curr_index])?;
-                if written != curr_index - prev_index {
-                    eprintln!("m = {}", offset + (curr_index - prev_index));
-                    Ok((written, offset + (curr_index - prev_index)))
-                } else {
-                    let len_to_bound = N - prev_index;
-                    let written0 = writer.try_write(&self.buffer[prev_index..])?;
-                    if written0 != len_to_bound {
-                        eprintln!("m2 = {}", offset + written0);
-                        Ok((written0, offset + written0))
-                    } else {
-                        let written1 = writer.try_write(&self.buffer[..curr_index])?;
-                        eprintln!(
-                            "m3 = {}, written0: {written0}, written1: {written1}",
-                            offset + written0 + written1
-                        );
-                        Ok((written0 + written1, offset + written0 + written1))
-                    }
-                }
-            } else {
-                panic!()
             }
         }
     }
