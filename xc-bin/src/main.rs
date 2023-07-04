@@ -42,6 +42,7 @@ use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::io::{stdin, Read};
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
 use term_table::homogeneous::{TableLayout, TableSource, Title};
@@ -96,6 +97,18 @@ enum Action {
     },
     Link {
         name: String,
+    },
+    Login {
+        #[clap(long="username", short='u')]
+        username: String,
+        #[clap(long="password", short='p')]
+        password: Option<String>,
+        #[clap(long="password-stdin", action)]
+        password_stdin: bool,
+        /// The server uses http instead of https
+        #[clap(long="insecure", action)]
+        insecure: bool,
+        server: String
     },
     #[clap(subcommand)]
     Network(NetworkAction),
@@ -247,6 +260,23 @@ fn main() -> Result<(), ActionError> {
                         _ = pdwait(child.as_raw_fd());
                     }
                 }
+            }
+        }
+        Action::Login { username, password, password_stdin, server, insecure } => {
+            if password.is_none() && !password_stdin {
+                eprintln!("at least --password <password> at --password-stdin required");
+                std::process::exit(1)
+            }
+
+            let password = password.unwrap_or_else(|| {
+                let mut password = String::new();
+                print!("Enter password: \n");
+                rpassword::read_password().unwrap()
+            });
+
+            let request = LoginRequest { username, password, server, insecure };
+            if let Err(err) = do_login_registry(&mut conn, request)? {
+                eprintln!("error: {err:#?}");
             }
         }
         Action::Network(action) => {

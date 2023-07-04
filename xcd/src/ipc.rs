@@ -32,6 +32,7 @@ use ipc::service::{ConnectionContext, Service};
 use ipc_macro::{ipc_method, FromPacket};
 use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
+use oci_util::distribution::client::{Registry, BasicAuth};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Seek;
@@ -743,6 +744,33 @@ async fn link_container(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+    pub server: String,
+    pub insecure: bool
+}
+
+#[ipc_method(method = "login")]
+async fn login_registry(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: LoginRequest,
+) -> GenericResult<()> {
+    let scheme = if request.insecure { "http" } else { "https" };
+    let registry = Registry::new(
+        format!("{scheme}://{}", request.server),
+        Some(BasicAuth::new(request.username, request.password))
+    );
+    // XXX: should have find some ways to verify the tokens
+    context
+        .write().await
+        .image_manager.write().await
+        .insert_registry(&request.server, registry).await;
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ExecCommandRequest {
     pub name: String,
@@ -825,6 +853,7 @@ pub(crate) async fn register_to_service(
     service.register(show_container).await;
     service.register(destroy_container).await;
     service.register(list_containers).await;
+    service.register(login_registry).await;
     service.register(commit_container).await;
     service.register(download_stat).await;
     service.register(upload_stat).await;

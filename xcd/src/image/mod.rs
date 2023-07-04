@@ -103,6 +103,11 @@ impl ImageManager {
         }
     }
 
+    pub async fn insert_registry(
+        &mut self, id: &str, registry: Registry) {
+        self.context.registries.lock().await.insert_registry(id, &registry);
+    }
+
     pub async fn register_and_tag_manifest(
         &self,
         name: &str,
