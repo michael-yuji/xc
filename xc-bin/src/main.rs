@@ -98,16 +98,24 @@ enum Action {
     Link {
         name: String,
     },
+    /// Login to a container
+    ///
+    /// This command does not actually verify the username/password against the registry, but just
+    /// record the credential for later use
     Login {
+        /// Username
         #[clap(long="username", short='u')]
         username: String,
         #[clap(long="password", short='p')]
+        /// Password
         password: Option<String>,
+        /// Take the password from stdin
         #[clap(long="password-stdin", action)]
         password_stdin: bool,
         /// The server uses http instead of https
         #[clap(long="insecure", action)]
         insecure: bool,
+        /// The target server
         server: String
     },
     #[clap(subcommand)]
