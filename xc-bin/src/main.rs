@@ -163,7 +163,7 @@ enum Action {
         output: String,
     },
 
-    Watch {
+    Trace {
         name: String,
         args: Vec<String>,
     },
@@ -553,10 +553,11 @@ fn main() -> Result<(), ActionError> {
                 .unwrap_or_else(|_| panic!("cannot open {output} for writing"));
             file.write_all(&encoded).expect("cannot write to file");
         }
-        Action::Watch { name, args } => {
+        Action::Trace { name, args } => {
             let request = ShowContainerRequest { id: name };
             if let Ok(response) = do_show_container(&mut conn, request)? {
                 let jid = response.running_container.jid;
+                let args = if args.is_empty() { vec!["-F".to_string(), "syscall".to_string()] } else { args };
                 let mut process = std::process::Command::new("dwatch")
                     .arg("-j")
                     .arg(jid.to_string())
