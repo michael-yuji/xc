@@ -33,6 +33,7 @@ use crate::network_manager::NetworkManager;
 use crate::port::PortForwardTable;
 use crate::registry::JsonRegistryProvider;
 use crate::site::Site;
+use crate::util::TwoWayMap;
 
 use anyhow::Context;
 use freebsd::fs::zfs::{ZfsHandle, ZfsSnapshot};
@@ -55,7 +56,8 @@ use xc::models::network::*;
 pub struct ServerContext {
     pub(crate) network_manager: Arc<Mutex<NetworkManager>>,
     pub(crate) sites: HashMap<String, Arc<RwLock<Site>>>,
-    pub(crate) alias_map: HashMap<String, String>,
+    pub(crate) alias_map: TwoWayMap<String, String>,
+    //    pub(crate) alias_map: HashMap<String, String>,
     pub(crate) devfs_store: DevfsRulesetStore,
     pub(crate) image_manager: Arc<RwLock<ImageManager>>,
     pub(crate) config_manager: ConfigManager,
@@ -92,7 +94,7 @@ impl ServerContext {
 
         ServerContext {
             network_manager,
-            alias_map: HashMap::new(),
+            alias_map: TwoWayMap::new(),
             devfs_store: DevfsRulesetStore::new(config.devfs_id_offset),
             image_manager: Arc::new(RwLock::new(image_manager)),
             sites: HashMap::new(),
@@ -244,6 +246,7 @@ impl ServerContext {
             }
             self.port_forward_table.remove_rules(id);
             self.reload_pf_rdr_anchor()?;
+            self.alias_map.remove_all_referenced(id);
         }
         Ok(())
     }
@@ -403,9 +406,11 @@ impl ServerContext {
 
             site.run_container(blueprint)?;
             let notify = site.container_notify.clone().unwrap();
+            let jail = site.container_dump().unwrap();
             let arc_site = Arc::new(RwLock::new(site));
             this.sites.insert(id.to_string(), arc_site.clone());
             this.alias_map.insert(id.to_string(), id.to_string());
+            this.alias_map.insert(jail.jid.to_string(), id.to_string());
             if let Some(name) = name {
                 this.alias_map.insert(name, id.to_string());
             }
