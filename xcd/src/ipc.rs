@@ -213,6 +213,15 @@ async fn instantiate(
     //    let id = Uuid::new_v4().to_string();
     let id = gen_id();
 
+    if request
+        .name
+        .as_ref()
+        .and_then(|n| n.parse::<isize>().ok())
+        .is_some()
+    {
+        return ipc_err(EINVAL, "container name cannot be integer literal");
+    }
+
     let row = {
         let ctx = context.read().await;
         let dlctx = ctx.image_manager.read().await;
@@ -526,27 +535,28 @@ async fn show_container(
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct DestroyContainerRequest {
+pub struct KillContainerRequest {
     pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct DestroyContainerResponse {}
+pub struct KillContainerResponse {}
 
-#[ipc_method(method = "destroy_container")]
-async fn destroy_container(
+#[ipc_method(method = "kill_container")]
+async fn kill_container(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
-    request: DestroyContainerRequest,
-) -> GenericResult<DestroyContainerResponse> {
+    request: KillContainerRequest,
+) -> GenericResult<KillContainerResponse> {
     let mut context = context.write().await;
     if let Some(id) = context.alias_map.get(&request.name).cloned() {
         _ = context.terminate(&id).await;
-        Ok(DestroyContainerResponse {})
+        Ok(KillContainerResponse {})
     } else {
         enoent(format!("no such container: {}", request.name).as_str())
     }
 }
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DoRdr {
     pub name: String,
@@ -562,6 +572,25 @@ async fn rdr_container(
     let redirection = request.redirection.clone();
     _ = context.write().await.do_rdr(&name, &redirection).await;
     Ok(request)
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ContainerRdrList {
+    pub name: String,
+}
+
+#[ipc_method(method = "list_site_rdr")]
+async fn list_site_rdr(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: ContainerRdrList,
+) -> GenericResult<Vec<PortRedirection>> {
+    let context = context.read().await;
+    if let Some(id) = context.alias_map.get(&request.name) {
+        Ok(context.port_forward_table.all_rules_with_id(id))
+    } else {
+        enoent(format!("no such container: {}", request.name).as_str())
+    }
 }
 
 #[derive(FromPacket)]
@@ -695,17 +724,17 @@ async fn commit_container(
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ReplaceMetaRequest {
+pub struct SetConfigRequest {
     pub name: String,
     pub tag: String,
-    pub meta: xc::models::jail_image::JailConfig,
+    pub config: xc::models::jail_image::JailConfig,
 }
 
 #[ipc_method(method = "replace_meta")]
 async fn replace_meta(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
-    request: ReplaceMetaRequest,
+    request: SetConfigRequest,
 ) -> GenericResult<xc::models::jail_image::JailImage> {
     let ctx = context.read().await;
     let dlctx = ctx.image_manager.read().await;
@@ -714,7 +743,7 @@ async fn replace_meta(
         .await
         .unwrap();
     let mut manifest = record.manifest;
-    manifest.set_config(&request.meta);
+    manifest.set_config(&request.config);
     dlctx
         .register_and_tag_manifest(&request.name, &request.tag, &manifest)
         .await
@@ -860,7 +889,7 @@ pub(crate) async fn register_to_service(
     service.register(create_network).await;
     service.register(list_networks).await;
     service.register(show_container).await;
-    service.register(destroy_container).await;
+    service.register(kill_container).await;
     service.register(list_containers).await;
     service.register(login_registry).await;
     service.register(commit_container).await;

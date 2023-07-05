@@ -29,6 +29,7 @@ use std::ffi::OsString;
 use std::os::fd::RawFd;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
+use tracing::info;
 use xc::config::XcConfig;
 use xc::container::effect::UndoStack;
 use xc::container::{Container, ContainerManifest};
@@ -110,7 +111,6 @@ impl Site {
 
     pub fn kill_conatiner(&mut self) -> anyhow::Result<()> {
         use freebsd::nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
-        use tracing::error;
         let event = KEvent::new(
             2,
             EventFilter::EVFILT_USER,
@@ -119,7 +119,7 @@ impl Site {
             0 as freebsd::libc::intptr_t,
             0 as freebsd::libc::intptr_t,
         );
-        error!("killing container");
+        info!("killing container");
         _ = kevent_ts(self.ctl_channel.unwrap(), &[event], &mut [], None);
         Ok(())
     }

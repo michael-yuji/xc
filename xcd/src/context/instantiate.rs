@@ -101,6 +101,20 @@ impl InstantiateBlueprint {
             ipc::packet::codec::Maybe::Some(x) => Some(EventFdNotify::from_fd(x.as_raw_fd())),
         };
 
+        for (name, env_spec) in config.envs.iter() {
+            if env_spec.required && !request.envs.contains_key(&name.to_string()) {
+                let extra_info = env_spec
+                    .description
+                    .as_ref()
+                    .map(|d| format!(" - {d}"))
+                    .unwrap_or_default();
+                precondition_failure!(
+                    ENOENT,
+                    "missing required environment variable: {name}{extra_info}"
+                );
+            }
+        }
+
         let Some(entry_point) = config.entry_points.get(&request.entry_point) else {
             precondition_failure!(ENOENT, "requested entry point not found: {}", request.entry_point);
         };

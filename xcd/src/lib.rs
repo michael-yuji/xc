@@ -31,6 +31,7 @@ mod port;
 mod registry;
 mod site;
 mod task;
+mod util;
 
 pub mod ipc;
 use config_manager::ConfigManager;

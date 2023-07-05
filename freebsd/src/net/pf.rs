@@ -25,12 +25,14 @@
 use ipcidr::IpCidr;
 use std::io::Write;
 use std::net::IpAddr;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub const PFCTL_CMD: &str = crate::env_or_default!("XC_PFCTL_CMD", "/sbin/pfctl");
 
 pub fn is_pf_enabled() -> Result<bool, std::io::Error> {
     Command::new(PFCTL_CMD)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .arg("-s")
         .arg("Running")
         .status()

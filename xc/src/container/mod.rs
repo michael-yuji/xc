@@ -189,7 +189,7 @@ impl Container {
         } else {
             proto = proto.param("vnet", Value::Int(1));
             for alloc in self.ip_alloc.iter() {
-                if let Some(network) = &alloc.network {
+                if let Some(_network) = &alloc.network {
                     let (epair_a, epair_b) = undo.create_epair()?;
                     undo.iface_up(epair_a.to_owned())?;
                     undo.iface_up(epair_b.to_owned())?;
