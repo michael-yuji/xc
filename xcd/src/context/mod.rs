@@ -57,7 +57,6 @@ pub struct ServerContext {
     pub(crate) network_manager: Arc<Mutex<NetworkManager>>,
     pub(crate) sites: HashMap<String, Arc<RwLock<Site>>>,
     pub(crate) alias_map: TwoWayMap<String, String>,
-    //    pub(crate) alias_map: HashMap<String, String>,
     pub(crate) devfs_store: DevfsRulesetStore,
     pub(crate) image_manager: Arc<RwLock<ImageManager>>,
     pub(crate) config_manager: ConfigManager,
