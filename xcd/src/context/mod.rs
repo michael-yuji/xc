@@ -459,9 +459,14 @@ impl ServerContext {
         Ok(())
     }
 
-    pub(crate) async fn pull_image(&mut self, reference: &ImageReference) -> anyhow::Result<()> {
+    pub(crate) async fn pull_image(
+        &mut self,
+        reference: ImageReference,
+        rename_reference: Option<ImageReference>,
+    ) -> anyhow::Result<()> {
         // XXX: handle pull image error
-        crate::image::pull::pull_image(self.image_manager.clone(), reference.clone()).await;
+        crate::image::pull::pull_image(self.image_manager.clone(), reference, rename_reference)
+            .await;
         Ok(())
     }
 }

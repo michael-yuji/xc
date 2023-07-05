@@ -145,6 +145,7 @@ async fn info(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PullImageRequest {
     pub image_reference: ImageReference,
+    pub rename_reference: Option<ImageReference>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -162,7 +163,7 @@ async fn pull_image(
         _ = context
             .write()
             .await
-            .pull_image(&request.image_reference)
+            .pull_image(request.image_reference, request.rename_reference)
             .await;
     });
     Ok(PullImageResponse { existed: false })
@@ -215,7 +216,11 @@ async fn instantiate(
     let row = {
         let ctx = context.read().await;
         let dlctx = ctx.image_manager.read().await;
-        let image_name = request.image_reference.name.to_string();
+        let image_name = if let Some(hostname) = &request.image_reference.hostname {
+            format!("{hostname}/{}", request.image_reference.name)
+        } else {
+            request.image_reference.name.to_string()
+        };
         let image_tag = request.image_reference.tag.to_string();
         dlctx.query_manifest(&image_name, &image_tag).await
     };

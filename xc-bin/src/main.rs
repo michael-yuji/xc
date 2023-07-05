@@ -127,6 +127,7 @@ enum Action {
     },
     Pull {
         image_id: ImageReference,
+        local_reference: Option<ImageReference>,
     },
 
     Push {
@@ -310,9 +311,13 @@ fn main() -> Result<(), ActionError> {
             let fmt = format.unwrap_or_else(|| "JID,ID,IMAGE,MAIN,IPS,NAME,OS".to_string());
             display_containers(no_print_header, fmt, &res);
         }
-        Action::Pull { image_id } => {
+        Action::Pull {
+            image_id,
+            local_reference,
+        } => {
             let reqt = PullImageRequest {
                 image_reference: image_id.clone(),
+                rename_reference: local_reference,
             };
             let res = do_pull_image(&mut conn, reqt)?;
             debug!("do_pull_image: {res:#?}");
@@ -469,10 +474,6 @@ fn main() -> Result<(), ActionError> {
             }
 
             let (res, notify) = {
-                if image_reference.hostname.is_some() {
-                    return Err(anyhow::anyhow!("non local image"))?;
-                }
-
                 let envs = {
                     let mut map = std::collections::HashMap::new();
                     for env in envs.into_iter() {

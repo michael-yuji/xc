@@ -92,7 +92,16 @@ impl SqliteImageStore {
                 digest text not null
             );
             ",
-        )
+        );
+        // only for people installed and used xc prior to July 6th, 2023
+        if self
+            .db
+            .execute("alter table image_manifests add column origin text;", [])
+            .is_ok()
+        {
+            tracing::info!("UPDATED IMAGE DATABASE SCHEME");
+        };
+        Ok(())
     }
 }
 

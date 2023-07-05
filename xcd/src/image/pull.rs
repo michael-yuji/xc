@@ -31,6 +31,7 @@ use freebsd::fs::zfs::ZfsHandle;
 use oci_util::digest::OciDigest;
 use oci_util::distribution::client::*;
 use oci_util::image_reference::ImageReference;
+use oci_util::image_reference::ImageTag;
 use oci_util::layer::ChainId;
 use oci_util::models::ImageManifest;
 use serde::{Deserialize, Serialize};
@@ -124,26 +125,24 @@ pub enum PullImageError {
 pub async fn pull_image(
     this: Arc<RwLock<ImageManager>>,
     reference: ImageReference,
+    rename_reference: Option<ImageReference>,
 ) -> Result<Receiver<Task<String, PullImageStatus>>, PullImageError> {
     let id = reference.to_string();
-
     let image = reference.name.clone();
-    let tag = match reference.tag {
-        oci_util::image_reference::ImageTag::Tag(tag) => tag,
-        oci_util::image_reference::ImageTag::Digest(digest) => digest.to_string(),
-    };
+    let tag = reference.tag;
+    let hostname = reference.hostname; //.clone();
 
     let registry = {
         let this = this.clone();
         let this = this.read().await;
         let reg = this.context.registries.lock().await;
-        match reference.hostname {
+        match &hostname {
             None => reg
                 .default_registry()
                 .ok_or_else(|| PullImageError::RegistryNotFound)?,
             Some(name) => reg
                 .get_registry_by_name(&name)
-                .unwrap_or_else(|| Registry::new(name, None)),
+                .unwrap_or_else(|| Registry::new(name.to_string(), None)),
         }
     };
 
@@ -160,7 +159,7 @@ pub async fn pull_image(
     if !emitter.is_completed() {
         let mut session = registry.new_session(image.to_string());
         let manifest = session
-            .query_manifest_traced(&tag, |list| {
+            .query_manifest_traced(tag.as_str(), |list| {
                 list.manifests
                     .iter()
                     .find(|desc| desc.platform.architecture == get_current_arch())
@@ -244,8 +243,41 @@ pub async fn pull_image(
                         let this = this.clone();
                         let arc_image_store = &this.write().await.context.image_store;
                         let image_store = arc_image_store.lock().await;
+
+                        // If tag is a digest (xxx/xxx@sha256:...), we still try to register a tag
+                        // sha256:... Note this image reference can never get by the user as it
+                        // violates the image_reference format.
+                        //
+                        // There are 2 reasons to do this.
+                        // 1. It act as a phantom row such that when a user try to run something
+                        //    like foo/bar@sha256:......., we still can check if foo/bar has ever
+                        //    contains a manifest with the digest. Otherwise, a user who can only
+                        //    run images from a certain repo can run any other images as well my
+                        //    referencing the digest
+                        // 2. We don't have to change our database scheme and potentially introduce
+                        //    a new table that does nothing but telling us what repos are available
+                        //    as we now always have at least one reference in image_manifests_tags
+                        //    table referencing to the repo
                         _ = image_store
-                            .register_and_tag_manifest(&image, &tag, &jail_image)
+                            .register_and_tag_manifest(&image, tag.as_str(), &jail_image)
+                            .and_then(|digest| {
+                                if let Some(reference) = rename_reference {
+                                    if let oci_util::image_reference::ImageTag::Tag(tag) =
+                                        reference.tag
+                                    {
+                                        let repo = reference
+                                            .hostname
+                                            .map(|h| format!("{h}/{}", reference.name))
+                                            .unwrap_or_else(|| reference.name);
+                                        image_store.tag_manifest(&digest, &repo, &tag)?;
+                                    }
+                                }
+                                image_store.tag_manifest(
+                                    &digest,
+                                    &format!("{}/{image}", hostname.unwrap()),
+                                    tag.as_str(),
+                                )
+                            })
                             .map_err(|err| {
                                 emitter.set_faulted(&format!("{err:?}"));
                                 err
