@@ -25,6 +25,7 @@ use anyhow::Context;
 use ipcidr::IpCidr;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use thiserror::Error;
 use tokio::sync::watch::Receiver;
@@ -61,6 +62,8 @@ impl NetworkInfo {
 pub(crate) struct NetworkManager {
     db: Connection,
     recv: Receiver<XcConfig>,
+    // { "conatiner_id": { "network_name": [ "ip_address", ...] }
+    table_cache: HashMap<String, HashMap<String, Vec<IpAddr>>>,
 }
 
 #[derive(Error, Debug)]
@@ -95,7 +98,11 @@ impl From<anyhow::Error> for Error {
 
 impl NetworkManager {
     pub(crate) fn new(db: Connection, recv: Receiver<XcConfig>) -> NetworkManager {
-        NetworkManager { db, recv }
+        NetworkManager {
+            db,
+            recv,
+            table_cache: HashMap::new(),
+        }
     }
 
     pub(crate) fn get_network_info(&self) -> Result<Vec<NetworkInfo>, anyhow::Error> {
@@ -117,12 +124,25 @@ impl NetworkManager {
         Ok(())
     }
 
-    pub(crate) fn release_addresses(&self, token: &str) -> anyhow::Result<()> {
+    pub(crate) fn release_addresses(
+        &mut self,
+        token: &str,
+    ) -> anyhow::Result<HashMap<String, Vec<IpAddr>>> {
         Netpool::release_addresses(&self.db, token).context("fail on address release")?;
-        Ok(())
+        let networks = self.table_cache.remove(token).unwrap_or_default();
+        Ok(networks)
     }
-    pub(crate) fn allocate(
+
+    pub(crate) fn get_allocated_addresses(
         &self,
+        token: &str,
+    ) -> Option<&HashMap<String, Vec<IpAddr>>> {
+        self.table_cache.get(token)
+    }
+
+    /// Request allociation using `req`, and return (an_assignment, default_router)
+    pub(crate) fn allocate(
+        &mut self,
         vnet: bool,
         req: &NetworkAllocRequest,
         token: &str,
@@ -150,6 +170,8 @@ impl NetworkManager {
                     return Err(Error::AllocationFailure(network_name))
                 };
 
+                self.insert_to_cache(token, &network_name, &address.addr());
+
                 Ok((
                     IpAssign {
                         network: Some(network_name),
@@ -166,6 +188,8 @@ impl NetworkManager {
                         return Err(Error::AddressUsed(*ip));
                     }
                     netpool.register_address(&self.db, ip, token)?;
+                    self.insert_to_cache(token, &network_name, ip);
+
                     Ok((
                         IpAssign {
                             network: Some(network_name),
@@ -178,6 +202,20 @@ impl NetworkManager {
                     Err(Error::InvalidAddress(*ip, network_name))
                 }
             }
+        }
+    }
+
+    fn insert_to_cache(&mut self, token: &str, network: &str, address: &IpAddr) {
+        if let Some(network_address) = self.table_cache.get_mut(token) {
+            if let Some(addresses) = network_address.get_mut(network) {
+                addresses.push(*address);
+            } else {
+                network_address.insert(network.to_string(), vec![*address]);
+            }
+        } else {
+            let mut hmap = HashMap::new();
+            hmap.insert(network.to_string(), vec![*address]);
+            self.table_cache.insert(token.to_string(), hmap);
         }
     }
 }

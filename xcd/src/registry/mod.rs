@@ -36,7 +36,8 @@ pub trait RegistriesProvider {
 }
 
 pub struct JsonRegistryProvider {
-    file: std::fs::File,
+    //    file: std::fs::File,
+    path: std::path::PathBuf,
     data: RegistriesJsonScheme,
 }
 
@@ -91,7 +92,8 @@ impl RegistriesJsonScheme {
 
 impl JsonRegistryProvider {
     pub fn from_path(path: impl AsRef<Path>) -> Result<JsonRegistryProvider, std::io::Error> {
-        let file = if !path.as_ref().exists() {
+        let path = path.as_ref().to_path_buf();
+        let file = if !path.exists() {
             let mut default = RegistriesJsonScheme {
                 default: Some("index.docker.io".to_string()),
                 ..RegistriesJsonScheme::default()
@@ -106,15 +108,15 @@ impl JsonRegistryProvider {
                 .read(true)
                 .write(true)
                 .create(true)
-                .open(path)?;
+                .open(&path)?;
             file.write_all(&json)?;
             file.rewind().unwrap();
             file
         } else {
-            OpenOptions::new().read(true).write(true).open(path)?
+            OpenOptions::new().read(true).write(true).open(&path)?
         };
         let regs: RegistriesJsonScheme = serde_json::from_reader(&file).unwrap();
-        Ok(JsonRegistryProvider { file, data: regs })
+        Ok(JsonRegistryProvider { path, data: regs })
     }
 }
 impl RegistriesProvider for JsonRegistryProvider {
@@ -139,6 +141,6 @@ impl RegistriesProvider for JsonRegistryProvider {
         copy.registries.insert(name.to_string(), reg);
         self.data = copy;
         let json = serde_json::to_vec_pretty(&self.data).unwrap();
-        self.file.write_all(&json).unwrap();
+        _ = std::fs::write(&self.path, json);
     }
 }

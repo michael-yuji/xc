@@ -36,6 +36,7 @@ use crate::site::Site;
 
 use anyhow::Context;
 use freebsd::fs::zfs::{ZfsHandle, ZfsSnapshot};
+use freebsd::net::pf;
 use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
 use oci_util::layer::ChainId;
@@ -43,7 +44,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use xc::config::XcConfig;
 use xc::container::ContainerManifest;
 use xc::image_store::sqlite::SqliteImageStore;
@@ -202,8 +203,14 @@ impl ServerContext {
     pub fn reload_pf_rdr_anchor(&self) -> Result<(), std::io::Error> {
         let rules = self.port_forward_table.generate_rdr_rules();
         info!(rules, "reloading xc-rdr anchor");
-        _ = freebsd::net::pf::set_rules_unchecked(Some("xc-rdr".to_string()), &rules);
-        Ok(())
+        pf::is_pf_enabled().and_then(|enabled| {
+            if enabled {
+                pf::set_rules_unchecked(Some("xc-rdr".to_string()), &rules)
+            } else {
+                warn!("pf is not enabled");
+                Ok(())
+            }
+        })
     }
 
     pub(crate) async fn terminate(&mut self, id: &str) -> Result<(), anyhow::Error> {
@@ -221,9 +228,20 @@ impl ServerContext {
                 error!("error on unwind: {err:#?}");
                 return Err(err);
             }
-            let nm = self.network_manager.lock().await;
-            nm.release_addresses(id)
+            let mut nm = self.network_manager.lock().await;
+            let addresses = nm
+                .release_addresses(id)
                 .context("sqlite failure on ip address release")?;
+            for (key, addresses) in addresses.iter() {
+                let table = format!("xc:network:{key}");
+                info!("pf table: {table}");
+                if pf::is_pf_enabled().unwrap_or_default() {
+                    let result = pf::table_del_addresses(None, &table, addresses);
+                    if let Err(error) = result {
+                        error!("cannot delete addresses from pf table <{table}>: {error}");
+                    }
+                }
+            }
             self.port_forward_table.remove_rules(id);
             self.reload_pf_rdr_anchor()?;
         }
@@ -353,16 +371,35 @@ impl ServerContext {
             let name = request.name.clone();
             let blueprint = {
                 let network_manager = this.network_manager.clone();
-                let network_manager = network_manager.lock().await;
+                let mut network_manager = network_manager.lock().await;
                 InstantiateBlueprint::new(
                     id,
                     image,
                     request,
                     &mut this.devfs_store,
                     &cred,
-                    &network_manager,
+                    &mut network_manager,
                 )?
             };
+
+            if pf::is_pf_enabled().unwrap_or_default() {
+                if let Some(map) = this
+                    .network_manager
+                    .lock()
+                    .await
+                    .get_allocated_addresses(id)
+                {
+                    for (network, addresses) in map.iter() {
+                        let table = format!("xc:network:{network}");
+                        let result = pf::table_add_addresses(None, &table, addresses);
+                        if let Err(err) = result {
+                            error!("cannot add addresses to <{table}>: {err}");
+                        }
+                    }
+                }
+            } else {
+                warn!("pf is disabled");
+            }
 
             site.run_container(blueprint)?;
             let notify = site.container_notify.clone().unwrap();

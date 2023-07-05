@@ -80,7 +80,7 @@ impl InstantiateBlueprint {
         request: InstantiateRequest,
         devfs_store: &mut DevfsRulesetStore,
         cred: &Credential,
-        network_manager: &NetworkManager,
+        network_manager: &mut NetworkManager,
     ) -> anyhow::Result<InstantiateBlueprint> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let config = oci_config.jail_config();

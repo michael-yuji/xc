@@ -182,13 +182,6 @@ impl Container {
                 } else {
                     for address in alloc.addresses.iter() {
                         undo.iface_create_alias(alloc.interface.to_string(), address.clone())?;
-                        if let Some(network) = &alloc.network {
-                            undo.pf_table_add_address(
-                                None,
-                                format!("xc:network:{network}"),
-                                address.to_singleton(),
-                            )?;
-                        }
                         proto = proto.ip(address.addr());
                     }
                 }
@@ -198,13 +191,6 @@ impl Container {
             for alloc in self.ip_alloc.iter() {
                 if let Some(network) = &alloc.network {
                     let (epair_a, epair_b) = undo.create_epair()?;
-                    for address in alloc.addresses.iter() {
-                        undo.pf_table_add_address(
-                            None,
-                            format!("xc:network:{network}"),
-                            address.to_singleton(),
-                        )?;
-                    }
                     undo.iface_up(epair_a.to_owned())?;
                     undo.iface_up(epair_b.to_owned())?;
                     undo.bridge_add_iface(alloc.interface.to_string(), epair_a)?;

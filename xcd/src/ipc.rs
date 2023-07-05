@@ -24,15 +24,15 @@
 
 use crate::auth::Credential;
 use crate::context::ServerContext;
-use crate::image::push::{PushImageStatusDesc, PushImageError};
+use crate::image::push::{PushImageError, PushImageStatusDesc};
 use freebsd::libc::{EINVAL, EIO};
 use ipc::packet::codec::{Fd, FromPacket, List, Maybe};
 use ipc::proto::{enoent, ipc_err, GenericResult};
 use ipc::service::{ConnectionContext, Service};
 use ipc_macro::{ipc_method, FromPacket};
 use oci_util::digest::OciDigest;
+use oci_util::distribution::client::{BasicAuth, Registry};
 use oci_util::image_reference::ImageReference;
-use oci_util::distribution::client::{Registry, BasicAuth};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Seek;
@@ -749,7 +749,7 @@ pub struct LoginRequest {
     pub username: String,
     pub password: String,
     pub server: String,
-    pub insecure: bool
+    pub insecure: bool,
 }
 
 #[ipc_method(method = "login")]
@@ -761,13 +761,17 @@ async fn login_registry(
     let scheme = if request.insecure { "http" } else { "https" };
     let registry = Registry::new(
         format!("{scheme}://{}", request.server),
-        Some(BasicAuth::new(request.username, request.password))
+        Some(BasicAuth::new(request.username, request.password)),
     );
     // XXX: should have find some ways to verify the tokens
     context
-        .write().await
-        .image_manager.write().await
-        .insert_registry(&request.server, registry).await;
+        .write()
+        .await
+        .image_manager
+        .write()
+        .await
+        .insert_registry(&request.server, registry)
+        .await;
     Ok(())
 }
 

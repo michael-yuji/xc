@@ -24,9 +24,18 @@
 
 use ipcidr::IpCidr;
 use std::io::Write;
+use std::net::IpAddr;
 use std::process::Command;
 
 pub const PFCTL_CMD: &str = crate::env_or_default!("XC_PFCTL_CMD", "/sbin/pfctl");
+
+pub fn is_pf_enabled() -> Result<bool, std::io::Error> {
+    Command::new(PFCTL_CMD)
+        .arg("-s")
+        .arg("Running")
+        .status()
+        .map(|status| status.success())
+}
 
 pub fn get_filter_rules(anchor: Option<String>) -> Result<Vec<String>, std::io::Error> {
     let mut cmd = Command::new(PFCTL_CMD);
@@ -118,7 +127,26 @@ pub fn table_flush<S: AsRef<str>>(anchor: Option<String>, table: S) -> Result<()
         .map(|_| ())
 }
 
-pub fn table_del_addresses<S: AsRef<str>>(
+pub fn table_del_addresses(
+    anchor: Option<String>,
+    table: &str,
+    addresses: &[IpAddr],
+) -> Result<(), std::io::Error> {
+    let mut cmd = Command::new(PFCTL_CMD);
+    if let Some(anchor) = anchor {
+        cmd.arg("-a").arg(anchor);
+    }
+
+    cmd.arg("-t").arg(table).arg("-T").arg("delete");
+
+    for address in addresses {
+        cmd.arg(address.to_string());
+    }
+
+    cmd.status().map(|_| ())
+}
+
+pub fn table_del_cidrs<S: AsRef<str>>(
     anchor: Option<String>,
     table: S,
     addresses: &[IpCidr],
@@ -157,6 +185,22 @@ pub fn table_del_address<S: AsRef<str>>(
 }
 
 pub fn table_add_addresses<S: AsRef<str>>(
+    anchor: Option<String>,
+    table: S,
+    addresses: &[IpAddr],
+) -> Result<(), std::io::Error> {
+    let mut cmd = Command::new(PFCTL_CMD);
+    if let Some(anchor) = anchor {
+        cmd.arg("-a").arg(anchor);
+    }
+    cmd.arg("-t").arg(table.as_ref()).arg("-T").arg("add");
+    for address in addresses {
+        cmd.arg(address.to_string());
+    }
+    cmd.status().map(|_| ())
+}
+
+pub fn table_add_cidrs<S: AsRef<str>>(
     anchor: Option<String>,
     table: S,
     addresses: &[IpCidr],
@@ -208,7 +252,7 @@ mod tests {
             IpCidr::V4("192.168.110.2".parse().unwrap()),
         ];
 
-        table_add_addresses(anchor.clone(), table, &addresses).expect("failed to add addresses");
+        table_add_cidrs(anchor.clone(), table, &addresses).expect("failed to add addresses");
         let a = table_list_address(Some("rust/test_pf".to_string()), "mytable").unwrap();
 
         eprintln!("a: {a:#?}");

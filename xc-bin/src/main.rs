@@ -104,19 +104,19 @@ enum Action {
     /// record the credential for later use
     Login {
         /// Username
-        #[clap(long="username", short='u')]
+        #[clap(long = "username", short = 'u')]
         username: String,
-        #[clap(long="password", short='p')]
+        #[clap(long = "password", short = 'p')]
         /// Password
         password: Option<String>,
         /// Take the password from stdin
-        #[clap(long="password-stdin", action)]
+        #[clap(long = "password-stdin", action)]
         password_stdin: bool,
         /// The server uses http instead of https
-        #[clap(long="insecure", action)]
+        #[clap(long = "insecure", action)]
         insecure: bool,
         /// The target server
-        server: String
+        server: String,
     },
     #[clap(subcommand)]
     Network(NetworkAction),
@@ -270,7 +270,13 @@ fn main() -> Result<(), ActionError> {
                 }
             }
         }
-        Action::Login { username, password, password_stdin, server, insecure } => {
+        Action::Login {
+            username,
+            password,
+            password_stdin,
+            server,
+            insecure,
+        } => {
             if password.is_none() && !password_stdin {
                 eprintln!("at least --password <password> at --password-stdin required");
                 std::process::exit(1)
@@ -282,7 +288,12 @@ fn main() -> Result<(), ActionError> {
                 rpassword::read_password().unwrap()
             });
 
-            let request = LoginRequest { username, password, server, insecure };
+            let request = LoginRequest {
+                username,
+                password,
+                server,
+                insecure,
+            };
             if let Err(err) = do_login_registry(&mut conn, request)? {
                 eprintln!("error: {err:#?}");
             }
@@ -595,7 +606,11 @@ fn main() -> Result<(), ActionError> {
             let request = ShowContainerRequest { id: name };
             if let Ok(response) = do_show_container(&mut conn, request)? {
                 let jid = response.running_container.jid;
-                let args = if args.is_empty() { vec!["-F".to_string(), "syscall".to_string()] } else { args };
+                let args = if args.is_empty() {
+                    vec!["-F".to_string(), "syscall".to_string()]
+                } else {
+                    args
+                };
                 let mut process = std::process::Command::new("dwatch")
                     .arg("-j")
                     .arg(jid.to_string())

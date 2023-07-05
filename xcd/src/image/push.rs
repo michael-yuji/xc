@@ -30,11 +30,11 @@ use oci_util::digest::OciDigest;
 use oci_util::distribution::client::*;
 use oci_util::image_reference::ImageReference;
 use oci_util::models::Descriptor;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::RwLock;
 use tokio::sync::watch::Receiver;
+use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 #[derive(Error, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -281,4 +281,3 @@ pub async fn push_image(
 
     Ok(rx)
 }
-

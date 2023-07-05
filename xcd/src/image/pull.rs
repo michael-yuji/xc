@@ -22,24 +22,24 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+use super::DiffMap;
 use super::ImageManager;
 use super::SharedContext;
-use super::DiffMap;
 use crate::task::*;
 
 use freebsd::fs::zfs::ZfsHandle;
-use oci_util::layer::ChainId;
 use oci_util::digest::OciDigest;
 use oci_util::distribution::client::*;
 use oci_util::image_reference::ImageReference;
+use oci_util::layer::ChainId;
 use oci_util::models::ImageManifest;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::RwLock;
 use tokio::sync::watch::Receiver;
-use xc::models::jail_image::JailConfig;
+use tokio::sync::RwLock;
 use xc::image_store::ImageStore;
+use xc::models::jail_image::JailConfig;
 use xc::util::get_current_arch;
 
 impl FromId<SharedContext, OciDigest> for PullLayerStatus {
@@ -107,7 +107,6 @@ pub struct PullImageStatus {
     pub jail_image: Option<xc::models::jail_image::JailImage>,
 }
 
-
 #[derive(Error, Debug)]
 pub enum PullImageError {
     #[error("requested registry not found")]
@@ -119,14 +118,13 @@ pub enum PullImageError {
     #[error("no usable config")]
     NoConfig,
     #[error("cannot convert config")]
-    ConfigConvertFail
+    ConfigConvertFail,
 }
 
 pub async fn pull_image(
     this: Arc<RwLock<ImageManager>>,
-    reference: ImageReference
-) -> Result<Receiver<Task<String, PullImageStatus>>, PullImageError>
-{
+    reference: ImageReference,
+) -> Result<Receiver<Task<String, PullImageStatus>>, PullImageError> {
     let id = reference.to_string();
 
     let image = reference.name.clone();
@@ -140,7 +138,9 @@ pub async fn pull_image(
         let this = this.read().await;
         let reg = this.context.registries.lock().await;
         match reference.hostname {
-            None => reg.default_registry().ok_or_else(|| PullImageError::RegistryNotFound)?,
+            None => reg
+                .default_registry()
+                .ok_or_else(|| PullImageError::RegistryNotFound)?,
             Some(name) => reg
                 .get_registry_by_name(&name)
                 .unwrap_or_else(|| Registry::new(name, None)),
@@ -183,7 +183,9 @@ pub async fn pull_image(
 
         let config_descriptor = manifest.config.clone();
 
-        let config: serde_json::Value = session.fetch_blob_as(&config_descriptor.digest).await
+        let config: serde_json::Value = session
+            .fetch_blob_as(&config_descriptor.digest)
+            .await
             .map_err(|err| {
                 emitter.set_faulted(&format!("failed request for config: {err:?}"));
                 PullImageError::ClientError(err)
@@ -236,21 +238,14 @@ pub async fn pull_image(
 
                 let fault = (*wait_stage_root.borrow()).fault();
                 if let Some(reason) = fault {
-                    emitter.set_faulted(&format!(
-                        "failed to stage root: {reason}"
-                    ));
+                    emitter.set_faulted(&format!("failed to stage root: {reason}"));
                 } else {
                     {
                         let this = this.clone();
-                        let arc_image_store =
-                            &this.write().await.context.image_store;
+                        let arc_image_store = &this.write().await.context.image_store;
                         let image_store = arc_image_store.lock().await;
                         _ = image_store
-                            .register_and_tag_manifest(
-                                &image,
-                                &tag,
-                                &jail_image
-                            )
+                            .register_and_tag_manifest(&image, &tag, &jail_image)
                             .map_err(|err| {
                                 emitter.set_faulted(&format!("{err:?}"));
                                 err
@@ -259,7 +254,6 @@ pub async fn pull_image(
                     }
                     emitter.set_completed();
                 }
-
             });
         } else {
             emitter.set_completed();
