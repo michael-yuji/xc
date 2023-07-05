@@ -31,7 +31,6 @@ use freebsd::fs::zfs::ZfsHandle;
 use oci_util::digest::OciDigest;
 use oci_util::distribution::client::*;
 use oci_util::image_reference::ImageReference;
-use oci_util::image_reference::ImageTag;
 use oci_util::layer::ChainId;
 use oci_util::models::ImageManifest;
 use serde::{Deserialize, Serialize};

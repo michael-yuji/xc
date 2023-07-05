@@ -27,12 +27,14 @@ mod error;
 mod format;
 mod image;
 mod network;
+mod redirect;
 
 use crate::channel::{use_channel_action, ChannelAction};
 use crate::error::ActionError;
 use crate::format::{BindMount, EnvPair, IpWant, PublishSpec};
 use crate::image::{use_image_action, ImageAction};
 use crate::network::{use_network_action, NetworkAction};
+use crate::redirect::{use_rdr_action, RdrAction};
 
 use clap::Parser;
 use freebsd::event::{eventfd, EventFdNotify};
@@ -42,7 +44,6 @@ use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::io::{stdin, Read};
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
 use term_table::homogeneous::{TableLayout, TableSource, Title};
@@ -134,11 +135,8 @@ enum Action {
         image_reference: ImageReference,
         new_image_reference: ImageReference,
     },
-    Rdr {
-        #[clap(long = "publish", short = 'p', multiple_occurrences = true)]
-        publish: Vec<PublishSpec>,
-        name: String,
-    },
+    #[clap(subcommand)]
+    Rdr(RdrAction),
     Run {
         #[clap(long, default_value_t, action)]
         no_clean: bool,
@@ -246,8 +244,8 @@ fn main() -> Result<(), ActionError> {
             eprintln!("{res:#?}");
         }
         Action::Kill { name } => {
-            let req = DestroyContainerRequest { name };
-            let res = do_destroy_container(&mut conn, req)?.unwrap();
+            let req = KillContainerRequest { name };
+            let res = do_kill_container(&mut conn, req)?.unwrap();
             eprintln!("{res:#?}");
         }
         Action::Link { name } => {
@@ -284,7 +282,6 @@ fn main() -> Result<(), ActionError> {
             }
 
             let password = password.unwrap_or_else(|| {
-                let mut password = String::new();
                 print!("Enter password: \n");
                 rpassword::read_password().unwrap()
             });
@@ -435,18 +432,8 @@ fn main() -> Result<(), ActionError> {
                 }
             }
         }
-
-        Action::Rdr { name, publish } => {
-            for expose in publish.iter() {
-                let redirection = expose.to_host_spec();
-                let request = DoRdr {
-                    name: name.clone(),
-                    redirection,
-                };
-                if let Ok(response) = do_rdr_container(&mut conn, request)? {
-                    eprintln!("{response:#?}");
-                }
-            }
+        Action::Rdr(rdr) => {
+            _ = use_rdr_action(&mut conn, rdr);
         }
         Action::Run {
             image_reference,
