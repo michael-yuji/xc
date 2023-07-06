@@ -21,11 +21,15 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use crate::format::EnvPair;
+
 use clap::{Parser, Subcommand};
 use oci_util::image_reference::ImageReference;
+use std::collections::HashMap;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use varutil::string_interpolation::Var;
-use xc::models::{jail_image::JailConfig, EnvSpec};
+use xc::models::{jail_image::{JailConfig, SpecialMount}, EnvSpec, MountSpec, SystemVPropValue};
 use xcd::ipc::*;
 
 #[derive(Subcommand, Debug)]
@@ -60,6 +64,36 @@ pub(crate) enum PatchActions {
         env: String,
         image_reference: ImageReference,
     },
+    /// add a new volume spec to the image
+    AddVolume {
+        /// some good information about what the volume is for
+        #[clap(short = 'd', long = "description")]
+        description: Option<String>,
+        /// hints to create this volume for intelligently, for example the right block size
+        #[clap(long="hint", multiple_occurrences = true)]
+        hints: Vec<EnvPair>,
+        /// if the volume should be mounted as read-only
+        #[clap(long="read-only", action)]
+        read_only: bool,
+        /// a name for the 
+        #[clap(long="name")]
+        name: Option<String>,
+        /// mount point in the container
+        mount_point: PathBuf,
+        /// the image
+        image_reference: ImageReference
+    },
+    MountFdescfs { image_reference: ImageReference },
+    MountProcfs { image_reference: ImageReference },
+    ModAllow {
+        allows: Vec<String>,
+        image_reference: ImageReference
+    },
+    SysvIpc {
+        #[clap(long="enable", multiple_occurrences = true)]
+        enable: Vec<String>,
+        image_reference: ImageReference
+    }
 }
 
 fn patch_image<F>(
@@ -118,6 +152,99 @@ pub(crate) fn use_image_action(
                     );
                 })?;
             }
+            PatchActions::AddVolume { description, hints, name, mount_point, image_reference, read_only } => {
+                patch_image(conn, &image_reference, |config| {
+                    let destination = mount_point.to_string_lossy().to_string();
+                    let description = description.unwrap_or_default();
+                    let key = name.unwrap_or_else(|| destination.to_string());
+                    let mut volume_hints = HashMap::new();
+                    for hint in hints.into_iter() {
+                        volume_hints.insert(hint.key, serde_json::Value::String(hint.value));
+                    }
+                    for (_, mount) in config.mounts.iter() {
+                        if mount.destination == destination {
+                            panic!("mounts with such mountpoint already exists");
+                        }
+                    }
+                    let mountspec = MountSpec {
+                        description,
+                        read_only,
+                        volume_hints,
+                        destination
+                    };
+                    config.mounts.insert(key,mountspec);
+                })?;
+            }
+            PatchActions::ModAllow { allows, image_reference } => {
+                patch_image(conn, &image_reference, |config| {
+                    for allow in allows.into_iter() {
+                        if let Some(param) = allow.strip_prefix('-') {
+                            for i in (0..config.allow.len()).rev() {
+                                if config.allow[i] == param {
+                                    config.allow.remove(i);
+                                }
+                            }
+                        } else if !config.allow.contains(&allow) {
+                            config.allow.push(allow);
+                        }
+                    }
+                })?;
+            }
+            PatchActions::SysvIpc { enable, image_reference } => {
+                let mut enabled = Vec::new();
+                for e in enable.iter() {
+                    enabled.extend(e.split(',').map(|h| h.trim()).collect::<Vec<_>>());
+                }
+                patch_image(conn, &image_reference, |config| {
+                    for e in enabled.into_iter() {
+                        match e {
+                            "shm" => config.sysv_shm = SystemVPropValue::New,
+                            "-shm" => config.sysv_shm = SystemVPropValue::Disable,
+                            "msg" => config.sysv_msg = SystemVPropValue::New,
+                            "-msg" => config.sysv_msg = SystemVPropValue::Disable,
+                            "sem" => config.sysv_sem = SystemVPropValue::New,
+                            "-sem" => config.sysv_sem = SystemVPropValue::Disable,
+                            _ => continue
+                        }
+                    }
+                })?;
+            }
+            PatchActions::MountFdescfs { image_reference } => {
+                patch_image(conn, &image_reference, |config| {
+                    for i in (0..config.special_mounts.len()).rev() {
+                        let mount = &config.special_mounts[i];
+                        if mount.mount_type.as_str() == "fdescfs"
+                            && mount.mount_point.as_str() == "/dev/fd"
+                        {
+                            break;
+                        }
+                    }
+                    config.special_mounts.push(
+                        SpecialMount {
+                            mount_type: "fdescfs".to_string(),
+                            mount_point: "/dev/fd".to_string()
+                        }
+                    );
+                })?;
+            },
+            PatchActions::MountProcfs { image_reference } => {
+                patch_image(conn, &image_reference, |config| {
+                    for i in (0..config.special_mounts.len()).rev() {
+                        let mount = &config.special_mounts[i];
+                        if mount.mount_type.as_str() == "procfs"
+                            && mount.mount_point.as_str() == "/proc"
+                        {
+                            break;
+                        }
+                    }
+                    config.special_mounts.push(
+                        SpecialMount {
+                            mount_type: "procfs".to_string(),
+                            mount_point: "/proc".to_string()
+                        }
+                    );
+                })?;
+            },
         },
         ImageAction::Import {
             image_id,
