@@ -38,6 +38,7 @@ use crate::util::realpath;
 
 use effect::UndoStack;
 use freebsd::event::EventFdNotify;
+use freebsd::net::ifconfig::IFCONFIG_CMD;
 use jail::param::Value;
 use jail::StoppedJail;
 use oci_util::image_reference::ImageReference;
@@ -277,7 +278,7 @@ impl Container {
                                 jail.jid.to_string(),
                                 iface.to_string(),
                             );
-                            _ = std::process::Command::new("/sbin/ifconfig")
+                            _ = std::process::Command::new(IFCONFIG_CMD)
                                 .arg("-j")
                                 .arg(jail.jid.to_string())
                                 .arg(iface)
@@ -292,14 +293,14 @@ impl Container {
                                 jail.jid.to_string(),
                                 iface.to_string(),
                             );
-                            _ = std::process::Command::new("/sbin/ifconfig")
+                            _ = std::process::Command::new(IFCONFIG_CMD)
                                 .arg("-j")
                                 .arg(jail.jid.to_string())
                                 .arg(iface)
                                 .arg("inet6")
                                 .arg("-ifdisabled")
                                 .status();
-                            _ = std::process::Command::new("/sbin/ifconfig")
+                            _ = std::process::Command::new(IFCONFIG_CMD)
                                 .arg("-j")
                                 .arg(jail.jid.to_string())
                                 .arg(iface)
