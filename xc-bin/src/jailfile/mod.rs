@@ -33,5 +33,5 @@ pub(crate) struct JailContext {
     /// Mapping to different containers for multi-stage build
     pub(crate) containers: HashMap<String, String>,
 
-    conn: UnixStream
+    conn: UnixStream,
 }

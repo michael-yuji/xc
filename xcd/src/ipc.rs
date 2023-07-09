@@ -34,7 +34,6 @@ use oci_util::digest::OciDigest;
 use oci_util::distribution::client::{BasicAuth, Registry};
 use oci_util::image_reference::ImageReference;
 use serde::{Deserialize, Serialize};
-use xc::models::exec::{Jexec, StdioMode};
 use std::collections::HashMap;
 use std::io::Seek;
 use std::net::IpAddr;
@@ -45,6 +44,7 @@ use tokio::sync::RwLock;
 use tracing::*;
 use varutil::string_interpolation::InterpolatedString;
 use xc::container::request::{MountReq, NetworkAllocRequest};
+use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
 use xc::res::network::Network;
@@ -820,21 +820,20 @@ pub struct ExecCommandRequest {
     pub stdout: Maybe<Fd>,
     pub stderr: Maybe<Fd>,
     pub uid: u32,
-    pub notify: Maybe<Fd>
+    pub notify: Maybe<Fd>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ExecCommandResponse {
-    pub cid: String
+    pub cid: String,
 }
 
 #[ipc_method(method = "exec")]
 async fn exec(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
-    request: ExecCommandRequest
-) -> GenericResult<ExecCommandResponse>
-{
+    request: ExecCommandRequest,
+) -> GenericResult<ExecCommandResponse> {
     info!("exec!!!");
     let cid = gen_id();
     let jexec = Jexec {
@@ -845,9 +844,9 @@ async fn exec(
         output_mode: StdioMode::Forward {
             stdin: request.stdin.to_option().map(|fd| fd.0),
             stdout: request.stdout.to_option().map(|fd| fd.0),
-            stderr: request.stderr.to_option().map(|fd| fd.0)
+            stderr: request.stderr.to_option().map(|fd| fd.0),
         },
-        notify: request.notify.to_option().map(|fd| fd.0)
+        notify: request.notify.to_option().map(|fd| fd.0),
     };
     if let Some(arc_site) = context.write().await.get_site(&request.name) {
         let mut site = arc_site.write().await;
@@ -855,6 +854,28 @@ async fn exec(
         Ok(ExecCommandResponse { cid })
     } else {
         enoent("site not found")
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RunMainRequest {
+    pub name: String
+}
+
+/// XXX: Temporary
+#[ipc_method(method = "run_main")]
+async fn run_main(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: RunMainRequest,
+) -> GenericResult<()>
+{
+    if let Some(arc_site) = context.write().await.get_site(&request.name) {
+        let mut site = arc_site.write().await;
+        site.run_main();
+        Ok(())
+    }else {
+        enoent("container not found")
     }
 }
 

@@ -22,8 +22,8 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-use crate::jailfile::JailContext;
 use crate::jailfile::parse::Action;
+use crate::jailfile::JailContext;
 
 use anyhow::{bail, Result};
 use oci_util::image_reference::ImageReference;
@@ -31,7 +31,7 @@ use xc::util::gen_id;
 
 pub(crate) struct FromDirective {
     image_reference: ImageReference,
-    alias: Option<String>
+    alias: Option<String>,
 }
 
 impl FromDirective {
@@ -44,9 +44,15 @@ impl FromDirective {
         if action.args.len() > 1 {
             let Some("as") = action.args.get(1).map(|s| s.as_str()) else { bail!("unexpected ariable") };
             let alias = action.args.get(2).expect("expected alias");
-            Ok(FromDirective { image_reference, alias: Some(alias.to_string()) })
+            Ok(FromDirective {
+                image_reference,
+                alias: Some(alias.to_string()),
+            })
         } else {
-            Ok(FromDirective { image_reference, alias: None })
+            Ok(FromDirective {
+                image_reference,
+                alias: None,
+            })
         }
     }
 
@@ -60,14 +66,11 @@ impl FromDirective {
         let name = format!("build-{}", gen_id());
         /* create container */
         if let Some(alias) = &self.alias {
-            context.containers.insert(alias.to_string(), name.to_string());
+            context
+                .containers
+                .insert(alias.to_string(), name.to_string());
         }
         context.container_id = Some(name);
         Ok(())
     }
 }
-
-
-
-
-

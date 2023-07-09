@@ -143,6 +143,8 @@ enum Action {
         no_clean: bool,
         #[clap(long, default_value_t, action)]
         persist: bool,
+        #[clap(long="create-only", action)]
+        create_only: bool,
         image_reference: ImageReference,
         entry_point: Option<String>,
         entry_point_args: Vec<String>,
@@ -192,8 +194,8 @@ enum Action {
     Exec {
         name: String,
         arg0: String,
-        args: Vec<String>
-    }
+        args: Vec<String>,
+    },
 }
 
 fn main() -> Result<(), ActionError> {
@@ -289,7 +291,7 @@ fn main() -> Result<(), ActionError> {
             }
 
             let password = password.unwrap_or_else(|| {
-                print!("Enter password: \n");
+                println!("Enter password: ");
                 rpassword::read_password().unwrap()
             });
 
@@ -444,6 +446,7 @@ fn main() -> Result<(), ActionError> {
         }
         Action::Run {
             image_reference,
+            create_only,
             detach,
             entry_point,
             entry_point_args,
@@ -528,7 +531,7 @@ fn main() -> Result<(), ActionError> {
                     Maybe::Some(Fd(fd))
                 };
 
-                let reqt = InstantiateRequest {
+                let mut reqt = InstantiateRequest {
                     alt_root: None,
                     name,
                     hostname,
@@ -549,6 +552,12 @@ fn main() -> Result<(), ActionError> {
                     ips: ips.into_iter().map(|v| v.0).collect(),
                     main_started_notify: main_started_notify.clone(),
                 };
+
+                if create_only {
+                    reqt.main_norun = true;
+                    reqt.init_norun = true;
+                    reqt.deinit_norun = true;
+                }
 
                 let res = do_instantiate(&mut conn, reqt)?;
                 (res, main_started_notify)
@@ -615,7 +624,7 @@ fn main() -> Result<(), ActionError> {
             } else {
                 eprintln!("no such container");
             }
-        },
+        }
         Action::Exec { name, arg0, args } => {
             let n = EventFdNotify::new();
             let request = ExecCommandRequest {
@@ -627,7 +636,7 @@ fn main() -> Result<(), ActionError> {
                 stdout: Maybe::Some(ipc::packet::codec::Fd(1)),
                 stderr: Maybe::Some(ipc::packet::codec::Fd(2)),
                 uid: 0,
-                notify: Maybe::Some(ipc::packet::codec::Fd(n.as_raw_fd()))
+                notify: Maybe::Some(ipc::packet::codec::Fd(n.as_raw_fd())),
             };
             if let Ok(response) = do_exec(&mut conn, request)? {
                 n.notified_sync();

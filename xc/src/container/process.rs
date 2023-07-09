@@ -104,9 +104,8 @@ pub(super) fn spawn_process_forward(
     cmd: &mut std::process::Command,
     stdin: Option<RawFd>,
     stdout: Option<RawFd>,
-    stderr: Option<RawFd>
-) -> Result<u32, ExecError>
-{
+    stderr: Option<RawFd>,
+) -> Result<u32, ExecError> {
     unsafe {
         cmd.pre_exec(move || {
             if let Some(fd) = stdin {

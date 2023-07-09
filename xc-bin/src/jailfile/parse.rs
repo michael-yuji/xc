@@ -103,38 +103,57 @@ mod tests {
         "#;
 
         let parsed = super::parse_jailfile(input).expect("cannot parse input");
-        assert_eq!(parsed[0], Action {
-            directive_name: "FROM".to_string(),
-            directive_args: HashMap::new(),
-            args: vec!["node:18-alpine".to_string()],
-            heredoc: None
-        });
-        assert_eq!(parsed[1], Action {
-            directive_name: "WORKDIR".to_string(),
-            directive_args: HashMap::new(),
-            args: vec!["/app".to_string()],
-            heredoc: None
-        });
-        assert_eq!(parsed[2], Action {
-            directive_name: "COPY".to_string(),
-            directive_args: HashMap::new(),
-            args: vec![".".to_string(), ".".to_string()],
-            heredoc: None
-        });
-        assert_eq!(parsed[3], Action {
-            directive_name: "RUN".to_string(),
-            directive_args: HashMap::new(),
-            args: vec!["yarn".to_string(), "install".to_string(), "--production".to_string()],
-            heredoc: None
-        });
-        assert_eq!(parsed[4], Action {
-            directive_name: "RUN".to_string(),
-            directive_args: HashMap::new(),
-            args: Vec::new(),
-            heredoc: Some("\n        This is some\n        funny string\n        ".to_string())
-        });
+        assert_eq!(
+            parsed[0],
+            Action {
+                directive_name: "FROM".to_string(),
+                directive_args: HashMap::new(),
+                args: vec!["node:18-alpine".to_string()],
+                heredoc: None
+            }
+        );
+        assert_eq!(
+            parsed[1],
+            Action {
+                directive_name: "WORKDIR".to_string(),
+                directive_args: HashMap::new(),
+                args: vec!["/app".to_string()],
+                heredoc: None
+            }
+        );
+        assert_eq!(
+            parsed[2],
+            Action {
+                directive_name: "COPY".to_string(),
+                directive_args: HashMap::new(),
+                args: vec![".".to_string(), ".".to_string()],
+                heredoc: None
+            }
+        );
+        assert_eq!(
+            parsed[3],
+            Action {
+                directive_name: "RUN".to_string(),
+                directive_args: HashMap::new(),
+                args: vec![
+                    "yarn".to_string(),
+                    "install".to_string(),
+                    "--production".to_string()
+                ],
+                heredoc: None
+            }
+        );
+        assert_eq!(
+            parsed[4],
+            Action {
+                directive_name: "RUN".to_string(),
+                directive_args: HashMap::new(),
+                args: Vec::new(),
+                heredoc: Some("\n        This is some\n        funny string\n        ".to_string())
+            }
+        );
 
-/*
+        /*
         eprintln!("{parsed:?}");
         assert!(false);
         */

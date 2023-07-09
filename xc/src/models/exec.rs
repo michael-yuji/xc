@@ -42,8 +42,8 @@ pub enum StdioMode {
     Forward {
         stdin: Option<RawFd>,
         stdout: Option<RawFd>,
-        stderr: Option<RawFd>
-    }
+        stderr: Option<RawFd>,
+    },
 }
 
 /// Executable parameters to be executed in container
@@ -54,7 +54,7 @@ pub struct Jexec {
     pub envs: std::collections::HashMap<String, String>,
     pub uid: u32,
     pub output_mode: StdioMode,
-    pub notify: Option<RawFd>
+    pub notify: Option<RawFd>,
 }
 
 pub struct ResolvedExec {
@@ -75,7 +75,7 @@ impl ResolvedExec {
                 stdout: None,
                 stderr: None,
             },
-            notify: None
+            notify: None,
         }
     }
 }

@@ -486,7 +486,7 @@ mod tests {
                 chdir: Some(dir.to_string()),
                 file: "test-materials/base.tar.zst".to_string(),
                 compression: CompressionType::Auto,
-                print_input_digest: false
+                print_input_digest: false,
             };
             do_extract(extract_arg).unwrap();
         });
@@ -500,7 +500,7 @@ mod tests {
                 chdir: Some(dir.to_string()),
                 file: "test-materials/base.tar".to_string(),
                 compression: CompressionType::Auto,
-                print_input_digest: false
+                print_input_digest: false,
             };
             do_extract(extract_arg).unwrap();
         });

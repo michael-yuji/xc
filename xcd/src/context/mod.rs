@@ -469,8 +469,9 @@ impl ServerContext {
         rename_reference: Option<ImageReference>,
     ) -> anyhow::Result<()> {
         // XXX: handle pull image error
-        let result = crate::image::pull::pull_image(self.image_manager.clone(), reference, rename_reference)
-            .await;
+        let result =
+            crate::image::pull::pull_image(self.image_manager.clone(), reference, rename_reference)
+                .await;
         if result.is_err() {
             error!("result: {result:#?}");
         }

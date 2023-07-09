@@ -32,7 +32,9 @@ use crate::util::exists_exec;
 
 use anyhow::Context;
 use freebsd::event::{EventFdNotify, KEventExt};
+use ipc::packet::codec::json::JsonPacket;
 use ipc::packet::Packet;
+use ipc::proto::Request;
 use jail::process::Jailed;
 use nix::libc::intptr_t;
 use nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
@@ -88,6 +90,26 @@ impl ReadingPacket {
     }
 }
 
+enum Readiness<T> {
+    Pending,
+    Ready(T),
+}
+
+impl<T> Readiness<T> {
+    fn map_can_fail<F, A, E>(self, transform: F) -> Result<Readiness<A>, E>
+    where
+        F: FnOnce(T) -> Result<A, E>,
+    {
+        match self {
+            Readiness::Pending => Ok(Readiness::Pending),
+            Readiness::Ready(value) => {
+                let x = transform(value)?;
+                Ok(Readiness::Ready(x))
+            }
+        }
+    }
+}
+
 // XXX: naively pretend writes always successful
 #[derive(Debug)]
 pub struct ControlStream {
@@ -103,7 +125,26 @@ impl ControlStream {
         }
     }
 
-    fn pour_in_bytes(&mut self, known_avail: usize) -> Result<Option<Packet>, anyhow::Error> {
+    fn try_get_request(
+        &mut self,
+        known_avail: usize,
+    ) -> Result<Readiness<(String, JsonPacket)>, anyhow::Error> {
+        self.pour_in_bytes(known_avail)
+            .and_then(|readiness| match readiness {
+                Readiness::Pending => Ok(Readiness::Pending),
+                Readiness::Ready(packet) => {
+                    let request: ipc::packet::TypedPacket<Request> =
+                        packet.map_failable(|vec| serde_json::from_slice(vec))?;
+
+                    let method = request.data.method.to_string();
+                    let packet = request.map(|req| req.value.clone());
+
+                    Ok(Readiness::Ready((method, packet)))
+                }
+            })
+    }
+
+    fn pour_in_bytes(&mut self, known_avail: usize) -> Result<Readiness<Packet>, anyhow::Error> {
         if let Some(reading_packet) = &mut self.processing {
             if reading_packet.ready() {
                 panic!("the client is sending more bytes than expected");
@@ -115,13 +156,13 @@ impl ControlStream {
         }
         let Some(processing) = self.processing.take() else { panic!() };
         if processing.ready() {
-            Ok(Some(Packet {
+            Ok(Readiness::Ready(Packet {
                 data: processing.buffer,
                 fds: processing.fds,
             }))
         } else {
             self.processing = Some(processing);
-            Ok(None)
+            Ok(Readiness::Pending)
         }
     }
 }
@@ -351,10 +392,11 @@ impl ProcessRunner {
                 let err_path = format!("/var/log/xc.{}.{}.err.log", self.container.id, id);
                 spawn_process_files(&mut cmd, &Some(out_path), &Some(err_path))?
             }
-            StdioMode::Forward { stdin, stdout, stderr } => {
-                spawn_process_forward(
-                    &mut cmd, *stdin, *stdout, *stderr)?
-            }
+            StdioMode::Forward {
+                stdin,
+                stdout,
+                stderr,
+            } => spawn_process_forward(&mut cmd, *stdin, *stdout, *stderr)?,
         };
 
         tx.send_if_modified(|status| {
@@ -421,6 +463,16 @@ impl ProcessRunner {
         }
     }
 
+    fn handle_control_stream_cmd(&mut self, method: String, request: JsonPacket) {
+        if method == "exec" {
+            let jexec: Jexec = serde_json::from_value(request.data).unwrap();
+            let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
+            let _result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify));
+        } else if method == "run_main" {
+            self.should_run_main = true;
+        }
+    }
+
     fn handle_pid_event(
         &mut self,
         event: KEvent,
@@ -474,7 +526,9 @@ impl ProcessRunner {
                         if descentdant_gone {
                             stat.set_tree_exited();
                             if stat.id() == "main" {
-                                if self.container.deinit_norun || deinits.is_empty() {
+                                if (self.container.deinit_norun || deinits.is_empty())
+                                    && !self.container.persist
+                                {
                                     return true;
                                 } else {
                                     debug!("activating deinit queue");
@@ -566,16 +620,13 @@ impl ProcessRunner {
                         } else if let Some(control_stream) =
                             self.control_streams.get_mut(&(event.ident() as i32))
                         {
-                            match control_stream.pour_in_bytes(event.data() as usize) {
+                            match control_stream.try_get_request(event.data() as usize) {
                                 Err(_) => {
                                     self.control_streams.remove(&(event.ident() as i32));
                                 }
-                                Ok(None) => {
-                                }
-                                Ok(Some(packet)) => {
-                                    let jexec: Jexec = serde_json::from_slice(&packet.data).unwrap();
-                                    let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
-                                    let _result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify));
+                                Ok(Readiness::Pending) => {}
+                                Ok(Readiness::Ready((method, request))) => {
+                                    self.handle_control_stream_cmd(method, request);
                                 }
                             }
                         }
@@ -630,7 +681,7 @@ impl ProcessRunner {
 }
 
 pub fn run(
-    container: RunningContainer, 
+    container: RunningContainer,
     control_stream: UnixStream,
 ) -> (i32, Receiver<ContainerManifest>) {
     let kq = nix::sys::event::kqueue().unwrap();

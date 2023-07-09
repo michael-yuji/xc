@@ -26,8 +26,8 @@ use anyhow::{anyhow, bail, Context};
 use freebsd::event::{EventFdNotify, Notify};
 use freebsd::fs::zfs::ZfsHandle;
 use ipc::packet::Packet;
+use ipc::proto::Request;
 use ipc::transport::PacketTransport;
-use xc::models::exec::Jexec;
 use std::ffi::OsString;
 use std::os::fd::RawFd;
 use std::os::unix::net::UnixStream;
@@ -37,6 +37,7 @@ use tracing::info;
 use xc::config::XcConfig;
 use xc::container::effect::UndoStack;
 use xc::container::{Container, ContainerManifest};
+use xc::models::exec::Jexec;
 use xc::models::jail_image::JailImage;
 
 pub enum SiteState {
@@ -113,8 +114,29 @@ impl Site {
     }
 
     pub fn exec(&mut self, jexec: Jexec) {
-        let encoded = serde_json::to_vec(&jexec).unwrap();
-        let packet = Packet { data: encoded, fds: Vec::new() };
+        let value = serde_json::to_value(jexec).unwrap();
+        let request = Request { method: "exec".to_string(), value };
+        let encoded = serde_json::to_vec(&request).unwrap();
+        let packet = Packet {
+            data: encoded,
+            fds: Vec::new(),
+        };
+        if let Some(stream) = self.control_stream.as_mut() {
+            let _result = stream.send_packet(&packet);
+        }
+    }
+
+    /// XXX: CHANGE ME
+    pub fn run_main(&mut self) {
+        let request = Request {
+            method: "run_main".to_string(),
+            value: serde_json::json!({})
+        };
+        let encoded = serde_json::to_vec(&request).unwrap();
+        let packet = Packet {
+            data: encoded,
+            fds: Vec::new(),
+        };
         if let Some(stream) = self.control_stream.as_mut() {
             let _result = stream.send_packet(&packet);
         }
