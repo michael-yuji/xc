@@ -24,8 +24,10 @@
 pub mod directives;
 pub mod parse;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::os::unix::net::UnixStream;
+use tracing::error;
+use xcd::ipc::*;
 
 pub(crate) struct JailContext {
     /// The current container we are operating in
@@ -33,5 +35,33 @@ pub(crate) struct JailContext {
     /// Mapping to different containers for multi-stage build
     pub(crate) containers: HashMap<String, String>,
 
-    conn: UnixStream,
+    pub(crate) conn: UnixStream,
+}
+
+impl JailContext {
+    pub(crate) fn new(conn: UnixStream) -> JailContext {
+        JailContext {
+            conn,
+            container_id: None,
+            containers: HashMap::new()
+        }
+    }
+
+    pub(crate) fn release(mut self) -> anyhow::Result<()> {
+        let mut containers = HashSet::new();
+        if let Some(container) = self.container_id {
+            containers.insert(container);
+        }
+        for (_, container) in self.containers.into_iter() {
+            containers.insert(container);
+        }
+        for name in containers.into_iter() {
+            let kill = KillContainerRequest { name: name.to_string() };
+            match do_kill_container(&mut self.conn, kill)? {
+                Ok(_) => {},
+                Err(error) => { error!("cannot kill container {name}: {error:?}"); }
+            }
+        }
+        Ok(())
+    }
 }

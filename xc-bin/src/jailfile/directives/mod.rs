@@ -23,3 +23,11 @@
 // SUCH DAMAGE.
 pub mod from;
 pub mod run;
+
+use crate::jailfile::parse::Action;
+use super::JailContext;
+
+pub(crate) trait Directive: Sized {
+    fn from_action(action: &Action) -> Result<Self, anyhow::Error>;
+    fn run_in_context(&self, context: &mut JailContext) -> Result<(), anyhow::Error>;
+}

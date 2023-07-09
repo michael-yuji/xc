@@ -22,20 +22,25 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+
 use crate::jailfile::parse::Action;
 use crate::jailfile::JailContext;
+use super::Directive;
 
 use anyhow::{bail, Result};
+use ipc::packet::codec::{List, Maybe};
 use oci_util::image_reference::ImageReference;
-use xc::util::gen_id;
+use std::collections::HashMap;
+use xc::{util::gen_id, models::network::DnsSetting};
+use xcd::ipc::*;
 
 pub(crate) struct FromDirective {
     image_reference: ImageReference,
     alias: Option<String>,
 }
 
-impl FromDirective {
-    pub(crate) fn from_action(action: &Action) -> Result<FromDirective> {
+impl Directive for FromDirective {
+    fn from_action(action: &Action) -> Result<FromDirective> {
         if action.directive_name != "FROM" {
             bail!("directive_name is not FROM");
         }
@@ -56,7 +61,7 @@ impl FromDirective {
         }
     }
 
-    pub(crate) fn run_in_context(&self, context: &mut JailContext) -> Result<()> {
+    fn run_in_context(&self, context: &mut JailContext) -> Result<()> {
         if let Some(container_id) = &context.container_id {
             let tagged_containers = context.containers.values().collect::<Vec<_>>();
             if !tagged_containers.contains(&container_id) {
@@ -65,12 +70,42 @@ impl FromDirective {
         }
         let name = format!("build-{}", gen_id());
         /* create container */
-        if let Some(alias) = &self.alias {
-            context
-                .containers
-                .insert(alias.to_string(), name.to_string());
+        let req = InstantiateRequest {
+            alt_root: None,
+            name: Some(name.to_string()),
+            hostname: None,
+            copies: List::new(),
+            dns: DnsSetting::Inherit,
+            image_reference: self.image_reference.clone(),
+            no_clean: false,
+            main_norun: true,
+            init_norun: true,
+            deinit_norun: true,
+            persist: true,
+            ips: Vec::new(),
+            main_started_notify: Maybe::None,
+            entry_point: "main".to_string(),
+            entry_point_args: Vec::new(),
+            envs: HashMap::new(),
+            vnet: false,
+            mount_req: Vec::new(),
+            ipreq: Vec::new()
+        };
+        eprintln!("before instantiate");
+        match do_instantiate(&mut context.conn, req)? {
+            Ok(response) => {
+                eprintln!("instantiate resspones: {response:?}");
+                if let Some(alias) = &self.alias {
+                    context
+                        .containers
+                        .insert(alias.to_string(), name.to_string());
+                }
+                context.container_id = Some(name);
+                Ok(())
+            },
+            Err(err) => {
+                bail!("instantiation failure: {err:?}")
+            }
         }
-        context.container_id = Some(name);
-        Ok(())
     }
 }

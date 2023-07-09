@@ -82,6 +82,9 @@ enum Action {
     Attach {
         name: String,
     },
+    Build {
+        image_reference: ImageReference
+    },
     #[clap(subcommand)]
     Channel(ChannelAction),
     Commit {
@@ -229,6 +232,51 @@ fn main() -> Result<(), ActionError> {
                     eprintln!("cannot attach to container");
                 }
             }
+        }
+        Action::Build { image_reference } => {
+            use crate::jailfile::*;
+            use crate::jailfile::parse::*;
+            use crate::jailfile::directives::*;
+            use crate::jailfile::directives::run::*;
+            use crate::jailfile::directives::from::*;
+            let file = std::fs::read_to_string("Jailfile")?;
+
+            let is_image_existed = do_describe_image(&mut conn, DescribeImageRequest {
+                image_name: image_reference.name.to_string(),
+                tag: image_reference.tag.to_string()
+            })?;
+
+            if is_image_existed.is_ok() {
+                Err(anyhow::anyhow!("image already exist"))?;
+            }
+
+            let actions = parse_jailfile(&file)?;
+            let mut context = JailContext::new(conn);
+
+            eprintln!("actions: {actions:#?}");
+
+            for action in actions.iter() {
+                if action.directive_name == "RUN" {
+                    let directive = RunDirective::from_action(action)?;
+                    directive.run_in_context(&mut context)?;
+                } else if action.directive_name == "FROM" {
+                    let directive = FromDirective::from_action(action)?;
+                    directive.run_in_context(&mut context)?;
+                    std::thread::sleep_ms(500);
+                }
+            }
+
+            let req = CommitRequest {
+                name: image_reference.name,
+                tag: image_reference.tag.to_string(),
+                container_name: context.container_id.clone().unwrap(),
+            };
+            let response = do_commit_container(&mut context.conn, req)?.unwrap();
+            eprintln!("{response:#?}");
+
+            context.release()?;
+            //            let response: CommitResponse = request(&mut conn, "commit", req)?;
+
         }
         Action::Channel(action) => {
             use_channel_action(&mut conn, action)?;
