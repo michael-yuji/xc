@@ -129,19 +129,20 @@ pub async fn pull_image(
     let id = reference.to_string();
     let image = reference.name.clone();
     let tag = reference.tag;
-    let hostname = reference.hostname; //.clone();
 
-    let registry = {
+    let (hostname, registry) = {
         let this = this.clone();
         let this = this.read().await;
         let reg = this.context.registries.lock().await;
-        match &hostname {
+        match &reference.hostname {
             None => reg
                 .default_registry()
+                .map(|registry| (reg.default_name().unwrap(), registry))
                 .ok_or_else(|| PullImageError::RegistryNotFound)?,
             Some(name) => reg
-                .get_registry_by_name(&name)
-                .unwrap_or_else(|| Registry::new(name.to_string(), None)),
+                .get_registry_by_name(name)
+                .map(|registry| (name.to_string(), registry))
+                .unwrap_or_else(|| (name.to_string(), Registry::new(name.to_string(), None))),
         }
     };
 
@@ -273,9 +274,10 @@ pub async fn pull_image(
                                 }
                                 image_store.tag_manifest(
                                     &digest,
-                                    &format!("{}/{image}", hostname.unwrap()),
+                                    &format!("{hostname}/{image}"),
                                     tag.as_str(),
-                                )
+                                )?;
+                                Ok(())
                             })
                             .map_err(|err| {
                                 emitter.set_faulted(&format!("{err:?}"));

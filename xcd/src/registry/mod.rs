@@ -30,6 +30,7 @@ use std::io::{Seek, Write};
 use std::path::Path;
 
 pub trait RegistriesProvider {
+    fn default_name(&self) -> Option<String>;
     fn default_registry(&self) -> Option<Registry>;
     fn get_registry_by_name(&self, name: &str) -> Option<Registry>;
     fn insert_registry(&mut self, name: &str, registry: &Registry);
@@ -120,6 +121,10 @@ impl JsonRegistryProvider {
     }
 }
 impl RegistriesProvider for JsonRegistryProvider {
+    fn default_name(&self) -> Option<String> {
+        self.data.default.clone()
+    }
+
     fn default_registry(&self) -> Option<Registry> {
         self.data.default_registry().map(|r| r.to_reg())
     }
