@@ -25,8 +25,12 @@ use crate::context::instantiate::InstantiateBlueprint;
 use anyhow::{anyhow, bail, Context};
 use freebsd::event::{EventFdNotify, Notify};
 use freebsd::fs::zfs::ZfsHandle;
+use ipc::packet::Packet;
+use ipc::transport::PacketTransport;
+use xc::models::exec::Jexec;
 use std::ffi::OsString;
 use std::os::fd::RawFd;
+use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 use tracing::info;
@@ -56,6 +60,8 @@ pub struct Site {
     pub container_notify: Option<Arc<EventFdNotify>>,
     ctl_channel: Option<i32>,
     state: SiteState,
+
+    control_stream: Option<UnixStream>,
 
     // clients who interested when the main process started
     main_started_interests: Vec<EventFdNotify>,
@@ -89,6 +95,7 @@ impl Site {
             ctl_channel: None,
             state: SiteState::Empty,
             main_started_interests: Vec::new(),
+            control_stream: None,
         }
     }
 
@@ -103,6 +110,14 @@ impl Site {
         self.state = SiteState::Terminated;
         self.notify.notify_waiters();
         Ok(())
+    }
+
+    pub fn exec(&mut self, jexec: Jexec) {
+        let encoded = serde_json::to_vec(&jexec).unwrap();
+        let packet = Packet { data: encoded, fds: Vec::new() };
+        if let Some(stream) = self.control_stream.as_mut() {
+            let _result = stream.send_packet(&packet);
+        }
     }
 
     pub fn link_fd(&mut self, fd: RawFd) {
@@ -130,6 +145,8 @@ impl Site {
 
     pub fn run_container(&mut self, blueprint: InstantiateBlueprint) -> anyhow::Result<()> {
         guard!(self, {
+            let (sock_a, sock_b) = UnixStream::pair().unwrap();
+            self.control_stream = Some(sock_a);
             if let SiteState::RootFsOnly = self.state {
                 let root = self.root.clone().unwrap().to_string_lossy().to_string();
                 let zfs_origin = self.zfs_origin.clone();
@@ -168,7 +185,7 @@ impl Site {
                 let container_notify = running_container.notify.clone();
                 let main_started_notify = running_container.main_started_notify.clone();
 
-                let (kq, recv) = xc::container::runner::run(running_container);
+                let (kq, recv) = xc::container::runner::run(running_container, sock_b);
                 self.container = Some(recv);
                 self.ctl_channel = Some(kq);
                 self.container_notify = Some(container_notify);

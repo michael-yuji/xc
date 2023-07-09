@@ -24,6 +24,7 @@
 use super::resolve_environ_order;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::os::fd::RawFd;
 use varutil::string_interpolation::{InterpolatedString, Var};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -38,6 +39,11 @@ pub enum StdioMode {
         stdout: Option<String>,
         stderr: Option<String>,
     },
+    Forward {
+        stdin: Option<RawFd>,
+        stdout: Option<RawFd>,
+        stderr: Option<RawFd>
+    }
 }
 
 /// Executable parameters to be executed in container
@@ -48,6 +54,7 @@ pub struct Jexec {
     pub envs: std::collections::HashMap<String, String>,
     pub uid: u32,
     pub output_mode: StdioMode,
+    pub notify: Option<RawFd>
 }
 
 pub struct ResolvedExec {
@@ -68,6 +75,7 @@ impl ResolvedExec {
                 stdout: None,
                 stderr: None,
             },
+            notify: None
         }
     }
 }

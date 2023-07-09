@@ -27,6 +27,8 @@ use crate::container::Jexec;
 use pty_process::kqueue_forwarder::PtyForwarder;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
+use std::os::fd::RawFd;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 
 /// Statistic and information about a process spawned by the runtime in the jail
@@ -96,6 +98,35 @@ impl ProcessStat {
     pub fn started(&self) -> bool {
         self.started.is_some()
     }
+}
+
+pub(super) fn spawn_process_forward(
+    cmd: &mut std::process::Command,
+    stdin: Option<RawFd>,
+    stdout: Option<RawFd>,
+    stderr: Option<RawFd>
+) -> Result<u32, ExecError>
+{
+    unsafe {
+        cmd.pre_exec(move || {
+            if let Some(fd) = stdin {
+                freebsd::libc::close(0);
+                freebsd::libc::dup2(fd, 0);
+            }
+            if let Some(fd) = stdout {
+                freebsd::libc::close(1);
+                freebsd::libc::dup2(fd, 1);
+            }
+            if let Some(fd) = stderr {
+                freebsd::libc::close(1);
+                freebsd::libc::dup2(fd, 1);
+            }
+            Ok(())
+        });
+    }
+    let child = cmd.spawn().map_err(ExecError::CannotSpawn)?;
+    let pid = child.id();
+    Ok(pid)
 }
 
 pub(super) fn spawn_process_pty(

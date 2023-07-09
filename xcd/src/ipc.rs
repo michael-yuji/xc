@@ -34,6 +34,7 @@ use oci_util::digest::OciDigest;
 use oci_util::distribution::client::{BasicAuth, Registry};
 use oci_util::image_reference::ImageReference;
 use serde::{Deserialize, Serialize};
+use xc::models::exec::{Jexec, StdioMode};
 use std::collections::HashMap;
 use std::io::Seek;
 use std::net::IpAddr;
@@ -809,18 +810,52 @@ async fn login_registry(
     Ok(())
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(FromPacket)]
 pub struct ExecCommandRequest {
     pub name: String,
     pub arg0: String,
-    pub args: Vec<InterpolatedString>,
+    pub args: Vec<String>,
     pub envs: HashMap<String, String>,
-    pub clear_env: bool,
+    pub stdin: Maybe<Fd>,
+    pub stdout: Maybe<Fd>,
+    pub stderr: Maybe<Fd>,
+    pub uid: u32,
+    pub notify: Maybe<Fd>
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ExecCommandResponse {
-    pub cid: String,
+    pub cid: String
+}
+
+#[ipc_method(method = "exec")]
+async fn exec(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: ExecCommandRequest
+) -> GenericResult<ExecCommandResponse>
+{
+    info!("exec!!!");
+    let cid = gen_id();
+    let jexec = Jexec {
+        arg0: request.arg0,
+        args: request.args,
+        envs: request.envs,
+        uid: request.uid,
+        output_mode: StdioMode::Forward {
+            stdin: request.stdin.to_option().map(|fd| fd.0),
+            stdout: request.stdout.to_option().map(|fd| fd.0),
+            stderr: request.stderr.to_option().map(|fd| fd.0)
+        },
+        notify: request.notify.to_option().map(|fd| fd.0)
+    };
+    if let Some(arc_site) = context.write().await.get_site(&request.name) {
+        let mut site = arc_site.write().await;
+        site.exec(jexec);
+        Ok(ExecCommandResponse { cid })
+    } else {
+        enoent("site not found")
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -878,6 +913,7 @@ pub(crate) async fn register_to_service(
 ) {
     service.register_event_delegate(on_channel_closed).await;
     service.register(create_channel).await;
+    service.register(exec).await;
     service.register(fd_import).await;
     service.register(info).await;
     service.register(link_container).await;

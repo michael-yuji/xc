@@ -146,6 +146,7 @@ impl InstantiateBlueprint {
                 envs,
                 uid: 0,
                 output_mode: StdioMode::Terminal,
+                notify: None
             }
         };
         for assign in request.ips.iter() {

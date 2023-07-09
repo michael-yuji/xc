@@ -425,7 +425,6 @@ fn main() -> Result<(), std::io::Error> {
 mod tests {
     use super::*;
     use serial_test::serial;
-
     fn test_extraction<F: FnOnce(&str) -> R + std::panic::UnwindSafe, R>(ident: &str, f: F) {
         // git cannot contain true empty directory, hence we need to store the test directories
         // in tarball and extract them if they are not extracted yet
@@ -487,6 +486,7 @@ mod tests {
                 chdir: Some(dir.to_string()),
                 file: "test-materials/base.tar.zst".to_string(),
                 compression: CompressionType::Auto,
+                print_input_digest: false
             };
             do_extract(extract_arg).unwrap();
         });
@@ -500,6 +500,7 @@ mod tests {
                 chdir: Some(dir.to_string()),
                 file: "test-materials/base.tar".to_string(),
                 compression: CompressionType::Auto,
+                print_input_digest: false
             };
             do_extract(extract_arg).unwrap();
         });

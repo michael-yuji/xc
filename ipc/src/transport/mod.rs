@@ -145,7 +145,7 @@ pub(crate) fn send_once(
         .map_err(ChannelError::<std::io::Error>::from)
 }
 
-pub(crate) fn recv_packet_once(
+pub fn recv_packet_once(
     fd: RawFd,
     fds_count: usize,
     data: &mut Vec<u8>,

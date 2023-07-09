@@ -26,6 +26,7 @@ mod channel;
 mod error;
 mod format;
 mod image;
+mod jailfile;
 mod network;
 mod redirect;
 
@@ -187,6 +188,12 @@ enum Action {
         name: String,
         args: Vec<String>,
     },
+
+    Exec {
+        name: String,
+        arg0: String,
+        args: Vec<String>
+    }
 }
 
 fn main() -> Result<(), ActionError> {
@@ -607,6 +614,23 @@ fn main() -> Result<(), ActionError> {
                 process.wait()?;
             } else {
                 eprintln!("no such container");
+            }
+        },
+        Action::Exec { name, arg0, args } => {
+            let n = EventFdNotify::new();
+            let request = ExecCommandRequest {
+                name,
+                arg0,
+                args,
+                envs: std::collections::HashMap::new(),
+                stdin: Maybe::Some(ipc::packet::codec::Fd(0)),
+                stdout: Maybe::Some(ipc::packet::codec::Fd(1)),
+                stderr: Maybe::Some(ipc::packet::codec::Fd(2)),
+                uid: 0,
+                notify: Maybe::Some(ipc::packet::codec::Fd(n.as_raw_fd()))
+            };
+            if let Ok(response) = do_exec(&mut conn, request)? {
+                n.notified_sync();
             }
         }
     };
