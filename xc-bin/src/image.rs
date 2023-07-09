@@ -29,7 +29,10 @@ use std::collections::HashMap;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use varutil::string_interpolation::Var;
-use xc::models::{jail_image::{JailConfig, SpecialMount}, EnvSpec, MountSpec, SystemVPropValue};
+use xc::models::{
+    jail_image::{JailConfig, SpecialMount},
+    EnvSpec, MountSpec, SystemVPropValue,
+};
 use xcd::ipc::*;
 
 #[derive(Subcommand, Debug)]
@@ -70,30 +73,34 @@ pub(crate) enum PatchActions {
         #[clap(short = 'd', long = "description")]
         description: Option<String>,
         /// hints to create this volume for intelligently, for example the right block size
-        #[clap(long="hint", multiple_occurrences = true)]
+        #[clap(long = "hint", multiple_occurrences = true)]
         hints: Vec<EnvPair>,
         /// if the volume should be mounted as read-only
-        #[clap(long="read-only", action)]
+        #[clap(long = "read-only", action)]
         read_only: bool,
-        /// a name for the 
-        #[clap(long="name")]
+        /// a name for the
+        #[clap(long = "name")]
         name: Option<String>,
         /// mount point in the container
         mount_point: PathBuf,
         /// the image
-        image_reference: ImageReference
+        image_reference: ImageReference,
     },
-    MountFdescfs { image_reference: ImageReference },
-    MountProcfs { image_reference: ImageReference },
+    MountFdescfs {
+        image_reference: ImageReference,
+    },
+    MountProcfs {
+        image_reference: ImageReference,
+    },
     ModAllow {
         allows: Vec<String>,
-        image_reference: ImageReference
+        image_reference: ImageReference,
     },
     SysvIpc {
-        #[clap(long="enable", multiple_occurrences = true)]
+        #[clap(long = "enable", multiple_occurrences = true)]
         enable: Vec<String>,
-        image_reference: ImageReference
-    }
+        image_reference: ImageReference,
+    },
 }
 
 fn patch_image<F>(
@@ -152,7 +159,14 @@ pub(crate) fn use_image_action(
                     );
                 })?;
             }
-            PatchActions::AddVolume { description, hints, name, mount_point, image_reference, read_only } => {
+            PatchActions::AddVolume {
+                description,
+                hints,
+                name,
+                mount_point,
+                image_reference,
+                read_only,
+            } => {
                 patch_image(conn, &image_reference, |config| {
                     let destination = mount_point.to_string_lossy().to_string();
                     let description = description.unwrap_or_default();
@@ -170,12 +184,15 @@ pub(crate) fn use_image_action(
                         description,
                         read_only,
                         volume_hints,
-                        destination
+                        destination,
                     };
-                    config.mounts.insert(key,mountspec);
+                    config.mounts.insert(key, mountspec);
                 })?;
             }
-            PatchActions::ModAllow { allows, image_reference } => {
+            PatchActions::ModAllow {
+                allows,
+                image_reference,
+            } => {
                 patch_image(conn, &image_reference, |config| {
                     for allow in allows.into_iter() {
                         if let Some(param) = allow.strip_prefix('-') {
@@ -190,7 +207,10 @@ pub(crate) fn use_image_action(
                     }
                 })?;
             }
-            PatchActions::SysvIpc { enable, image_reference } => {
+            PatchActions::SysvIpc {
+                enable,
+                image_reference,
+            } => {
                 let mut enabled = Vec::new();
                 for e in enable.iter() {
                     enabled.extend(e.split(',').map(|h| h.trim()).collect::<Vec<_>>());
@@ -204,7 +224,7 @@ pub(crate) fn use_image_action(
                             "-msg" => config.sysv_msg = SystemVPropValue::Disable,
                             "sem" => config.sysv_sem = SystemVPropValue::New,
                             "-sem" => config.sysv_sem = SystemVPropValue::Disable,
-                            _ => continue
+                            _ => continue,
                         }
                     }
                 })?;
@@ -219,14 +239,12 @@ pub(crate) fn use_image_action(
                             break;
                         }
                     }
-                    config.special_mounts.push(
-                        SpecialMount {
-                            mount_type: "fdescfs".to_string(),
-                            mount_point: "/dev/fd".to_string()
-                        }
-                    );
+                    config.special_mounts.push(SpecialMount {
+                        mount_type: "fdescfs".to_string(),
+                        mount_point: "/dev/fd".to_string(),
+                    });
                 })?;
-            },
+            }
             PatchActions::MountProcfs { image_reference } => {
                 patch_image(conn, &image_reference, |config| {
                     for i in (0..config.special_mounts.len()).rev() {
@@ -237,14 +255,12 @@ pub(crate) fn use_image_action(
                             break;
                         }
                     }
-                    config.special_mounts.push(
-                        SpecialMount {
-                            mount_type: "procfs".to_string(),
-                            mount_point: "/proc".to_string()
-                        }
-                    );
+                    config.special_mounts.push(SpecialMount {
+                        mount_type: "procfs".to_string(),
+                        mount_point: "/proc".to_string(),
+                    });
                 })?;
-            },
+            }
         },
         ImageAction::Import {
             image_id,
