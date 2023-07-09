@@ -40,7 +40,7 @@ use xc::container::{Container, ContainerManifest};
 use xc::models::exec::Jexec;
 use xc::models::jail_image::JailImage;
 
-pub enum SiteState {
+enum SiteState {
     Empty,
     RootFsOnly,
     Started,
@@ -100,6 +100,10 @@ impl Site {
         }
     }
 
+    pub fn id(&self) -> String {
+        self.id.to_string()
+    }
+
     pub fn notify_main_started(&self) {
         for interest in self.main_started_interests.iter() {
             interest.notify_waiters();
@@ -115,7 +119,10 @@ impl Site {
 
     pub fn exec(&mut self, jexec: Jexec) {
         let value = serde_json::to_value(jexec).unwrap();
-        let request = Request { method: "exec".to_string(), value };
+        let request = Request {
+            method: "exec".to_string(),
+            value,
+        };
         let encoded = serde_json::to_vec(&request).unwrap();
         let packet = Packet {
             data: encoded,
@@ -127,10 +134,10 @@ impl Site {
     }
 
     /// XXX: CHANGE ME
-    pub fn run_main(&mut self) {
+    pub fn run_main(&mut self, main_notify: Option<EventFdNotify>) {
         let request = Request {
             method: "run_main".to_string(),
-            value: serde_json::json!({})
+            value: serde_json::json!({}),
         };
         let encoded = serde_json::to_vec(&request).unwrap();
         let packet = Packet {
@@ -139,6 +146,9 @@ impl Site {
         };
         if let Some(stream) = self.control_stream.as_mut() {
             let _result = stream.send_packet(&packet);
+        }
+        if let Some(interest) = main_notify {
+            self.main_started_interests.push(interest);
         }
     }
 

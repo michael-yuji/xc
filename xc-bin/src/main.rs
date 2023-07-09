@@ -143,7 +143,7 @@ enum Action {
         no_clean: bool,
         #[clap(long, default_value_t, action)]
         persist: bool,
-        #[clap(long="create-only", action)]
+        #[clap(long = "create-only", action)]
         create_only: bool,
         image_reference: ImageReference,
         entry_point: Option<String>,
@@ -177,15 +177,17 @@ enum Action {
         #[clap(long = "copy", multiple_occurrences = true)]
         copy: Vec<BindMount>,
     },
-
+    RunMain {
+        #[clap(long = "detach", short = 'd', action)]
+        detach: bool,
+        name: String,
+    },
     Show {
         id: String,
     },
-
     Template {
         output: String,
     },
-
     Trace {
         name: String,
         args: Vec<String>,
@@ -447,7 +449,7 @@ fn main() -> Result<(), ActionError> {
         Action::Run {
             image_reference,
             create_only,
-            detach,
+            mut detach,
             entry_point,
             entry_point_args,
             no_clean,
@@ -557,6 +559,7 @@ fn main() -> Result<(), ActionError> {
                     reqt.main_norun = true;
                     reqt.init_norun = true;
                     reqt.deinit_norun = true;
+                    detach = true;
                 }
 
                 let res = do_instantiate(&mut conn, reqt)?;
@@ -589,7 +592,32 @@ fn main() -> Result<(), ActionError> {
                 eprintln!("{res:#?}");
             }
         }
+        Action::RunMain { detach, name } => {
+            let notify = if detach {
+                Maybe::None
+            } else {
+                let fd = unsafe { eventfd(0, nix::libc::EFD_NONBLOCK) };
+                Maybe::Some(Fd(fd))
+            };
 
+            let req = RunMainRequest {
+                name,
+                notify: notify.clone(),
+            };
+            if let Ok(res) = do_run_main(&mut conn, req)? {
+                if !detach {
+                    if let Maybe::Some(notify) = notify {
+                        EventFdNotify::from_fd(notify.as_raw_fd()).notified_sync();
+                        let id = res.id;
+                        let path = format!("/var/run/xc.{id}.main");
+                        let path = std::path::Path::new(&path);
+                        if path.exists() {
+                            _ = attach::run(path);
+                        }
+                    }
+                }
+            }
+        }
         Action::Show { id } => {
             let req = ShowContainerRequest { id };
             let res: ShowContainerResponse = do_show_container(&mut conn, req)?.unwrap();

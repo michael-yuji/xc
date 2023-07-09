@@ -25,6 +25,7 @@
 use crate::auth::Credential;
 use crate::context::ServerContext;
 use crate::image::push::{PushImageError, PushImageStatusDesc};
+use freebsd::event::EventFdNotify;
 use freebsd::libc::{EINVAL, EIO};
 use ipc::packet::codec::{Fd, FromPacket, List, Maybe};
 use ipc::proto::{enoent, ipc_err, GenericResult};
@@ -42,7 +43,6 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::*;
-use varutil::string_interpolation::InterpolatedString;
 use xc::container::request::{MountReq, NetworkAllocRequest};
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailConfig;
@@ -857,9 +857,15 @@ async fn exec(
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(FromPacket)]
 pub struct RunMainRequest {
-    pub name: String
+    pub name: String,
+    pub notify: Maybe<Fd>,
+}
+
+#[derive(FromPacket)]
+pub struct RunMainResponse {
+    pub id: String,
 }
 
 /// XXX: Temporary
@@ -868,13 +874,16 @@ async fn run_main(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
     request: RunMainRequest,
-) -> GenericResult<()>
-{
+) -> GenericResult<RunMainResponse> {
     if let Some(arc_site) = context.write().await.get_site(&request.name) {
         let mut site = arc_site.write().await;
-        site.run_main();
-        Ok(())
-    }else {
+        let notify = request
+            .notify
+            .to_option()
+            .map(|fd| EventFdNotify::from_fd(fd.0));
+        site.run_main(notify);
+        Ok(RunMainResponse { id: site.id() })
+    } else {
         enoent("container not found")
     }
 }
@@ -954,5 +963,6 @@ pub(crate) async fn register_to_service(
     service.register(upload_stat).await;
     service.register(rdr_container).await;
     service.register(replace_meta).await;
+    service.register(run_main).await;
     service.register(push_image).await;
 }
