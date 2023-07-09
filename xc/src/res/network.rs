@@ -279,7 +279,6 @@ impl Netpool {
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +287,7 @@ mod tests {
     fn test_assignment() -> rusqlite::Result<()> {
         let network = Network {
             ext_if: None,
+            default_router: None,
             alias_iface: "jeth0".to_string(),
             bridge_iface: "jeth0".to_string(),
             subnet: "192.168.2.0/24".parse().unwrap(),
