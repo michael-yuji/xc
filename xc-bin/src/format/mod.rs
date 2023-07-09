@@ -223,34 +223,33 @@ mod tests {
     use anyhow::Result;
     use ipcidr::IpCidr;
     use xc::models::network::{NetProto, PortNum};
-
     #[test]
     fn test_parse_vnet_interface_only() -> Result<()> {
         let input = "vtnet0";
-        let vnet = input.parse::<Vnet>()?;
-        assert_eq!(vnet.addresses, Vec::new());
-        assert_eq!(vnet.interface, input.to_string());
+        let vnet = input.parse::<IpWant>()?;
+        assert_eq!(vnet.0.addresses, Vec::new());
+        assert_eq!(vnet.0.interface, input.to_string());
         Ok(())
     }
 
     #[test]
     fn test_parse_vnet_single_address_no_mask() -> Result<()> {
         let input = "vtnet0|192.168.0.1";
-        let vnet = input.parse::<Vnet>()?;
-        assert_eq!(vnet.addresses, vec!["192.168.0.1/32".parse()?]);
-        assert_eq!(vnet.interface, "vtnet0".to_string());
+        let vnet = input.parse::<IpWant>()?;
+        assert_eq!(vnet.0.addresses, vec!["192.168.0.1/32".parse()?]);
+        assert_eq!(vnet.0.interface, "vtnet0".to_string());
         Ok(())
     }
 
     #[test]
     fn test_parse_vnet_single_addresses_mixed_masks() -> Result<()> {
         let input = "vtnet0|192.168.0.1,[dead:beef::]/120";
-        let vnet = input.parse::<Vnet>()?;
+        let vnet = input.parse::<IpWant>()?;
         assert_eq!(
-            vnet.addresses,
+            vnet.0.addresses,
             vec!["192.168.0.1/32".parse()?, "[dead:beef::]/120".parse()?]
         );
-        assert_eq!(vnet.interface, "vtnet0".to_string());
+        assert_eq!(vnet.0.interface, "vtnet0".to_string());
         Ok(())
     }
     #[test]

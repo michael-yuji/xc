@@ -262,7 +262,7 @@ mod tests {
         assert!(a.contains(&"192.168.110.1".to_string()));
         assert!(a.contains(&"192.168.110.2".to_string()));
 
-        table_del_addresses(anchor, table, &addresses).expect("failed to delete addresses");
+        table_del_cidrs(anchor, table, &addresses).expect("failed to delete addresses");
         let a = table_list_address(Some("rust/test_pf".to_string()), "mytable").unwrap();
 
         assert!(a.is_empty());
