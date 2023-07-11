@@ -27,6 +27,8 @@ pub mod parse;
 use std::collections::{HashMap, HashSet};
 use std::os::unix::net::UnixStream;
 use tracing::error;
+use xc::container::request::NetworkAllocRequest;
+use xc::models::network::DnsSetting;
 use xcd::ipc::*;
 
 pub(crate) struct JailContext {
@@ -36,14 +38,24 @@ pub(crate) struct JailContext {
     pub(crate) containers: HashMap<String, String>,
 
     pub(crate) conn: UnixStream,
+
+    pub(crate) dns: DnsSetting,
+
+    pub(crate) network: Vec<NetworkAllocRequest>,
 }
 
 impl JailContext {
-    pub(crate) fn new(conn: UnixStream) -> JailContext {
+    pub(crate) fn new(
+        conn: UnixStream,
+        dns: DnsSetting,
+        network: Vec<NetworkAllocRequest>,
+    ) -> JailContext {
         JailContext {
             conn,
             container_id: None,
-            containers: HashMap::new()
+            containers: HashMap::new(),
+            dns,
+            network,
         }
     }
 
@@ -56,10 +68,14 @@ impl JailContext {
             containers.insert(container);
         }
         for name in containers.into_iter() {
-            let kill = KillContainerRequest { name: name.to_string() };
+            let kill = KillContainerRequest {
+                name: name.to_string(),
+            };
             match do_kill_container(&mut self.conn, kill)? {
-                Ok(_) => {},
-                Err(error) => { error!("cannot kill container {name}: {error:?}"); }
+                Ok(_) => {}
+                Err(error) => {
+                    error!("cannot kill container {name}: {error:?}");
+                }
             }
         }
         Ok(())

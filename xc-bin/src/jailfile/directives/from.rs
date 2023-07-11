@@ -22,16 +22,15 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-
+use super::Directive;
 use crate::jailfile::parse::Action;
 use crate::jailfile::JailContext;
-use super::Directive;
 
 use anyhow::{bail, Result};
 use ipc::packet::codec::{List, Maybe};
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
-use xc::{util::gen_id, models::network::DnsSetting};
+use xc::{models::network::DnsSetting, util::gen_id};
 use xcd::ipc::*;
 
 pub(crate) struct FromDirective {
@@ -75,7 +74,7 @@ impl Directive for FromDirective {
             name: Some(name.to_string()),
             hostname: None,
             copies: List::new(),
-            dns: DnsSetting::Inherit,
+            dns: context.dns.clone(),
             image_reference: self.image_reference.clone(),
             no_clean: false,
             main_norun: true,
@@ -89,7 +88,7 @@ impl Directive for FromDirective {
             envs: HashMap::new(),
             vnet: false,
             mount_req: Vec::new(),
-            ipreq: Vec::new()
+            ipreq: context.network.clone(),
         };
         eprintln!("before instantiate");
         match do_instantiate(&mut context.conn, req)? {
@@ -102,7 +101,7 @@ impl Directive for FromDirective {
                 }
                 context.container_id = Some(name);
                 Ok(())
-            },
+            }
             Err(err) => {
                 bail!("instantiation failure: {err:?}")
             }

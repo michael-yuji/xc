@@ -49,7 +49,7 @@ use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
 use term_table::homogeneous::{TableLayout, TableSource, Title};
 use term_table::{ColumnLayout, Pos};
-use tracing::debug;
+use tracing::{debug, error};
 use xc::container::request::{MountReq, NetworkAllocRequest};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::DnsSetting;
@@ -83,7 +83,15 @@ enum Action {
         name: String,
     },
     Build {
-        image_reference: ImageReference
+        #[clap(long = "network")]
+        network: Option<String>,
+        #[clap(long = "dns", multiple_occurrences = true)]
+        dns_servers: Vec<String>,
+        #[clap(long = "dns_search", multiple_occurrences = true)]
+        dns_searchs: Vec<String>,
+        #[clap(long = "empty-dns", action)]
+        empty_dns: bool,
+        image_reference: ImageReference,
     },
     #[clap(subcommand)]
     Channel(ChannelAction),
@@ -233,27 +241,67 @@ fn main() -> Result<(), ActionError> {
                 }
             }
         }
-        Action::Build { image_reference } => {
-            use crate::jailfile::*;
-            use crate::jailfile::parse::*;
-            use crate::jailfile::directives::*;
-            use crate::jailfile::directives::run::*;
+        Action::Build {
+            image_reference,
+            network,
+            dns_servers,
+            dns_searchs,
+            empty_dns,
+        } => {
+            use crate::jailfile::directives::copy::*;
             use crate::jailfile::directives::from::*;
+            use crate::jailfile::directives::run::*;
+            use crate::jailfile::directives::*;
+            use crate::jailfile::parse::*;
+            use crate::jailfile::*;
             let file = std::fs::read_to_string("Jailfile")?;
 
-            let is_image_existed = do_describe_image(&mut conn, DescribeImageRequest {
-                image_name: image_reference.name.to_string(),
-                tag: image_reference.tag.to_string()
-            })?;
+            let net_req = network
+                .map(|network| vec![NetworkAllocRequest::Any { network }])
+                .unwrap_or_default();
+
+            let dns = if empty_dns {
+                DnsSetting::Specified {
+                    servers: Vec::new(),
+                    search_domains: Vec::new(),
+                }
+            } else if dns_servers.is_empty() && dns_searchs.is_empty() {
+                DnsSetting::Inherit
+            } else {
+                DnsSetting::Specified {
+                    servers: dns_servers,
+                    search_domains: dns_searchs,
+                }
+            };
+
+            let is_image_existed = do_describe_image(
+                &mut conn,
+                DescribeImageRequest {
+                    image_name: image_reference.name.to_string(),
+                    tag: image_reference.tag.to_string(),
+                },
+            )?;
 
             if is_image_existed.is_ok() {
                 Err(anyhow::anyhow!("image already exist"))?;
             }
 
             let actions = parse_jailfile(&file)?;
-            let mut context = JailContext::new(conn);
 
-            eprintln!("actions: {actions:#?}");
+            if unsafe { freebsd::libc::geteuid() } != 0 {
+                for action in actions.iter() {
+                    if action.directive_name == "COPY" {
+                        error!(
+                            "This Jailfile contains COPY directive(s) but is not running as root,"
+                        );
+                        error!("due to the lack of time to properly implement COPY by the developer(me)");
+                        error!("This should be solved in some later release say v0.0.1");
+                        std::process::exit(1)
+                    }
+                }
+            }
+
+            let mut context = JailContext::new(conn, dns, net_req);
 
             for action in actions.iter() {
                 if action.directive_name == "RUN" {
@@ -263,9 +311,13 @@ fn main() -> Result<(), ActionError> {
                     let directive = FromDirective::from_action(action)?;
                     directive.run_in_context(&mut context)?;
                     std::thread::sleep_ms(500);
+                } else if action.directive_name == "COPY" {
+                    let directive = CopyDirective::from_action(action)?;
+                    directive.run_in_context(&mut context)?;
                 }
             }
 
+            debug!("before commit");
             let req = CommitRequest {
                 name: image_reference.name,
                 tag: image_reference.tag.to_string(),
@@ -276,7 +328,6 @@ fn main() -> Result<(), ActionError> {
 
             context.release()?;
             //            let response: CommitResponse = request(&mut conn, "commit", req)?;
-
         }
         Action::Channel(action) => {
             use_channel_action(&mut conn, action)?;

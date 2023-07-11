@@ -37,7 +37,7 @@ pub struct CopyFileReq {
 }
 
 /// Ip allocation requests from user
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Clone, Deserialize, Debug)]
 pub enum NetworkAllocRequest {
     Any { network: String },
     Explicit { network: String, ip: IpAddr },
