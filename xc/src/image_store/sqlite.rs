@@ -260,8 +260,10 @@ impl ImageStore for SqliteImageStore {
 
     fn register_manifest(&self, manifest: &JailImage) -> Result<OciDigest, ImageStoreError> {
         let db = &self.db;
-        let mut stmt =
-            db.prepare_cached("insert into image_manifests (digest, manifest) values (?, ?)")?;
+        let mut stmt = db.prepare_cached(
+            "insert into image_manifests (digest, manifest) values (?, ?)
+                    on conflict(digest) do nothing",
+        )?;
         let manifest_json = serde_json::to_string(manifest)?;
         let digest = manifest.digest();
         stmt.execute([digest.as_str(), manifest_json.as_str()])?;

@@ -103,7 +103,7 @@ pub(crate) enum PatchActions {
     },
 }
 
-fn patch_image<F>(
+pub(crate) fn patch_image<F>(
     conn: &mut UnixStream,
     image_reference: &ImageReference,
     f: F,

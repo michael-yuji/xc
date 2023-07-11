@@ -314,19 +314,30 @@ fn main() -> Result<(), ActionError> {
                 } else if action.directive_name == "COPY" {
                     let directive = CopyDirective::from_action(action)?;
                     directive.run_in_context(&mut context)?;
+                } else if ConfigMod::implemented_directives()
+                    .contains(&action.directive_name.as_str())
+                {
+                    let directive = ConfigMod::from_action(action)?;
+                    directive.run_in_context(&mut context)?;
                 }
             }
 
             debug!("before commit");
+            /*
             let req = CommitRequest {
-                name: image_reference.name,
+                name: image_reference.name.to_string(),
                 tag: image_reference.tag.to_string(),
                 container_name: context.container_id.clone().unwrap(),
             };
             let response = do_commit_container(&mut context.conn, req)?.unwrap();
             eprintln!("{response:#?}");
 
-            context.release()?;
+            crate::image::patch_image(&mut context.conn, &image_reference, |config| {
+                context.apply_config(config);
+            })?;
+            */
+
+            context.release(image_reference)?;
             //            let response: CommitResponse = request(&mut conn, "commit", req)?;
         }
         Action::Channel(action) => {

@@ -24,10 +24,12 @@
 pub mod directives;
 pub mod parse;
 
+use oci_util::image_reference::ImageReference;
 use std::collections::{HashMap, HashSet};
 use std::os::unix::net::UnixStream;
 use tracing::error;
 use xc::container::request::NetworkAllocRequest;
+use xc::models::jail_image::JailConfig;
 use xc::models::network::DnsSetting;
 use xcd::ipc::*;
 
@@ -42,6 +44,8 @@ pub(crate) struct JailContext {
     pub(crate) dns: DnsSetting,
 
     pub(crate) network: Vec<NetworkAllocRequest>,
+
+    pub(crate) config_mods: Vec<self::directives::ConfigMod>,
 }
 
 impl JailContext {
@@ -56,10 +60,34 @@ impl JailContext {
             containers: HashMap::new(),
             dns,
             network,
+            config_mods: Vec::new(),
         }
     }
 
-    pub(crate) fn release(mut self) -> anyhow::Result<()> {
+    pub(crate) fn apply_config(&self, config: &mut JailConfig) {
+        for config_mod in self.config_mods.iter() {
+            config_mod.apply_config(config);
+        }
+    }
+
+    pub(crate) fn release(self, image_reference: ImageReference) -> anyhow::Result<()> {
+        let mut conn = self.conn;
+        let config_mods = self.config_mods;
+        let req = CommitRequest {
+            name: image_reference.name.to_string(),
+            tag: image_reference.tag.to_string(),
+            container_name: self.container_id.clone().unwrap(),
+        };
+
+        let _response = do_commit_container(&mut conn, req)?.unwrap();
+
+        crate::image::patch_image(&mut conn, &image_reference, |config| {
+            for config_mod in config_mods.iter() {
+                config_mod.apply_config(config);
+            }
+            //                self.apply_config(config);
+        })?;
+
         let mut containers = HashSet::new();
         if let Some(container) = self.container_id {
             containers.insert(container);
@@ -71,7 +99,7 @@ impl JailContext {
             let kill = KillContainerRequest {
                 name: name.to_string(),
             };
-            match do_kill_container(&mut self.conn, kill)? {
+            match do_kill_container(&mut conn, kill)? {
                 Ok(_) => {}
                 Err(error) => {
                     error!("cannot kill container {name}: {error:?}");
