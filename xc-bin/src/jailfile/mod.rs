@@ -24,12 +24,13 @@
 pub mod directives;
 pub mod parse;
 
+use ipc::packet::codec::{Fd, Maybe};
 use oci_util::image_reference::ImageReference;
 use std::collections::{HashMap, HashSet};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use tracing::error;
 use xc::container::request::NetworkAllocRequest;
-use xc::models::jail_image::JailConfig;
 use xc::models::network::DnsSetting;
 use xcd::ipc::*;
 
@@ -46,6 +47,8 @@ pub(crate) struct JailContext {
     pub(crate) network: Vec<NetworkAllocRequest>,
 
     pub(crate) config_mods: Vec<self::directives::ConfigMod>,
+
+    pub(crate) output_inplace: bool,
 }
 
 impl JailContext {
@@ -53,6 +56,7 @@ impl JailContext {
         conn: UnixStream,
         dns: DnsSetting,
         network: Vec<NetworkAllocRequest>,
+        output_inplace: bool,
     ) -> JailContext {
         JailContext {
             conn,
@@ -61,32 +65,72 @@ impl JailContext {
             dns,
             network,
             config_mods: Vec::new(),
-        }
-    }
-
-    pub(crate) fn apply_config(&self, config: &mut JailConfig) {
-        for config_mod in self.config_mods.iter() {
-            config_mod.apply_config(config);
+            output_inplace,
         }
     }
 
     pub(crate) fn release(self, image_reference: ImageReference) -> anyhow::Result<()> {
         let mut conn = self.conn;
         let config_mods = self.config_mods;
-        let req = CommitRequest {
-            name: image_reference.name.to_string(),
-            tag: image_reference.tag.to_string(),
-            container_name: self.container_id.clone().unwrap(),
+
+        let local_id = xc::util::gen_id();
+        let tempfile = if self.output_inplace {
+            Some(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(&local_id)?,
+            )
+        } else {
+            None
         };
 
-        let _response = do_commit_container(&mut conn, req)?.unwrap();
+        let req = match &tempfile {
+            Some(tempfile) => {
+                let fd = tempfile.as_raw_fd();
 
-        crate::image::patch_image(&mut conn, &image_reference, |config| {
-            for config_mod in config_mods.iter() {
-                config_mod.apply_config(config);
+                CommitRequest {
+                    name: image_reference.name.to_string(),
+                    tag: image_reference.tag.to_string(),
+                    container_name: self.container_id.clone().unwrap(),
+                    alt_out: Maybe::Some(Fd(fd)),
+                }
             }
-            //                self.apply_config(config);
-        })?;
+            None => CommitRequest {
+                name: image_reference.name.to_string(),
+                tag: image_reference.tag.to_string(),
+                container_name: self.container_id.clone().unwrap(),
+                alt_out: Maybe::None,
+            },
+        };
+
+        let response = do_commit_container(&mut conn, req)?.unwrap();
+
+        if self.output_inplace {
+            let container = do_show_container(
+                &mut conn,
+                ShowContainerRequest {
+                    id: self.container_id.clone().unwrap(),
+                },
+            )?
+            .unwrap();
+
+            let mut image = container.running_container.origin_image.unwrap_or_default();
+            let mut config = image.jail_config();
+            for config_mod in config_mods.iter() {
+                config_mod.apply_config(&mut config);
+            }
+            image.set_config(&config);
+
+            std::fs::rename(local_id, &response.commit_id);
+            std::fs::write("jail.json", serde_json::to_string_pretty(&image).unwrap());
+        } else {
+            crate::image::patch_image(&mut conn, &image_reference, |config| {
+                for config_mod in config_mods.iter() {
+                    config_mod.apply_config(config);
+                }
+            })?;
+        }
 
         let mut containers = HashSet::new();
         if let Some(container) = self.container_id {

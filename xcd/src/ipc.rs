@@ -708,11 +708,12 @@ async fn fd_import(
     Ok(diff_id)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(FromPacket)]
 pub struct CommitRequest {
     pub container_name: String,
     pub name: String,
     pub tag: String,
+    pub alt_out: Maybe<Fd>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -726,14 +727,27 @@ async fn commit_container(
     local_context: &mut ConnectionContext<Variables>,
     request: CommitRequest,
 ) -> GenericResult<CommitResponse> {
-    let commit_id = context
-        .write()
-        .await
-        .do_commit(&request.container_name, &request.name, &request.tag)
-        .await
-        .unwrap();
-    let response = CommitResponse { commit_id };
-    Ok(response)
+    let mut ctx = context.write().await;
+    let result = if let Maybe::Some(fd) = request.alt_out {
+        ctx.do_commit_file(&request.container_name, fd.0)
+            .await
+            .map(|a| a.to_string())
+    } else {
+        ctx.do_commit2(&request.container_name, &request.name, &request.tag)
+            .await
+    };
+    match result {
+        Ok(commit_id) => {
+            let response = CommitResponse {
+                commit_id: commit_id.to_string(),
+            };
+            Ok(response)
+        }
+        Err(err) => {
+            error!("{err:#?}");
+            enoent(&format!("{err:#?}"))
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -43,6 +43,8 @@ use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
 use oci_util::layer::ChainId;
 use std::collections::HashMap;
+use std::os::fd::{FromRawFd, RawFd};
+use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -259,6 +261,109 @@ impl ServerContext {
         ret
     }
 
+    async fn commit_to_file(
+        &mut self,
+        container_name: &str,
+        file: std::fs::File,
+        commit_id: &str,
+    ) -> Result<OciDigest, anyhow::Error> {
+        let container = self
+            .resolve_container_by_name(container_name)
+            .await
+            .expect("no such container");
+        let container_id = container.id;
+        let config = self.config();
+        let running_dataset = format!("{}/{}", config.container_dataset, container_id);
+        let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
+
+        let zfs_origin = container.zfs_origin.expect("missing zfs origin");
+
+        let zfs = ZfsHandle::default();
+        {
+            zfs.snapshot2(running_dataset.clone(), commit_id).unwrap();
+            zfs.clone2(running_dataset, commit_id, dst_dataset.clone())
+                .unwrap();
+            zfs.promote(dst_dataset.clone()).unwrap();
+        }
+        let snapshot = ZfsSnapshot::new(&dst_dataset, "xc");
+        debug!("taking zfs snapshot for {dst_dataset}@xc");
+        snapshot.execute(&zfs)?;
+        let child = std::process::Command::new("ocitar")
+            .arg("-cf-")
+            .arg("--write-to-stderr")
+            .stdout(file)
+            .stderr(Stdio::piped())
+            .arg("--zfs-diff")
+            .arg(format!("{zfs_origin}@xc"))
+            .arg(format!("{dst_dataset}@xc"))
+            .spawn()
+            .expect("fail to spawn ocitar");
+
+        let output = child.wait_with_output()?;
+
+        let diff_id = std::str::from_utf8(&output.stderr).unwrap().trim();
+        Ok(OciDigest::from_str(diff_id)?)
+    }
+
+    pub(crate) async fn do_commit_file(
+        &mut self,
+        container_name: &str,
+        file_fd: RawFd,
+    ) -> Result<OciDigest, anyhow::Error> {
+        let commit_id = xc::util::gen_id();
+        self.commit_to_file(
+            container_name,
+            unsafe { std::fs::File::from_raw_fd(file_fd) },
+            &commit_id,
+        )
+        .await
+    }
+
+    pub(crate) async fn do_commit2(
+        &mut self,
+        container_name: &str,
+        name: &str,
+        tag: &str,
+    ) -> Result<String, anyhow::Error> {
+        let container = self
+            .resolve_container_by_name(container_name)
+            .await
+            .expect("no such container");
+        let commit_id = xc::util::gen_id();
+        let config = self.config();
+        let layers_dir = &config.layers_dir;
+        let temp_file = format!("{layers_dir}/{commit_id}");
+        let mut manifest = container
+            .origin_image
+            .clone()
+            .expect("missing origin image");
+        let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
+        let zfs_origin = container.zfs_origin.clone().expect("missing zfs origin");
+        let zfs = ZfsHandle::default();
+        let prev_chain_id = zfs_origin.rsplit_once('/').expect("").1;
+        debug!("prev_chain_id: {prev_chain_id:#?}");
+        let mut chain_id = ChainId::from_str(prev_chain_id)?;
+        let temp_file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(temp_file)?;
+
+        let diff_id = self
+            .commit_to_file(container_name, temp_file, &commit_id)
+            .await?;
+        chain_id.consume_diff_id(oci_util::digest::DigestAlgorithm::Sha256, &diff_id);
+
+        let new_name = format!("{}/{chain_id}", config.image_dataset);
+        zfs.rename(&dst_dataset, new_name)?;
+        manifest.push_layer(&diff_id);
+        let context = self.image_manager.read().await;
+        _ = context
+            .register_and_tag_manifest(name, tag, &manifest)
+            .await;
+        context.map_diff_id(&diff_id, &diff_id, "plain").await?;
+        Ok(commit_id)
+    }
+
     pub(crate) async fn do_commit(
         &mut self,
         container_name: &str,
@@ -274,7 +379,7 @@ impl ServerContext {
         let config = self.config();
         let layers_dir = &config.layers_dir;
         let temp_file = format!("{layers_dir}/{commit_id}");
-
+        //
         let running_dataset = format!("{}/{}", config.container_dataset, container_id);
         let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
 
@@ -321,7 +426,7 @@ impl ServerContext {
             std::fs::rename(temp_file, format!("{}/{diff_id}", config.layers_dir))?;
             OciDigest::from_str(diff_id).unwrap()
         };
-
+        //
         chain_id.consume_diff_id(oci_util::digest::DigestAlgorithm::Sha256, &diff_id);
         let new_name = format!("{}/{chain_id}", config.image_dataset);
         zfs.rename(&dst_dataset, new_name)?;

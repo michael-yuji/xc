@@ -111,6 +111,10 @@ pub struct CreateArgs {
     /// Include this program's custom tar extension to the archive
     #[clap(long = "no-ext")]
     with_ext: bool,
+
+    /// write digest to stderr instead of stdin
+    #[clap(long = "write-to-stderr", action)]
+    write_to_stderr: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -266,7 +270,9 @@ pub fn do_create(args: CreateArgs) -> Result<(), std::io::Error> {
         let stdout = std::str::from_utf8(&out.stdout).unwrap();
 
         for line in stdout.lines() {
-            eprintln!("{line}");
+            if !args.write_to_stderr {
+                eprintln!("{line}");
+            }
             let mut columns = line.split('\t'); //.collect::<Vec<_>>();
             let flag = columns.next().expect("Expect flag");
             let path = columns
@@ -294,6 +300,7 @@ pub fn do_create(args: CreateArgs) -> Result<(), std::io::Error> {
             &adding,
             &removing,
             &mut output,
+            args.write_to_stderr,
         )
     } else {
         create_tar(
@@ -303,6 +310,7 @@ pub fn do_create(args: CreateArgs) -> Result<(), std::io::Error> {
             &args.paths,
             &args.remove,
             &mut output,
+            args.write_to_stderr,
         )
     }
 }
@@ -359,6 +367,7 @@ fn create_tar<W: Write>(
     paths: &[String],
     whiteouts: &[String],
     output: &mut W,
+    write_to_stderr: bool,
 ) -> Result<(), std::io::Error> {
     let paths_input = paths.join("\n");
 
@@ -381,7 +390,11 @@ fn create_tar<W: Write>(
 
     let digest = tar::tap_create_tar(without_oci, without_ext, whiteouts, tar_stdout, output)?;
 
-    println!("sha256:{}", hex(digest));
+    if !write_to_stderr {
+        println!("sha256:{}", hex(digest));
+    } else {
+        eprintln!("sha256:{}", hex(digest));
+    }
 
     match child.wait()?.code() {
         Some(code) if code != 0 => {

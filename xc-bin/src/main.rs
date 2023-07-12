@@ -93,6 +93,8 @@ enum Action {
         dns_searchs: Vec<String>,
         #[clap(long = "empty-dns", action)]
         empty_dns: bool,
+        #[clap(long = "output-inplace", action)]
+        output_inplace: bool,
         image_reference: ImageReference,
     },
     #[clap(subcommand)]
@@ -251,6 +253,7 @@ fn main() -> Result<(), ActionError> {
             dns_servers,
             dns_searchs,
             empty_dns,
+            output_inplace,
         } => {
             use crate::jailfile::directives::copy::*;
             use crate::jailfile::directives::from::*;
@@ -305,7 +308,7 @@ fn main() -> Result<(), ActionError> {
                 }
             }
 
-            let mut context = JailContext::new(conn, dns, net_req);
+            let mut context = JailContext::new(conn, dns, net_req, output_inplace);
 
             for action in actions.iter() {
                 if action.directive_name == "RUN" {
@@ -359,6 +362,7 @@ fn main() -> Result<(), ActionError> {
                 name,
                 tag,
                 container_name,
+                alt_out: Maybe::None,
             };
             let response = do_commit_container(&mut conn, req)?.unwrap();
             //            let response: CommitResponse = request(&mut conn, "commit", req)?;
