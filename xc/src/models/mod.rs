@@ -26,6 +26,8 @@ pub mod exec;
 pub mod jail_image;
 pub mod network;
 
+use crate::util::default_on_missing;
+
 use cmd_arg::CmdArg;
 use exec::ResolvedExec;
 use serde::{Deserialize, Serialize};
@@ -39,6 +41,8 @@ pub struct MountSpec {
     pub destination: String,
     pub volume_hints: HashMap<String, Value>,
     pub read_only: bool,
+    #[serde(default, deserialize_with = "default_on_missing")]
+    pub required: bool,
 }
 
 impl MountSpec {
@@ -48,6 +52,7 @@ impl MountSpec {
             destination: destination.to_string(),
             volume_hints: HashMap::new(),
             read_only: false,
+            required: false,
         }
     }
 }

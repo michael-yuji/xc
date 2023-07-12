@@ -21,6 +21,10 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+
+use crate::format::docker_compat::Expose;
+use crate::util::default_on_missing;
+
 use super::cmd_arg::CmdArg;
 use super::exec::Exec;
 use super::MountSpec;
@@ -45,16 +49,12 @@ pub struct JailConfig {
 
     pub original_oci_config: Option<OciConfig>,
 
-    /// If this jail require vnet to run
+    /// is vnet required
     #[serde(default)]
     pub vnet: bool,
 
-    /// The mappings between the alias and variable name, for example, a jail can expect an
-    /// interface myext0 to exists, and map the variable as $MY_EXT0
-    pub nics: Option<HashMap<Var, String>>,
-
     /// Required ports
-    pub ports: HashMap<u16, String>,
+    pub ports: HashMap<Expose, String>,
 
     pub devfs_rules: Vec<InterpolatedString>,
 
@@ -87,6 +87,9 @@ pub struct JailConfig {
 
     #[serde(default)]
     pub linux: bool,
+
+    #[serde(default, deserialize_with = "default_on_missing")]
+    pub labels: HashMap<String, String>,
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]
@@ -169,11 +172,30 @@ impl JailConfig {
             })
             .unwrap_or_else(HashMap::new);
 
+        let ports = config
+            .config
+            .as_ref()
+            .and_then(|config| config.exposed_ports.as_ref())
+            .map(|set| {
+                let mut ports = HashMap::new();
+                for port in set.0.iter() {
+                    if let Ok(expose) = port.parse::<Expose>() {
+                        ports.insert(expose, "".to_string());
+                    }
+                }
+                ports
+            })
+            .unwrap_or_default();
+
+        let labels = config
+            .config
+            .as_ref()
+            .and_then(|config| config.labels.clone())
+            .unwrap_or_default();
+
         let mut meta = JailConfig {
             secure_level: 0,
             vnet: false,
-            nics: None,
-            ports: HashMap::new(),
             devfs_rules: Vec::new(),
             allow: Vec::new(),
             sysv_msg: SystemVPropValue::New,
@@ -184,8 +206,10 @@ impl JailConfig {
             init: Vec::new(),
             deinit: Vec::new(),
             mounts,
-            linux: true,
+            linux: config.os != "FreeBSD",
             original_oci_config: Some(config.clone()),
+            ports,
+            labels,
             ..JailConfig::default()
         };
 
@@ -237,14 +261,10 @@ impl JailConfig {
 
         let layers = config.rootfs.diff_ids;
 
-        Some(meta.to_image(layers))
-    }
-}
+        let mut image = meta.to_image(layers);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Satis {
-    MissingCap(String),
-    MissingEnv(String, Option<String>),
-    PreconditionFailure(String),
-    Ok,
+        image.0.os = config.os;
+
+        Some(image)
+    }
 }

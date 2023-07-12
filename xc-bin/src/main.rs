@@ -34,6 +34,7 @@ use crate::channel::{use_channel_action, ChannelAction};
 use crate::error::ActionError;
 use crate::format::{BindMount, EnvPair, IpWant, PublishSpec};
 use crate::image::{use_image_action, ImageAction};
+use crate::jailfile::directives::volume::VolumeDirective;
 use crate::network::{use_network_action, NetworkAction};
 use crate::redirect::{use_rdr_action, RdrAction};
 
@@ -313,6 +314,9 @@ fn main() -> Result<(), ActionError> {
                     std::thread::sleep_ms(500);
                 } else if action.directive_name == "COPY" {
                     let directive = CopyDirective::from_action(action)?;
+                    directive.run_in_context(&mut context)?;
+                } else if action.directive_name == "VOLUME" {
+                    let directive = VolumeDirective::from_action(action)?;
                     directive.run_in_context(&mut context)?;
                 } else if ConfigMod::implemented_directives()
                     .contains(&action.directive_name.as_str())

@@ -46,6 +46,9 @@ pub(crate) enum ImageAction {
     Show {
         image_id: String,
     },
+    Describe {
+        image_id: ImageReference,
+    },
     GetConfig {
         image_id: String,
     },
@@ -83,6 +86,10 @@ pub(crate) enum PatchActions {
         name: Option<String>,
         /// mount point in the container
         mount_point: PathBuf,
+
+        #[clap(long = "required", action)]
+        required: bool,
+
         /// the image
         image_reference: ImageReference,
     },
@@ -164,6 +171,7 @@ pub(crate) fn use_image_action(
                 hints,
                 name,
                 mount_point,
+                required,
                 image_reference,
                 read_only,
             } => {
@@ -185,6 +193,7 @@ pub(crate) fn use_image_action(
                         read_only,
                         volume_hints,
                         destination,
+                        required,
                     };
                     config.mounts.insert(key, mountspec);
                 })?;
@@ -307,6 +316,47 @@ pub(crate) fn use_image_action(
                 Ok(res) => {
                     let json = serde_json::to_string_pretty(&res).unwrap();
                     println!("{json}");
+                }
+            }
+        }
+        ImageAction::Describe { image_id } => {
+            let image_name = image_id.name.to_string();
+            let tag = image_id.tag.to_string();
+            let reqt = DescribeImageRequest { image_name, tag };
+            let res = do_describe_image(conn, reqt)?;
+            match res {
+                Err(e) => eprintln!("{e:#?}"),
+                Ok(res) => {
+                    let image = &res.jail_image;
+                    let config = image.jail_config();
+                    println!("\n{image_id}");
+                    println!("    Envs:");
+                    for (key, value) in config.envs.iter() {
+                        println!("        {key}:");
+                        println!("            Required: {}", value.required);
+                        println!(
+                            "            Description: {}",
+                            value.description.clone().unwrap_or_default()
+                        );
+                    }
+                    println!("    Ports:");
+                    for (port, value) in config.ports.iter() {
+                        println!("        {port}: {value}");
+                    }
+                    println!("    Volumes:");
+                    for (name, spec) in config.mounts.iter() {
+                        println!("        {name}:");
+                        println!("            Mount Point: {}", spec.destination);
+                        println!("            Required: {}", spec.required);
+                        println!("            Read-Only: {}", spec.read_only);
+                        if !spec.volume_hints.is_empty() {
+                            println!("                  Hints:");
+                            for (key, value) in spec.volume_hints.iter() {
+                                let desc = serde_json::to_string(value).unwrap();
+                                println!("            {key}: {desc}");
+                            }
+                        }
+                    }
                 }
             }
         }

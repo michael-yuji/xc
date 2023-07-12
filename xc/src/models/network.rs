@@ -61,7 +61,7 @@ impl std::fmt::Display for IpAssign {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub enum PortNum {
     Single(u16),
     /// Represents a range of port number by a starting number and length
@@ -77,7 +77,7 @@ impl std::fmt::Display for PortNum {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub enum NetProto {
     Tcp,
     Udp,

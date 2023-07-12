@@ -168,6 +168,8 @@ pub struct OciInnerConfig {
     pub volumes: Option<Set<String>>,
     pub exposed_ports: Option<Set<String>>,
     pub user: Option<String>,
+    pub labels: Option<HashMap<String, String>>,
+    pub stop_signal: Option<String>,
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]

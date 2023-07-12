@@ -24,6 +24,7 @@
 use crate::models::network::{NetProto, PortNum};
 use pest::Parser;
 use pest_derive::Parser;
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
 #[derive(Parser)]
@@ -35,10 +36,59 @@ expose = { (portrange | portnum) ~ ("/" ~ net_proto)? }
 "#]
 struct RuleParser;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, std::hash::Hash)]
 pub struct Expose {
     pub port: PortNum,
     pub proto: Option<NetProto>,
+}
+
+impl Serialize for Expose {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+struct ExposeVisitor;
+
+impl<'de> Visitor<'de> for ExposeVisitor {
+    type Value = Expose;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("(PORT | PORTRANGE)(/ PROTO)?")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        value.parse().map_err(|e| E::custom("{e:?}"))
+    }
+}
+
+impl<'de> Deserialize<'de> for Expose {
+    fn deserialize<D>(deserializer: D) -> Result<Expose, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(ExposeVisitor)
+    }
+}
+
+impl std::fmt::Display for Expose {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.port {
+            PortNum::Single(n) => write!(f, "{n}")?,
+            PortNum::Range(s, n) => write!(f, "{s}-{n}")?,
+        };
+        match &self.proto {
+            Some(proto) => write!(f, "/{proto}")?,
+            None => {}
+        }
+        Ok(())
+    }
 }
 
 impl FromStr for Expose {

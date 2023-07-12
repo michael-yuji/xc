@@ -213,6 +213,13 @@ impl InstantiateBlueprint {
         for req in request.ipreq.iter() {
             match network_manager.allocate(vnet, req, id) {
                 Ok((alloc, router)) => {
+                    if !existing_ifaces.contains(&alloc.interface) {
+                        precondition_failure!(
+                            ENOENT,
+                            "missing network interface {}",
+                            &alloc.interface
+                        );
+                    }
                     if let Some(router) = router {
                         if default_router.is_none() {
                             default_router = Some(router);

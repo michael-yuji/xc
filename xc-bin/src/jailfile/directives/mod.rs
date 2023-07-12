@@ -24,13 +24,14 @@
 pub mod copy;
 pub mod from;
 pub mod run;
+pub mod volume;
 
 use super::JailContext;
 use crate::jailfile::parse::Action;
 
 use anyhow::Context;
 use xc::models::jail_image::{JailConfig, SpecialMount};
-use xc::models::SystemVPropValue;
+use xc::models::{MountSpec, SystemVPropValue};
 
 pub(crate) trait Directive: Sized {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error>;
@@ -48,7 +49,7 @@ pub(crate) enum ConfigMod {
     NoDeinit,
     Cmd,
     Expose,
-    Volume,
+    Volume(String, MountSpec),
     Mount(String, String),
     SysV(Vec<String>),
 }
@@ -99,6 +100,9 @@ impl ConfigMod {
                         _ => continue,
                     }
                 }
+            }
+            Self::Volume(name, mount_spec) => {
+                config.mounts.insert(name.clone(), mount_spec.clone());
             }
             _ => {}
         }

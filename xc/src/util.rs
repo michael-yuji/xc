@@ -21,11 +21,22 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use serde::{Deserialize, Deserializer};
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::os::fd::AsRawFd;
 use std::path::{Component, Path, PathBuf};
 use sysctl::{Ctl, Sysctl};
+
+pub fn default_on_missing<'de, D, T: Default + serde::Deserialize<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
 
 #[derive(Debug, Clone)]
 pub enum PathComp {
