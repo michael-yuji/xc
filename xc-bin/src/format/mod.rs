@@ -41,7 +41,7 @@ ip = { (ip4_ish | ip6_ish) }
 cidr = { ip ~ ("/" ~ ASCII_DIGIT{1, 3})? }
 publish_proto = { "udp" | "tcp" }
 publish_port =  { portrange | portnum }
-publish_without_proto = { 
+publish_without_proto = {
 	(ip ~ ("," ~ ip)* ~ ":" ~ (portrange | portnum) ~ ":" ~ portnum) |
     ((portrange | portnum) ~ ":" ~ portnum)
 }

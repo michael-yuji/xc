@@ -178,7 +178,7 @@ impl Container {
             let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
             for alloc in self.ip_alloc.iter() {
                 if !existing_ifaces.contains(&alloc.interface) {
-                    // such container does not exists
+                    // such interface does not exists
                     panic!()
                 } else {
                     for address in alloc.addresses.iter() {

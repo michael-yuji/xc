@@ -521,9 +521,7 @@ fn tap_foreach_entry<R: Read, H: TarEntryHandle>(
                     .file_name()
                     .and_then(|name| name.to_str())
                     .and_then(|name| name.strip_prefix(".wh."));
-                //                let filename = path.file_name().unwrap().to_str().unwrap();
 
-                //                if let Some(name) = filename.strip_prefix(".wh.") {
                 if let Some(name) = filename {
                     if name == ".wh..opq" {
                         let mut parent = match path.parent() {
