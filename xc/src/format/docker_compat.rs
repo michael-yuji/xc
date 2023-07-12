@@ -64,7 +64,7 @@ impl<'de> Visitor<'de> for ExposeVisitor {
     where
         E: serde::de::Error,
     {
-        value.parse().map_err(|e| E::custom("{e:?}"))
+        value.parse().map_err(|e| E::custom(format!("{e:?}")))
     }
 }
 

@@ -29,10 +29,12 @@ use super::cmd_arg::CmdArg;
 use super::exec::Exec;
 use super::MountSpec;
 use super::{EntryPoint, EnvSpec, SystemVPropValue};
+
+use anyhow::{anyhow, bail, Context, Error};
 use oci_util::digest::{sha256_once, DigestAlgorithm, OciDigest};
 use oci_util::layer::ChainId;
 use oci_util::models::{FreeOciConfig, OciConfig, OciConfigRootFs};
-use serde::{Deserialize, Serialize};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use varutil::string_interpolation::{InterpolatedString, Var};
 
@@ -42,8 +44,94 @@ pub struct SpecialMount {
     pub mount_type: String,
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Version {
+    major_version: u32,
+    minor_version: u32,
+    patch_version: u32,
+    tag: u32,
+}
+
+impl Version {
+    fn prehistorial() -> Version {
+        Version {
+            major_version: 0,
+            minor_version: 0,
+            patch_version: 0,
+            tag: 0,
+        }
+    }
+    fn is_prehistorial(&self) -> bool {
+        self == &Self::prehistorial()
+    }
+}
+
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}.{}.{}+{}",
+            self.major_version, self.minor_version, self.patch_version, self.tag
+        )
+    }
+}
+
+impl std::str::FromStr for Version {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Version, anyhow::Error> {
+        let (version, tag) = s.split_once('+').ok_or_else(|| anyhow!("invaild format"))?;
+        let (major, other) = version
+            .split_once('.')
+            .ok_or_else(|| anyhow!("invaild format"))?;
+        let (minor, patch) = other
+            .split_once('.')
+            .ok_or_else(|| anyhow!("invaild format"))?;
+        Ok(Version {
+            major_version: major.parse()?,
+            minor_version: minor.parse()?,
+            patch_version: patch.parse()?,
+            tag: tag.parse()?,
+        })
+    }
+}
+
+impl Serialize for Version {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+struct VersionVisitor;
+
+impl<'de> Visitor<'de> for VersionVisitor {
+    type Value = Version;
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("x.x.x+p")
+    }
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        value.parse().map_err(|e| E::custom(format!("{e:?}")))
+    }
+}
+
+impl<'de> Deserialize<'de> for Version {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(VersionVisitor)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct JailConfig {
+    #[serde(default)]
+    pub version: Version,
     /// The secure level this jail is required
     pub secure_level: i8,
 
