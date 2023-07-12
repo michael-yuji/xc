@@ -24,6 +24,7 @@
 
 use crate::auth::Credential;
 use crate::context::ServerContext;
+use crate::image::pull::PullImageError;
 use crate::image::push::{PushImageError, PushImageStatusDesc};
 use freebsd::event::EventFdNotify;
 use freebsd::libc::{EINVAL, EIO};
@@ -160,14 +161,23 @@ async fn pull_image(
     local_context: &mut ConnectionContext<Variables>,
     request: PullImageRequest,
 ) -> GenericResult<PullImageResponse> {
-    tokio::spawn(async move {
-        _ = context
-            .write()
-            .await
-            .pull_image(request.image_reference, request.rename_reference)
-            .await;
-    });
-    Ok(PullImageResponse { existed: false })
+    let result = context
+        .write()
+        .await
+        .pull_image(request.image_reference, request.rename_reference)
+        .await;
+
+    match result {
+        Err(PullImageError::NoConfig) => enoent("cannot find oci config from registry"),
+        Err(PullImageError::NoManifest) => enoent("cannot find usable manifest from registry"),
+        Err(PullImageError::RegistryNotFound) => enoent("requested registry not found"),
+        Err(PullImageError::ConfigConvertFail) => enoent("failure on config conversion"),
+        Err(PullImageError::ClientError(response)) => {
+            error!("pull image result in error response: {response:?}");
+            ipc_err(EINVAL, &format!("client error: {response:?}"))
+        }
+        Ok(_) => Ok(PullImageResponse { existed: false }),
+    }
 }
 
 #[derive(FromPacket)]

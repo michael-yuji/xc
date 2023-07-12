@@ -438,28 +438,45 @@ fn main() -> Result<(), ActionError> {
                 rename_reference: local_reference,
             };
             let res = do_pull_image(&mut conn, reqt)?;
+
             debug!("do_pull_image: {res:#?}");
-            let mut lines_count = 0;
-
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                if lines_count > 0 {
-                    eprint!("{}\x1B[0J", "\x1B[F".repeat(lines_count));
-                }
-
-                let reqt = DownloadStat {
-                    image_reference: image_id.clone(),
-                };
-
-                let res = do_download_stat(&mut conn, reqt)?.unwrap();
-                debug!("do_download_stat: {res:#?}");
-                match res.state {
-                    xc::tasks::ImportImageState::Done => {
-                        eprintln!("done");
-                        break;
+            match res {
+                Err(err) => {
+                    if let Some(msg) = err
+                        .value
+                        .as_object()
+                        .and_then(|map| map.get("error"))
+                        .and_then(|v| v.as_str())
+                    {
+                        error!("{msg}");
+                    } else {
+                        error!("{err:?}");
                     }
-                    _ => {
-                        lines_count = render_import_status(&res);
+                }
+                Ok(_) => {
+                    let mut lines_count = 0;
+
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        if lines_count > 0 {
+                            eprint!("{}\x1B[0J", "\x1B[F".repeat(lines_count));
+                        }
+
+                        let reqt = DownloadStat {
+                            image_reference: image_id.clone(),
+                        };
+
+                        let res = do_download_stat(&mut conn, reqt)?.unwrap();
+                        debug!("do_download_stat: {res:#?}");
+                        match res.state {
+                            xc::tasks::ImportImageState::Done => {
+                                eprintln!("done");
+                                break;
+                            }
+                            _ => {
+                                lines_count = render_import_status(&res);
+                            }
+                        }
                     }
                 }
             }

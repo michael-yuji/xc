@@ -27,6 +27,7 @@ use crate::auth::Credential;
 use crate::config_manager::ConfigManager;
 use crate::context::instantiate::InstantiateBlueprint;
 use crate::devfs_store::DevfsRulesetStore;
+use crate::image::pull::PullImageError;
 use crate::image::ImageManager;
 use crate::ipc::InstantiateRequest;
 use crate::network_manager::NetworkManager;
@@ -467,7 +468,7 @@ impl ServerContext {
         &mut self,
         reference: ImageReference,
         rename_reference: Option<ImageReference>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), PullImageError> {
         // XXX: handle pull image error
         let result =
             crate::image::pull::pull_image(self.image_manager.clone(), reference, rename_reference)
@@ -475,6 +476,6 @@ impl ServerContext {
         if result.is_err() {
             error!("result: {result:#?}");
         }
-        Ok(())
+        result.map(|_| ())
     }
 }
