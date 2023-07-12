@@ -733,13 +733,13 @@ async fn commit_container(
             .await
             .map(|a| a.to_string())
     } else {
-        ctx.do_commit2(&request.container_name, &request.name, &request.tag)
+        ctx.do_commit(&request.container_name, &request.name, &request.tag)
             .await
     };
     match result {
         Ok(commit_id) => {
             let response = CommitResponse {
-                commit_id: commit_id.to_string(),
+                commit_id,
             };
             Ok(response)
         }

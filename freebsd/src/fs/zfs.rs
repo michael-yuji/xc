@@ -268,6 +268,10 @@ impl ZfsHandle {
         })
     }
 
+    /// # Paramaters
+    /// * dataset
+    /// * resursive
+    /// * remove_dependents
     pub fn destroy(
         &self,
         dataset: impl AsRef<Path>,

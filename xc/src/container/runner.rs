@@ -670,10 +670,12 @@ impl ProcessRunner {
         });
 
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
-        _ = jail.kill().context("cannot kill jail").map_err(|e| {
+        let kill  = jail.kill().context("cannot kill jail").map_err(|e| {
             error!("cannot kill jail: {e}");
             e
         });
+
+        info!("jail kill: {kill:#?}");
         // allow 5 seconds for the jail to be killed
         //            std::thread::sleep(std::time::Duration::from_secs(5));
         self.container.notify.notify_waiters();
