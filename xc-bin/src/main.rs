@@ -48,6 +48,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use term_table::homogeneous::{TableLayout, TableSource, Title};
 use term_table::{ColumnLayout, Pos};
 use tracing::{debug, error};
@@ -188,6 +189,8 @@ enum Action {
         ips: Vec<IpWant>,
         #[clap(long = "copy", multiple_occurrences = true)]
         copy: Vec<BindMount>,
+        #[clap(long = "extra-layer", multiple_occurrences = true)]
+        extra_layers: Vec<PathBuf>,
     },
     RunMain {
         #[clap(long = "detach", short = 'd', action)]
@@ -583,6 +586,7 @@ fn main() -> Result<(), ActionError> {
             mut detach,
             entry_point,
             entry_point_args,
+            extra_layers,
             no_clean,
             persist,
             networks,
@@ -664,6 +668,15 @@ fn main() -> Result<(), ActionError> {
                     Maybe::Some(Fd(fd))
                 };
 
+                let mut extra_layer_files = Vec::new();
+
+                for layer in extra_layers.iter() {
+                    extra_layer_files.push(std::fs::OpenOptions::new().read(true).open(layer)?);
+                }
+
+                let extra_layers =
+                    List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
+
                 let mut reqt = InstantiateRequest {
                     alt_root: None,
                     name,
@@ -675,6 +688,7 @@ fn main() -> Result<(), ActionError> {
                     mount_req,
                     entry_point: entry_point.unwrap_or_else(|| "main".to_string()),
                     entry_point_args,
+                    extra_layers,
                     no_clean,
                     main_norun: false,
                     init_norun: false,

@@ -88,6 +88,7 @@ impl Directive for FromDirective {
             envs: HashMap::new(),
             vnet: false,
             mount_req: Vec::new(),
+            extra_layers: List::new(),
             ipreq: context.network.clone(),
         };
         eprintln!("before instantiate");

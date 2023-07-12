@@ -33,7 +33,7 @@ use freebsd::libc::{EINVAL, EIO, ENOENT, ENOTDIR, EPERM};
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use xc::container::request::{CopyFileReq, Mount, NetworkAllocRequest};
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
@@ -51,6 +51,7 @@ pub struct InstantiateBlueprint {
     pub main_norun: bool,
     pub init_norun: bool,
     pub deinit_norun: bool,
+    pub extra_layers: Vec<RawFd>,
     pub persist: bool,
     pub no_clean: bool,
     pub dns: DnsSetting,
@@ -277,6 +278,13 @@ impl InstantiateBlueprint {
 
         let devfs_ruleset_id = devfs_store.get_ruleset_id(&devfs_rules);
 
+        let extra_layers = request
+            .extra_layers
+            .to_vec()
+            .into_iter()
+            .map(|fd| fd.as_raw_fd())
+            .collect::<Vec<_>>();
+
         Ok(InstantiateBlueprint {
             name,
             hostname,
@@ -294,6 +302,7 @@ impl InstantiateBlueprint {
                 .into_iter()
                 .map(|s| s.resolve_args(&request.envs).jexec())
                 .collect(),
+            extra_layers,
             main: Some(main),
             ips: request.ips,
             ipreq: request.ipreq,

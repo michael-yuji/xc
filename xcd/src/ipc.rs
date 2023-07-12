@@ -207,6 +207,8 @@ pub struct InstantiateRequest {
     pub name: Option<String>,
     pub dns: DnsSetting,
 
+    pub extra_layers: List<Fd>,
+
     pub main_started_notify: Maybe<Fd>,
 }
 

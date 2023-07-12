@@ -29,11 +29,11 @@ use ipc::packet::Packet;
 use ipc::proto::Request;
 use ipc::transport::PacketTransport;
 use std::ffi::OsString;
-use std::os::fd::RawFd;
+use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
-use tracing::info;
+use tracing::{error, info};
 use xc::config::XcConfig;
 use xc::container::effect::UndoStack;
 use xc::container::{Container, ContainerManifest};
@@ -179,9 +179,30 @@ impl Site {
         guard!(self, {
             let (sock_a, sock_b) = UnixStream::pair().unwrap();
             self.control_stream = Some(sock_a);
+
             if let SiteState::RootFsOnly = self.state {
                 let root = self.root.clone().unwrap().to_string_lossy().to_string();
                 let zfs_origin = self.zfs_origin.clone();
+
+                for (i, layer_fd) in blueprint.extra_layers.iter().enumerate() {
+                    let file = unsafe { std::fs::File::from_raw_fd(*layer_fd) };
+                    let exit_status = std::process::Command::new("ocitar")
+                        .arg("-xf-")
+                        .arg("-C")
+                        .arg(&root)
+                        .stdin(file)
+                        .status()
+                        .with_context(|| format!("extracting extra layers at offset {i}"))?;
+                    if !exit_status.success() {
+                        error!(
+                            "ocitar exit with {exit_status} while extract the extra layers at {i}"
+                        );
+                        bail!(
+                            "ocitar exit with unsuccessful exit code {exit_status} at offset {i}"
+                        );
+                    }
+                }
+
                 let container = Container {
                     name: blueprint.name,
                     hostname: blueprint.hostname,
