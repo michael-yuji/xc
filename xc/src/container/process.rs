@@ -117,8 +117,8 @@ pub(super) fn spawn_process_forward(
                 freebsd::libc::dup2(fd, 1);
             }
             if let Some(fd) = stderr {
-                freebsd::libc::close(1);
-                freebsd::libc::dup2(fd, 1);
+                freebsd::libc::close(2);
+                freebsd::libc::dup2(fd, 2);
             }
             Ok(())
         });
