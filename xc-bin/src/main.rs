@@ -51,7 +51,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use term_table::homogeneous::{TableLayout, TableSource, Title};
 use term_table::{ColumnLayout, Pos};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use xc::container::request::{MountReq, NetworkAllocRequest};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::DnsSetting;
@@ -611,6 +611,8 @@ fn main() -> Result<(), ActionError> {
                 panic!("detach and link flags are mutually exclusive");
             }
 
+            let entry_point = entry_point.unwrap_or_else(|| "main".to_string());
+
             let (res, notify) = {
                 let envs = {
                     let mut map = std::collections::HashMap::new();
@@ -690,7 +692,7 @@ fn main() -> Result<(), ActionError> {
                     vnet,
                     ipreq: networks,
                     mount_req,
-                    entry_point: entry_point.unwrap_or_else(|| "main".to_string()),
+                    entry_point: entry_point.to_string(),
                     entry_point_args,
                     extra_layers,
                     no_clean,
@@ -731,11 +733,43 @@ fn main() -> Result<(), ActionError> {
                     }
                     //                    std::thread::sleep(std::time::Duration::from_millis(100));
                     let id = res.id;
+
+                    if let Ok(container) =
+                        do_show_container(&mut conn, ShowContainerRequest { id })?
+                    {
+                        let spawn_info = container
+                            .running_container
+                            .processes
+                            .get(&entry_point)
+                            .as_ref()
+                            .and_then(|proc| proc.spawn_info.as_ref())
+                            .expect("process not started yet or not found");
+                        if let Some(socket) = &spawn_info.terminal_socket {
+                            _ = attach::run(socket);
+                        } else {
+                            info!("main process is not running with tty");
+                        }
+                        /*
+                        if let Some(main_proc) = container.running_container.processes.get(&entry_point) {
+                            if let Some(spawn_info) = main_proc.spawn_info {
+                                if let Some(socket) = spawn_info.terminal_socket {
+                                }
+                            } else {
+                                panic!("main process has not started yet");
+                            }
+                        }
+                        */
+                    } else {
+                        panic!("cannot find container");
+                    }
+
+                    /*
                     let path = format!("/var/run/xc.{id}.main");
                     let path = std::path::Path::new(&path);
                     if path.exists() {
                         _ = attach::run(path);
                     }
+                    */
                 }
             } else {
                 eprintln!("{res:#?}");
@@ -926,10 +960,10 @@ networks:"
         println!("    {label}:");
         println!(
             "         pid: {}",
-            if process.pid.is_none() {
+            if process.pid().is_none() {
                 "none".to_string()
             } else {
-                process.pid.unwrap().to_string()
+                process.pid().unwrap().to_string()
             }
         );
         println!("        arg0: {arg0}");

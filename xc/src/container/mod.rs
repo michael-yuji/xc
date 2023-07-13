@@ -36,6 +36,7 @@ use crate::models::jail_image::JailImage;
 use crate::models::network::{DnsSetting, IpAssign};
 use crate::util::realpath;
 
+use anyhow::Context;
 use effect::UndoStack;
 use freebsd::event::EventFdNotify;
 use freebsd::net::ifconfig::IFCONFIG_CMD;
@@ -91,11 +92,20 @@ impl Container {
         let root = &self.root;
         let anchor = format!("xc/{}", self.id);
 
-        undo.pf_create_anchor(anchor)?;
+        undo.pf_create_anchor(anchor)
+            .with_context(|| format!("failed to create pf anchor for container {}", self.id))?;
+
+        let resolv_conf_path = realpath(root, "/etc/resolv.conf")
+            .with_context(|| format!("failed finding /etc/resolv.conf in jail {}", self.id))?;
 
         match &self.dns {
             DnsSetting::Inherit => {
-                std::fs::copy("/etc/resolv.conf", format!("{root}/etc/resolv.conf"))?;
+                std::fs::copy("/etc/resolv.conf", resolv_conf_path).with_context(|| {
+                    format!(
+                        "failed copying resolv.conf to destination container: {}",
+                        self.id
+                    )
+                })?;
             }
             DnsSetting::Specified {
                 servers,
@@ -135,7 +145,7 @@ impl Container {
         }
 
         for mreq in self.mount_req.iter() {
-            let dest = realpath(root, &mreq.dest, 64)?.unwrap();
+            let dest = realpath(root, &mreq.dest)?;
             undo.mount(
                 mreq.fs.to_string(),
                 Vec::new(),
@@ -145,11 +155,10 @@ impl Container {
         }
 
         for copy in self.copies.iter() {
-            let dest = realpath(root, &copy.destination, 64)?.unwrap();
+            let dest = realpath(root, &copy.destination)?;
             let in_fd = copy.source;
             let file = unsafe { std::fs::File::from_raw_fd(copy.source) };
             let metadata = file.metadata().unwrap();
-            eprintln!("metadata: {metadata:#?}");
 
             let sink = std::fs::OpenOptions::new()
                 .write(true)
@@ -182,7 +191,10 @@ impl Container {
                     panic!()
                 } else {
                     for address in alloc.addresses.iter() {
-                        undo.iface_create_alias(alloc.interface.to_string(), address.clone())?;
+                        undo.iface_create_alias(alloc.interface.to_string(), address.clone())
+                            .with_context(|| {
+                                format!("failed during interface creation, container: {}", self.id)
+                            })?;
                         proto = proto.ip(address.addr());
                     }
                 }
@@ -191,10 +203,19 @@ impl Container {
             proto = proto.param("vnet", Value::Int(1));
             for alloc in self.ip_alloc.iter() {
                 if let Some(_network) = &alloc.network {
-                    let (epair_a, epair_b) = undo.create_epair()?;
-                    undo.iface_up(epair_a.to_owned())?;
-                    undo.iface_up(epair_b.to_owned())?;
-                    undo.bridge_add_iface(alloc.interface.to_string(), epair_a)?;
+                    let (epair_a, epair_b) = undo.create_epair().with_context(|| {
+                        format!("failed during epair creation, container: {}", self.id)
+                    })?;
+                    undo.iface_up(epair_a.to_owned()).with_context(|| {
+                        format!("failed to bring up epair_a, container: {}", self.id)
+                    })?;
+                    undo.iface_up(epair_b.to_owned()).with_context(|| {
+                        format!("failed to bring up epair_a, container: {}", self.id)
+                    })?;
+                    undo.bridge_add_iface(alloc.interface.to_string(), epair_a)
+                        .with_context(|| {
+                            format!("failed adding epair_a to bridge, container: {}", self.id)
+                        })?;
 
                     match ifaces_to_move.get_mut(&alloc.interface) {
                         None => {

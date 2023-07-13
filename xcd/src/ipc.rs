@@ -738,9 +738,7 @@ async fn commit_container(
     };
     match result {
         Ok(commit_id) => {
-            let response = CommitResponse {
-                commit_id,
-            };
+            let response = CommitResponse { commit_id };
             Ok(response)
         }
         Err(err) => {
@@ -873,7 +871,7 @@ async fn exec(
             stderr: request.stderr.to_option().map(|fd| fd.0),
         },
         notify: request.notify.to_option().map(|fd| fd.0),
-        work_dir: None
+        work_dir: None,
     };
     if let Some(arc_site) = context.write().await.get_site(&request.name) {
         let mut site = arc_site.write().await;

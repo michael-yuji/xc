@@ -157,7 +157,7 @@ pub struct EntryPoint {
     pub default_args: Vec<InterpolatedString>,
     pub required_envs: Vec<Var>,
     pub environ: HashMap<Var, InterpolatedString>,
-    pub work_dir: Option<String>
+    pub work_dir: Option<String>,
 }
 
 impl EntryPoint {

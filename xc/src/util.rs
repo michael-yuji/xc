@@ -84,8 +84,35 @@ impl<'a> From<Component<'a>> for PathComp {
         }
     }
 }
+/// Given an absolute path, and another path as its root directory, resolve the final path that
+/// in absolute in the host's system.
+///
+/// This function also resolve symlinks up to the specified amount of times
+///
+/// # Parameters
+/// * root: The alternate root location
+/// * path: Path in that root location
+/// * max_redirect: maximum number of redirection for symlink resolution
+pub fn realpath(root: impl AsRef<Path>, path: impl AsRef<Path>) -> Result<PathBuf, std::io::Error> {
+    _realpath(root, path, 256).and_then(|path| {
+        path.ok_or(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "invalid path",
+        ))
+    })
+}
 
-pub fn realpath(
+/// Given an absolute path, and another path as its root directory, resolve the final path that
+/// in absolute in the host's system.
+///
+/// This function also resolve symlinks up to the specified amount of times
+///
+/// # Parameters
+/// * root: The alternate root location
+/// * path: Path in that root location
+/// * max_redirect: maximum number of redirection for symlink resolution
+#[inline(always)]
+fn _realpath(
     root: impl AsRef<Path>,
     path: impl AsRef<Path>,
     max_redirect: usize,

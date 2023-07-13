@@ -96,21 +96,6 @@ enum Readiness<T> {
     Ready(T),
 }
 
-impl<T> Readiness<T> {
-    fn map_can_fail<F, A, E>(self, transform: F) -> Result<Readiness<A>, E>
-    where
-        F: FnOnce(T) -> Result<A, E>,
-    {
-        match self {
-            Readiness::Pending => Ok(Readiness::Pending),
-            Readiness::Ready(value) => {
-                let x = transform(value)?;
-                Ok(Readiness::Ready(x))
-            }
-        }
-    }
-}
-
 // XXX: naively pretend writes always successful
 #[derive(Debug)]
 pub struct ControlStream {
@@ -240,9 +225,7 @@ impl SyncProcesses {
     fn activate(&mut self) {
         self.activated = true;
     }
-    fn deactivate(&mut self) {
-        self.activated = false;
-    }
+
     fn is_empty(&self) -> bool {
         self.execs.is_empty()
     }
@@ -354,7 +337,7 @@ impl ProcessRunner {
         id: &str,
         exec: &Jexec,
         notify: Option<Arc<EventFdNotify>>,
-    ) -> Result<u32, ExecError> {
+    ) -> Result<SpawnInfo, ExecError> {
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
         let paths = exec
             .envs
@@ -385,7 +368,7 @@ impl ProcessRunner {
             cmd.jwork_dir(work_dir);
         }
 
-        let pid = match &exec.output_mode {
+        let spawn_info = match &exec.output_mode {
             StdioMode::Terminal => {
                 let socket_path = format!("/var/run/xc.{}.{}", self.container.id, id);
                 let log_path = format!("/var/log/xc.{}.{}.log", self.container.id, id);
@@ -404,8 +387,10 @@ impl ProcessRunner {
             } => spawn_process_forward(&mut cmd, *stdin, *stdout, *stderr)?,
         };
 
+        let pid = spawn_info.pid;
+
         tx.send_if_modified(|status| {
-            status.set_started(pid);
+            status.set_started(spawn_info.clone());
             true
         });
 
@@ -423,7 +408,7 @@ impl ProcessRunner {
         let event = KEvent::from_trace_pid(pid, FilterFlag::NOTE_EXIT);
         _ = kevent_ts(self.kq, &[event], &mut [], None);
 
-        Ok(pid)
+        Ok(spawn_info)
     }
 
     pub fn pid_ancestor(&self, pid: u32) -> u32 {
@@ -585,10 +570,8 @@ impl ProcessRunner {
 
         if inits.is_empty() && !self.container.main_norun {
             self.run_main();
-        } else {
-            if let Some((id, jexec)) = inits.pop_front() {
-                _ = self.spawn_process(&id, &jexec, None);
-            }
+        } else if let Some((id, jexec)) = inits.pop_front() {
+            _ = self.spawn_process(&id, &jexec, None);
         }
 
         'kq: loop {
@@ -676,7 +659,7 @@ impl ProcessRunner {
         });
 
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
-        let kill  = jail.kill().context("cannot kill jail").map_err(|e| {
+        let kill = jail.kill().context("cannot kill jail").map_err(|e| {
             error!("cannot kill jail: {e}");
             e
         });

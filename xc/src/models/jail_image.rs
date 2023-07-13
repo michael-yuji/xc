@@ -343,7 +343,7 @@ impl JailConfig {
                     default_args,
                     environ,
                     required_envs: Vec::new(),
-                    work_dir
+                    work_dir,
                 };
                 meta.entry_points.insert("main".to_string(), entry_point);
             }

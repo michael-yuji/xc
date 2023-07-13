@@ -37,7 +37,7 @@ use nix::fcntl::{open, OFlag};
 use nix::libc::{ioctl, TIOCNOTTY, TIOCSCTTY};
 use nix::pty::OpenptyResult;
 use nix::sys::stat::Mode;
-use nix::unistd::{close, dup2, setsid, setuid, chdir};
+use nix::unistd::{chdir, close, dup2, setsid, setuid};
 use serde::Deserialize;
 use std::os::raw::{c_int, c_uint};
 use std::os::unix::process::CommandExt;

@@ -166,7 +166,7 @@ impl Site {
             0 as freebsd::libc::intptr_t,
             0 as freebsd::libc::intptr_t,
         );
-        info!(id=self.id, "killing container");
+        info!(id = self.id, "killing container");
         _ = kevent_ts(self.ctl_channel.unwrap(), &[event], &mut [], None);
         Ok(())
     }

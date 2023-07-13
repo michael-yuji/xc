@@ -278,7 +278,7 @@ impl ServerContext {
         let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
         let zfs_origin = container.zfs_origin.expect("missing zfs origin");
         let zfs = ZfsHandle::default();
-            zfs.snapshot2(&running_dataset, &commit_id).unwrap();
+        zfs.snapshot2(&running_dataset, &commit_id).unwrap();
 
         debug!("taking zfs snapshot for {dst_dataset}@xc");
         let child = std::process::Command::new("ocitar")
@@ -298,7 +298,6 @@ impl ServerContext {
 
         let diff_id = std::str::from_utf8(&output.stderr).unwrap().trim();
         Ok(OciDigest::from_str(diff_id)?)
-
     }
 
     pub(crate) async fn do_commit(

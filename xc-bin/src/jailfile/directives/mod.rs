@@ -33,7 +33,7 @@ use anyhow::Context;
 use std::collections::HashMap;
 use varutil::string_interpolation::InterpolatedString;
 use xc::models::jail_image::{JailConfig, SpecialMount};
-use xc::models::{MountSpec, SystemVPropValue, EntryPoint};
+use xc::models::{EntryPoint, MountSpec, SystemVPropValue};
 
 pub(crate) trait Directive: Sized {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error>;
@@ -119,8 +119,10 @@ impl ConfigMod {
                             environ: HashMap::new(),
                             work_dir: Some(work_dir),
                         };
-                        config.entry_points.insert(entry_point.to_string(), entrypoint);
-                    },
+                        config
+                            .entry_points
+                            .insert(entry_point.to_string(), entrypoint);
+                    }
                     Some(entry_point) => {
                         eprintln!("setting work dir");
                         entry_point.work_dir = Some(work_dir);
@@ -140,18 +142,23 @@ impl ConfigMod {
                             environ: HashMap::new(),
                             work_dir: None,
                         };
-                        config.entry_points.insert(entry_point.to_string(), entrypoint);
-                    },
+                        config
+                            .entry_points
+                            .insert(entry_point.to_string(), entrypoint);
+                    }
                     Some(entry_point) => {
                         entry_point.exec = exec;
                     }
                 }
             }
             Self::Cmd(entry_point, args) => {
-                let default_args = args.iter().map(|arg| {
-                    InterpolatedString::new(arg.as_str())
-                        .expect("cannot parse interpolate string")
-                }).collect();
+                let default_args = args
+                    .iter()
+                    .map(|arg| {
+                        InterpolatedString::new(arg.as_str())
+                            .expect("cannot parse interpolate string")
+                    })
+                    .collect();
 
                 match config.entry_points.get_mut(entry_point) {
                     None => {
@@ -163,8 +170,10 @@ impl ConfigMod {
                             environ: HashMap::new(),
                             work_dir: None,
                         };
-                        config.entry_points.insert(entry_point.to_string(), entrypoint);
-                    },
+                        config
+                            .entry_points
+                            .insert(entry_point.to_string(), entrypoint);
+                    }
                     Some(entry_point) => {
                         entry_point.default_args = default_args;
                     }
@@ -175,7 +184,16 @@ impl ConfigMod {
     }
 
     pub(crate) fn implemented_directives() -> &'static [&'static str] {
-        &["ALLOW", "NOINIT", "NODEINIT", "SYSVIPC", "MOUNT", "WORKDIR", "ENTRYPOINT", "CMD"]
+        &[
+            "ALLOW",
+            "NOINIT",
+            "NODEINIT",
+            "SYSVIPC",
+            "MOUNT",
+            "WORKDIR",
+            "ENTRYPOINT",
+            "CMD",
+        ]
     }
 }
 
@@ -183,29 +201,41 @@ impl Directive for ConfigMod {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error> {
         match action.directive_name.as_str() {
             "WORKDIR" => {
-                let entry_point = action.directive_args.get("entry_point")
+                let entry_point = action
+                    .directive_args
+                    .get("entry_point")
                     .map(|s| s.as_str())
                     .unwrap_or_else(|| "main")
                     .to_string();
-                let arg0 = action.args.get(0).context("entry point requires one variable")?;
+                let arg0 = action
+                    .args
+                    .get(0)
+                    .context("entry point requires one variable")?;
                 Ok(ConfigMod::WorkDir(entry_point, arg0.to_string()))
-            },
+            }
             "ENTRYPOINT" => {
-                let entry_point = action.directive_args.get("entry_point")
+                let entry_point = action
+                    .directive_args
+                    .get("entry_point")
                     .map(|s| s.as_str())
                     .unwrap_or_else(|| "main")
                     .to_string();
-                let arg0 = action.args.get(0).context("entry point requires one variable")?;
+                let arg0 = action
+                    .args
+                    .get(0)
+                    .context("entry point requires one variable")?;
                 Ok(ConfigMod::EntryPoint(entry_point, arg0.to_string()))
-            },
+            }
             "CMD" => {
-                let entry_point = action.directive_args.get("entry_point")
+                let entry_point = action
+                    .directive_args
+                    .get("entry_point")
                     .map(|s| s.as_str())
                     .unwrap_or_else(|| "main")
                     .to_string();
                 let args = action.args.clone();
                 Ok(ConfigMod::Cmd(entry_point, args))
-            },
+            }
             "ALLOW" => match action.directive_args.get("replace") {
                 Some(value) if value.as_str() == "true" => {
                     Ok(ConfigMod::ReplaceAllow(action.args.clone()))

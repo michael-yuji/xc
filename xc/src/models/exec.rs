@@ -77,7 +77,7 @@ impl ResolvedExec {
                 stderr: None,
             },
             notify: None,
-            work_dir: None
+            work_dir: None,
         }
     }
 }

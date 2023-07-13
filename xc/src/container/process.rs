@@ -39,7 +39,7 @@ pub struct ProcessStat {
     pub tree_exited: Option<u64>,
     pub exec: Jexec,
     pub exit_code: Option<i32>,
-    pub pid: Option<u32>,
+    pub spawn_info: Option<SpawnInfo>,
     pub description: Option<String>,
 }
 
@@ -49,10 +49,10 @@ impl ProcessStat {
             started: None,
             exited: None,
             exit_code: None,
-            pid: None,
             exec,
             description: None,
             tree_exited: None,
+            spawn_info: None,
         }
     }
 
@@ -61,19 +61,23 @@ impl ProcessStat {
             started: None,
             exited: None,
             exit_code: None,
-            pid: None,
             exec,
             tree_exited: None,
             description: Some(desc.as_ref().to_string()),
+            spawn_info: None,
         }
     }
 
-    pub fn set_started(&mut self, pid: u32) {
+    pub fn pid(&self) -> Option<u32> {
+        self.spawn_info.as_ref().map(|info| info.pid)
+    }
+
+    pub fn set_started(&mut self, spawn_info: SpawnInfo) {
         let time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap();
         self.started = Some(time.as_secs());
-        self.pid = Some(pid);
+        self.spawn_info = Some(spawn_info);
     }
 
     pub fn set_exited(&mut self, exit_code: i32) {
@@ -100,12 +104,20 @@ impl ProcessStat {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpawnInfo {
+    pub pid: u32,
+    pub stdout_log_file: Option<String>,
+    pub stderr_log_file: Option<String>,
+    pub terminal_socket: Option<String>,
+}
+
 pub(super) fn spawn_process_forward(
     cmd: &mut std::process::Command,
     stdin: Option<RawFd>,
     stdout: Option<RawFd>,
     stderr: Option<RawFd>,
-) -> Result<u32, ExecError> {
+) -> Result<SpawnInfo, ExecError> {
     unsafe {
         cmd.pre_exec(move || {
             if let Some(fd) = stdin {
@@ -125,14 +137,19 @@ pub(super) fn spawn_process_forward(
     }
     let child = cmd.spawn().map_err(ExecError::CannotSpawn)?;
     let pid = child.id();
-    Ok(pid)
+    Ok(SpawnInfo {
+        pid,
+        stdout_log_file: None,
+        stderr_log_file: None,
+        terminal_socket: None,
+    })
 }
 
 pub(super) fn spawn_process_pty(
     cmd: std::process::Command,
     log_path: &str,
     socket_path: &str,
-) -> Result<u32, ExecError> {
+) -> Result<SpawnInfo, ExecError> {
     let file = File::options()
         .create(true)
         .write(true)
@@ -147,15 +164,19 @@ pub(super) fn spawn_process_pty(
         _ = forwarder.spawn();
         unsafe { nix::libc::waitpid(pid as i32, std::ptr::null_mut(), 0) };
     });
-
-    Ok(pid)
+    Ok(SpawnInfo {
+        pid,
+        stdout_log_file: Some(log_path.to_string()),
+        stderr_log_file: Some(log_path.to_string()),
+        terminal_socket: Some(socket_path.to_string()),
+    })
 }
 
 pub(super) fn spawn_process_files(
     cmd: &mut std::process::Command,
     stdout: &Option<impl AsRef<Path>>,
     stderr: &Option<impl AsRef<Path>>,
-) -> Result<u32, ExecError> {
+) -> Result<SpawnInfo, ExecError> {
     if let Some(path) = stdout {
         let file = File::options()
             .create(true)
@@ -180,5 +201,14 @@ pub(super) fn spawn_process_files(
 
     let child = cmd.spawn().map_err(ExecError::CannotSpawn)?;
     let pid = child.id();
-    Ok(pid)
+    Ok(SpawnInfo {
+        pid,
+        stdout_log_file: stdout
+            .as_ref()
+            .map(|p| p.as_ref().to_string_lossy().to_string()),
+        stderr_log_file: stderr
+            .as_ref()
+            .map(|p| p.as_ref().to_string_lossy().to_string()),
+        terminal_socket: None,
+    })
 }
