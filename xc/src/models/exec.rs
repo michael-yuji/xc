@@ -55,6 +55,7 @@ pub struct Jexec {
     pub uid: u32,
     pub output_mode: StdioMode,
     pub notify: Option<RawFd>,
+    pub work_dir: Option<String>,
 }
 
 pub struct ResolvedExec {
@@ -76,6 +77,7 @@ impl ResolvedExec {
                 stderr: None,
             },
             notify: None,
+            work_dir: None
         }
     }
 }

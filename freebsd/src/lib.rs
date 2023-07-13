@@ -37,10 +37,11 @@ use nix::fcntl::{open, OFlag};
 use nix::libc::{ioctl, TIOCNOTTY, TIOCSCTTY};
 use nix::pty::OpenptyResult;
 use nix::sys::stat::Mode;
-use nix::unistd::{close, dup2, setsid, setuid};
+use nix::unistd::{close, dup2, setsid, setuid, chdir};
 use serde::Deserialize;
 use std::os::raw::{c_int, c_uint};
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::Command;
 
 #[macro_export]
@@ -118,6 +119,8 @@ pub trait FreeBSDCommandExt {
     /// Detach the child process from controlling terminal, attach to the replica side of the pty
     /// and use it as controlling terminal
     fn pty(&mut self, pty: &OpenptyResult) -> &mut Command;
+
+    fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut Command;
 }
 
 #[cfg(feature = "tokio")]
@@ -131,6 +134,8 @@ pub trait FreeBSDTokioCommandExt {
     fn pty(&mut self, pty: &OpenptyResult) -> &mut tokio::process::Command;
 
     fn jail(&mut self, jail: &jail::RunningJail) -> &mut tokio::process::Command;
+
+    fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut tokio::process::Command;
 }
 
 #[cfg(feature = "tokio")]
@@ -139,6 +144,17 @@ impl FreeBSDTokioCommandExt for tokio::process::Command {
         unsafe {
             self.pre_exec(move || {
                 setuid(nix::unistd::Uid::from_raw(uid))?;
+                Ok(())
+            });
+        }
+        self
+    }
+
+    fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut tokio::process::Command {
+        let os_str = wd.as_ref().to_path_buf().as_os_str().to_os_string();
+        unsafe {
+            self.pre_exec(move || {
+                chdir(os_str.as_os_str())?;
                 Ok(())
             });
         }
@@ -183,6 +199,17 @@ impl FreeBSDCommandExt for std::process::Command {
         unsafe {
             self.pre_exec(move || {
                 setuid(nix::unistd::Uid::from_raw(uid))?;
+                Ok(())
+            });
+        }
+        self
+    }
+
+    fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut Command {
+        let os_str = wd.as_ref().to_path_buf().as_os_str().to_os_string();
+        unsafe {
+            self.pre_exec(move || {
+                chdir(os_str.as_os_str())?;
                 Ok(())
             });
         }

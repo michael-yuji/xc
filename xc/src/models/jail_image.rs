@@ -304,6 +304,7 @@ impl JailConfig {
         if let Some(config) = &config.config {
             let entrypoint = config.entrypoint.clone().unwrap_or_default();
             let cmd = config.cmd.clone().unwrap_or_default();
+            let work_dir = config.working_dir.clone();
 
             if !entrypoint.is_empty() || !cmd.is_empty() {
                 let (exec, args, default_args) = if entrypoint.is_empty() {
@@ -342,6 +343,7 @@ impl JailConfig {
                     default_args,
                     environ,
                     required_envs: Vec::new(),
+                    work_dir
                 };
                 meta.entry_points.insert("main".to_string(), entry_point);
             }

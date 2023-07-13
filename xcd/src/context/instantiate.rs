@@ -148,6 +148,7 @@ impl InstantiateBlueprint {
                 uid: 0,
                 output_mode: StdioMode::Terminal,
                 notify: None,
+                work_dir: entry_point.work_dir.clone()
             }
         };
         for assign in request.ips.iter() {

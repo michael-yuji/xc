@@ -873,6 +873,7 @@ async fn exec(
             stderr: request.stderr.to_option().map(|fd| fd.0),
         },
         notify: request.notify.to_option().map(|fd| fd.0),
+        work_dir: None
     };
     if let Some(arc_site) = context.write().await.get_site(&request.name) {
         let mut site = arc_site.write().await;

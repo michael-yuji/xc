@@ -32,6 +32,7 @@ use crate::util::exists_exec;
 
 use anyhow::Context;
 use freebsd::event::{EventFdNotify, KEventExt};
+use freebsd::FreeBSDCommandExt;
 use ipc::packet::codec::json::JsonPacket;
 use ipc::packet::Packet;
 use ipc::proto::Request;
@@ -380,6 +381,10 @@ impl ProcessRunner {
             .envs(&exec.envs)
             .jail(&jail);
 
+        if let Some(work_dir) = &exec.work_dir {
+            cmd.jwork_dir(work_dir);
+        }
+
         let pid = match &exec.output_mode {
             StdioMode::Terminal => {
                 let socket_path = format!("/var/run/xc.{}.{}", self.container.id, id);
@@ -581,8 +586,9 @@ impl ProcessRunner {
         if inits.is_empty() && !self.container.main_norun {
             self.run_main();
         } else {
-            let (id, jexec) = inits.pop_front().unwrap();
-            _ = self.spawn_process(&id, &jexec, None);
+            if let Some((id, jexec)) = inits.pop_front() {
+                _ = self.spawn_process(&id, &jexec, None);
+            }
         }
 
         'kq: loop {

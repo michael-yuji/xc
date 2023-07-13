@@ -30,8 +30,10 @@ use super::JailContext;
 use crate::jailfile::parse::Action;
 
 use anyhow::Context;
+use std::collections::HashMap;
+use varutil::string_interpolation::InterpolatedString;
 use xc::models::jail_image::{JailConfig, SpecialMount};
-use xc::models::{MountSpec, SystemVPropValue};
+use xc::models::{MountSpec, SystemVPropValue, EntryPoint};
 
 pub(crate) trait Directive: Sized {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error>;
@@ -42,13 +44,14 @@ pub(crate) trait Directive: Sized {
 pub(crate) enum ConfigMod {
     Allow(Vec<String>),
     ReplaceAllow(Vec<String>),
-    WorkDir,
+    WorkDir(String, String),
     Init,
     NoInit,
     Deinit,
     NoDeinit,
-    Cmd,
     Expose,
+    EntryPoint(String, String),
+    Cmd(String, Vec<String>),
     Volume(String, MountSpec),
     Mount(String, String),
     SysV(Vec<String>),
@@ -104,18 +107,105 @@ impl ConfigMod {
             Self::Volume(name, mount_spec) => {
                 config.mounts.insert(name.clone(), mount_spec.clone());
             }
+            Self::WorkDir(entry_point, dir) => {
+                let work_dir = dir.to_string();
+                match config.entry_points.get_mut(entry_point) {
+                    None => {
+                        let entrypoint = EntryPoint {
+                            exec: String::new(),
+                            args: Vec::new(),
+                            default_args: Vec::new(),
+                            required_envs: Vec::new(),
+                            environ: HashMap::new(),
+                            work_dir: Some(work_dir),
+                        };
+                        config.entry_points.insert(entry_point.to_string(), entrypoint);
+                    },
+                    Some(entry_point) => {
+                        eprintln!("setting work dir");
+                        entry_point.work_dir = Some(work_dir);
+                        eprintln!("{config:#?}");
+                    }
+                }
+            }
+            Self::EntryPoint(entry_point, cmd) => {
+                let exec = cmd.to_string();
+                match config.entry_points.get_mut(entry_point) {
+                    None => {
+                        let entrypoint = EntryPoint {
+                            exec,
+                            args: Vec::new(),
+                            default_args: Vec::new(),
+                            required_envs: Vec::new(),
+                            environ: HashMap::new(),
+                            work_dir: None,
+                        };
+                        config.entry_points.insert(entry_point.to_string(), entrypoint);
+                    },
+                    Some(entry_point) => {
+                        entry_point.exec = exec;
+                    }
+                }
+            }
+            Self::Cmd(entry_point, args) => {
+                let default_args = args.iter().map(|arg| {
+                    InterpolatedString::new(arg.as_str())
+                        .expect("cannot parse interpolate string")
+                }).collect();
+
+                match config.entry_points.get_mut(entry_point) {
+                    None => {
+                        let entrypoint = EntryPoint {
+                            exec: String::new(),
+                            args: Vec::new(),
+                            default_args,
+                            required_envs: Vec::new(),
+                            environ: HashMap::new(),
+                            work_dir: None,
+                        };
+                        config.entry_points.insert(entry_point.to_string(), entrypoint);
+                    },
+                    Some(entry_point) => {
+                        entry_point.default_args = default_args;
+                    }
+                }
+            }
             _ => {}
         }
     }
 
     pub(crate) fn implemented_directives() -> &'static [&'static str] {
-        &["ALLOW", "NOINIT", "NODEINIT", "SYSVIPC", "MOUNT"]
+        &["ALLOW", "NOINIT", "NODEINIT", "SYSVIPC", "MOUNT", "WORKDIR", "ENTRYPOINT", "CMD"]
     }
 }
 
 impl Directive for ConfigMod {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error> {
         match action.directive_name.as_str() {
+            "WORKDIR" => {
+                let entry_point = action.directive_args.get("entry_point")
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| "main")
+                    .to_string();
+                let arg0 = action.args.get(0).context("entry point requires one variable")?;
+                Ok(ConfigMod::WorkDir(entry_point, arg0.to_string()))
+            },
+            "ENTRYPOINT" => {
+                let entry_point = action.directive_args.get("entry_point")
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| "main")
+                    .to_string();
+                let arg0 = action.args.get(0).context("entry point requires one variable")?;
+                Ok(ConfigMod::EntryPoint(entry_point, arg0.to_string()))
+            },
+            "CMD" => {
+                let entry_point = action.directive_args.get("entry_point")
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| "main")
+                    .to_string();
+                let args = action.args.clone();
+                Ok(ConfigMod::Cmd(entry_point, args))
+            },
             "ALLOW" => match action.directive_args.get("replace") {
                 Some(value) if value.as_str() == "true" => {
                     Ok(ConfigMod::ReplaceAllow(action.args.clone()))
