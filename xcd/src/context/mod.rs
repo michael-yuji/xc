@@ -294,10 +294,18 @@ impl ServerContext {
 
         let output = child.wait_with_output()?;
 
+        let (diff_id, _digest) = {
+            let mut results = std::str::from_utf8(&output.stdout).unwrap().trim().lines();
+            let diff_id = results.next().expect("unexpected output");
+            let digest = results.next().expect("unexpected output");
+            eprintln!("diff_id: {diff_id}");
+            (
+                OciDigest::from_str(diff_id).unwrap(),
+                OciDigest::from_str(digest).unwrap()
+            )
+        };
         zfs.destroy(format!("{running_dataset}@{commit_id}"), true, true, true)?;
-
-        let diff_id = std::str::from_utf8(&output.stderr).unwrap().trim();
-        Ok(OciDigest::from_str(diff_id)?)
+        Ok(diff_id)
     }
 
     pub(crate) async fn do_commit(
@@ -357,14 +365,19 @@ impl ServerContext {
             .output()
             .expect("fail to spawn ocitar");
 
-        let diff_id = {
-            let diff_id = std::str::from_utf8(&output.stdout).unwrap().trim();
+        let (diff_id, digest) = {
+            let mut results = std::str::from_utf8(&output.stdout).unwrap().trim().lines();
+            let diff_id = results.next().expect("unexpected output");
+            let digest = results.next().expect("unexpected output");
             eprintln!("diff_id: {diff_id}");
-            eprintln!("rename: {temp_file} -> {}/{diff_id}", config.layers_dir);
-            std::fs::rename(temp_file, format!("{}/{diff_id}", config.layers_dir))?;
-            OciDigest::from_str(diff_id).unwrap()
+            eprintln!("rename: {temp_file} -> {}/{digest}", config.layers_dir);
+            std::fs::rename(temp_file, format!("{}/{digest}", config.layers_dir))?;
+            (
+                OciDigest::from_str(diff_id).unwrap(),
+                OciDigest::from_str(digest).unwrap()
+            )
         };
-        //
+
         chain_id.consume_diff_id(oci_util::digest::DigestAlgorithm::Sha256, &diff_id);
         let new_name = format!("{}/{chain_id}", config.image_dataset);
         zfs.rename(&dst_dataset, new_name)?;
@@ -377,7 +390,7 @@ impl ServerContext {
             .register_and_tag_manifest(name, tag, &manifest)
             .await;
 
-        context.map_diff_id(&diff_id, &diff_id, "plain").await?;
+        context.map_diff_id(&diff_id, &digest, "zstd").await?;
 
         Ok(commit_id)
     }

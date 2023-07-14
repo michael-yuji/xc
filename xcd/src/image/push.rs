@@ -30,6 +30,7 @@ use oci_util::digest::OciDigest;
 use oci_util::distribution::client::*;
 use oci_util::image_reference::ImageReference;
 use oci_util::models::Descriptor;
+use oci_util::models::Platform;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -267,9 +268,23 @@ pub async fn push_image(
             state.push_manifest = true;
             Ok(())
         });
-        session.register_manifest(&tag, &manifest).await?;
-
         debug!("Registering manifest: {manifest:#?}");
+
+        let arch = record.manifest.architecture();
+        let arch_tag = format!("{tag}-{arch}");
+        let platform = Platform {
+            os: record.manifest.os().to_string(),
+            architecture: arch.to_string(),
+            os_version: None,
+            os_features: Vec::new(),
+            variant: None,
+            features: Vec::new(),
+        };
+        let descriptor = session.register_manifest(&arch_tag, &manifest).await?;
+        session
+            .merge_manifest_list(&descriptor, &platform, &tag)
+            .await?;
+
         _ = emitter.use_try(|state| {
             state.done = true;
             Ok(())

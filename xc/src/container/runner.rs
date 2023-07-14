@@ -369,24 +369,31 @@ impl ProcessRunner {
             cmd.jwork_dir(work_dir);
         }
 
-        let spawn_info = match &exec.output_mode {
+        let spawn_info_result = match &exec.output_mode {
             StdioMode::Terminal => {
                 let socket_path = format!("/var/run/xc.{}.{}", self.container.id, id);
                 let log_path = format!("/var/log/xc.{}.{}.log", self.container.id, id);
-                spawn_process_pty(cmd, &log_path, &socket_path)?
+                spawn_process_pty(cmd, &log_path, &socket_path)
             }
-            StdioMode::Files { stdout, stderr } => spawn_process_files(&mut cmd, stdout, stderr)?,
+            StdioMode::Files { stdout, stderr } => spawn_process_files(&mut cmd, stdout, stderr),
             StdioMode::Inherit => {
                 let out_path = format!("/var/log/xc.{}.{}.out.log", self.container.id, id);
                 let err_path = format!("/var/log/xc.{}.{}.err.log", self.container.id, id);
-                spawn_process_files(&mut cmd, &Some(out_path), &Some(err_path))?
+                spawn_process_files(&mut cmd, &Some(out_path), &Some(err_path))
             }
             StdioMode::Forward {
                 stdin,
                 stdout,
                 stderr,
-            } => spawn_process_forward(&mut cmd, *stdin, *stdout, *stderr)?,
+            } => spawn_process_forward(&mut cmd, *stdin, *stdout, *stderr),
         };
+
+        let spawn_info = spawn_info_result.map_err(|error| {
+            if let Some(n) = notify.clone() {
+                n.notify_waiters();
+            }
+            error
+        })?;
 
         let pid = spawn_info.pid;
 

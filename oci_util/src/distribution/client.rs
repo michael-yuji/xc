@@ -548,7 +548,6 @@ impl Session {
         // if there is none, just register this manifest
         let manifest_variant = self.query_manifest(tag).await?;
         let manifest_list = match manifest_variant {
-            None => todo!(),
             Some(ManifestVariant::List(mut manifest_list)) => {
                 let mut manifests = manifest_list
                     .manifests

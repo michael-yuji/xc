@@ -90,6 +90,33 @@ impl<R: Read> Read for DigestReaderHandle<R> {
     }
 }
 
+
+pub struct DigestSink<W: Write> {
+    sink: W,
+    digest: Rc<RefCell<Sha256>>,
+}
+
+//pub struct DigestSinkHandle<W: Write>(pub Rc<RefCell<DigestSink<W>>>);
+
+impl<T: Write> DigestSink<T> {
+    pub fn new<W: Write>(sink: W, digest: Rc<RefCell<Sha256>>) -> DigestSink<W> {
+        DigestSink {
+            sink,
+            digest,
+        }
+    }
+}
+impl<W: Write> Write for DigestSink<W> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        let size = self.sink.write(buf)?;
+        self.digest.borrow_mut().update(&buf[..size]);
+        Ok(size)
+    }
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        self.sink.flush()
+    }
+}
+
 pub struct DigestWriter<W: Write> {
     sink: W,
     digest: Sha256,
@@ -110,11 +137,12 @@ impl<T: Write> DigestWriter<T> {
 
 impl<W: Write> Write for DigestWriter<W> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        self.digest.update(buf);
-        self.sink.write(buf)
+        let size = self.sink.write(buf)?;
+        self.digest.update(&buf[..size]);
+        Ok(size)
     }
     fn flush(&mut self) -> Result<(), std::io::Error> {
-        Ok(())
+        self.sink.flush()
     }
 }
 

@@ -26,6 +26,7 @@ mod util;
 
 use crate::util::*;
 use clap::{Parser, Subcommand};
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::process::Command;
@@ -216,18 +217,21 @@ fn zfs_dataset_get_mountpoint(dataset: &String) -> Result<Option<String>, std::i
 }
 
 pub fn do_create(args: CreateArgs) -> Result<(), std::io::Error> {
-    let mut output: Box<dyn Write> = match args.file.as_str() {
+    let output: Box<dyn Write> = match args.file.as_str() {
         "-" => Box::new(std::io::stdout()),
         path => Box::new(File::create(path)?),
     };
 
-    output = match args.compression {
-        CompressionType::Zstd => Box::new(ZstdEncoder::new(output, 3)?.auto_finish()),
+    let sha256 = std::rc::Rc::new(std::cell::RefCell::new(Sha256::new()));
+    let handle = DigestSink::<Box<dyn Write>>::new(output, sha256.clone());
+
+    let mut output: Box<dyn Write> = match args.compression {
+        CompressionType::Zstd => Box::new(ZstdEncoder::new(handle, 3)?.auto_finish()),
         CompressionType::Gzip => Box::new(flate2::write::GzEncoder::new(
-            output,
+            handle,
             flate2::Compression::default(),
         )),
-        _ => output,
+        _ => Box::new(handle),
     };
 
     if args.zfs_diff {
@@ -301,7 +305,7 @@ pub fn do_create(args: CreateArgs) -> Result<(), std::io::Error> {
             &removing,
             &mut output,
             args.write_to_stderr,
-        )
+        )?;
     } else {
         create_tar(
             args.without_oci,
@@ -311,8 +315,18 @@ pub fn do_create(args: CreateArgs) -> Result<(), std::io::Error> {
             &args.remove,
             &mut output,
             args.write_to_stderr,
-        )
+        )?;
     }
+
+    drop(output);
+    let digest: [u8; 32] = sha256.borrow().clone().finalize().into();
+
+    if !args.write_to_stderr {
+        println!("sha256:{}", hex(digest));
+    } else {
+        eprintln!("sha256:{}", hex(digest));
+    }
+    Ok(())
 }
 
 pub fn do_extract(args: ExtractArgs) -> Result<(), std::io::Error> {
@@ -377,6 +391,7 @@ fn create_tar<W: Write>(
         .arg("-T-") //.args(paths)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
         .spawn()?;
 
     let mut child_stdin = child.stdin.take().unwrap();

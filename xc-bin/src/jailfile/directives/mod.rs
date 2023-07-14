@@ -21,6 +21,7 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+pub mod add_env;
 pub mod copy;
 pub mod from;
 pub mod run;
@@ -33,14 +34,14 @@ use anyhow::Context;
 use std::collections::HashMap;
 use varutil::string_interpolation::{InterpolatedString, Var};
 use xc::models::jail_image::{JailConfig, SpecialMount};
-use xc::models::{EntryPoint, MountSpec, SystemVPropValue};
+use xc::models::{EntryPoint, EnvSpec, MountSpec, SystemVPropValue};
 
 pub(crate) trait Directive: Sized {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error>;
     fn run_in_context(&self, context: &mut JailContext) -> Result<(), anyhow::Error>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConfigMod {
     Allow(Vec<String>),
     ReplaceAllow(Vec<String>),
@@ -55,6 +56,7 @@ pub(crate) enum ConfigMod {
     Volume(String, MountSpec),
     Mount(String, String),
     SysV(Vec<String>),
+    AddEnv(Var, EnvSpec),
 }
 
 impl ConfigMod {
@@ -62,6 +64,9 @@ impl ConfigMod {
         match self {
             Self::NoInit => config.init = Vec::new(),
             Self::NoDeinit => config.deinit = Vec::new(),
+            Self::AddEnv(variable, spec) => {
+                config.envs.insert(variable.clone(), spec.clone());
+            }
             Self::Allow(allows) => {
                 for allow in allows.iter() {
                     if let Some(param) = allow.strip_prefix('-') {
@@ -232,10 +237,7 @@ impl Directive for ConfigMod {
                     curr = args_iter.next();
                 }
 
-                let arg0 = curr
-                    .as_ref()
-                    .clone()
-                    .context("entry point requires one variable")?;
+                let arg0 = curr.as_ref().context("entry point requires one variable")?;
                 Ok(ConfigMod::EntryPoint(entry_point, arg0.to_string(), envs))
             }
             "CMD" => {
@@ -268,5 +270,54 @@ impl Directive for ConfigMod {
     fn run_in_context(&self, context: &mut JailContext) -> Result<(), anyhow::Error> {
         context.config_mods.push(self.clone());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_directive_entrypoint_no_env() {
+        let action = Action {
+            directive_name: "ENTRYPOINT".to_string(),
+            directive_args: HashMap::new(),
+            args: vec!["arg0".to_string()],
+            heredoc: None,
+        };
+        let config_mod = ConfigMod::from_action(&action).expect("cannot parse");
+        assert_eq!(
+            config_mod,
+            ConfigMod::EntryPoint("main".to_string(), "arg0".to_string(), HashMap::new())
+        );
+    }
+
+    #[test]
+    fn test_parse_directive_entrypoint_with_env() {
+        let action = Action {
+            directive_name: "ENTRYPOINT".to_string(),
+            directive_args: HashMap::new(),
+            args: vec![
+                "A=BCD".to_string(),
+                "PATH=/usr/bin:/usr/sbin".to_string(),
+                "arg0".to_string(),
+            ],
+            heredoc: None,
+        };
+        let config_mod = ConfigMod::from_action(&action).expect("cannot parse");
+        let mut expect_hashmap = HashMap::new();
+
+        expect_hashmap.insert(
+            Var::new("A").unwrap(),
+            InterpolatedString::new("BCD").unwrap(),
+        );
+        expect_hashmap.insert(
+            Var::new("PATH").unwrap(),
+            InterpolatedString::new("/usr/bin:/usr/sbin").unwrap(),
+        );
+        assert_eq!(
+            config_mod,
+            ConfigMod::EntryPoint("main".to_string(), "arg0".to_string(), expect_hashmap)
+        );
     }
 }

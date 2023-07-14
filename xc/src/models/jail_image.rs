@@ -198,6 +198,12 @@ impl Default for JailImage {
 }
 
 impl JailImage {
+    pub fn os(&self) -> &str {
+        &self.0.os
+    }
+    pub fn architecture(&self) -> &str {
+        &self.0.architecture
+    }
     pub fn chain_id(&self) -> Option<ChainId> {
         if self.0.rootfs.diff_ids.is_empty() {
             None

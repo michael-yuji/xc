@@ -298,9 +298,10 @@ pub struct Summary {
 }
 
 pub fn remove_path(p: std::path::PathBuf) -> std::io::Result<()> {
+    /*
     eprintln!("enter remove path");
     log::warn!("removing: {p:?}");
-
+    */
     let path = std::path::PathBuf::from(&p);
     if path.exists() {
         if path.is_dir() {
@@ -308,10 +309,10 @@ pub fn remove_path(p: std::path::PathBuf) -> std::io::Result<()> {
         } else {
             _ = std::fs::remove_file(path);
         }
-        eprintln!("exit remove path");
+        //        eprintln!("exit remove path");
         Ok(())
     } else {
-        eprintln!("exit remove path");
+        //        eprintln!("exit remove path");
 
         Ok(())
     }

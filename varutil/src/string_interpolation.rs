@@ -156,6 +156,16 @@ impl std::fmt::Display for Var {
     }
 }
 
+impl FromStr for Var {
+    type Err = std::io::Error;
+    fn from_str(s: &str) -> Result<Var, Self::Err> {
+        Var::new(s).ok_or(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "must conform to IEEE Std 1003.1-2001",
+        ))
+    }
+}
+
 impl Var {
     pub fn as_str(&self) -> &str {
         self.0.as_str()

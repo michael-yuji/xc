@@ -255,6 +255,7 @@ fn main() -> Result<(), ActionError> {
             empty_dns,
             output_inplace,
         } => {
+            use crate::jailfile::directives::add_env::*;
             use crate::jailfile::directives::copy::*;
             use crate::jailfile::directives::from::*;
             use crate::jailfile::directives::run::*;
@@ -311,19 +312,25 @@ fn main() -> Result<(), ActionError> {
             let mut context = JailContext::new(conn, dns, net_req, output_inplace);
 
             for action in actions.iter() {
-                if action.directive_name == "RUN" {
-                    let directive = RunDirective::from_action(action)?;
-                    directive.run_in_context(&mut context)?;
-                } else if action.directive_name == "FROM" {
+                macro_rules! do_directive {
+                    ($name:expr, $tpe:ty) => {
+                        if action.directive_name == $name {
+                            let directive = <$tpe>::from_action(action)?;
+                            directive.run_in_context(&mut context)?;
+                            continue;
+                        }
+                    };
+                }
+
+                do_directive!("RUN", RunDirective);
+                do_directive!("COPY", CopyDirective);
+                do_directive!("VOLUME", VolumeDirective);
+                do_directive!("ADDENV", AddEnvDirective);
+
+                if action.directive_name == "FROM" {
                     let directive = FromDirective::from_action(action)?;
                     directive.run_in_context(&mut context)?;
                     std::thread::sleep_ms(500);
-                } else if action.directive_name == "COPY" {
-                    let directive = CopyDirective::from_action(action)?;
-                    directive.run_in_context(&mut context)?;
-                } else if action.directive_name == "VOLUME" {
-                    let directive = VolumeDirective::from_action(action)?;
-                    directive.run_in_context(&mut context)?;
                 } else if ConfigMod::implemented_directives()
                     .contains(&action.directive_name.as_str())
                 {
