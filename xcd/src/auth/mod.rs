@@ -48,30 +48,34 @@ impl Credential {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn can_read(&self, metadata: &Metadata) -> bool {
         let mode = metadata.mode();
-        mode & 0o004 > 0
+        self.unix_credential.uid == 0 
+            || mode & 0o004 > 0
             || mode & 0o400 > 0 && self.unix_credential.uid == metadata.uid()
             || mode & 0o040 > 0 && self.unix_credential.gids.contains(&metadata.gid())
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn can_write(&self, metadata: &Metadata) -> bool {
         let mode = metadata.mode();
-        mode & 0o002 > 0
+        self.unix_credential.uid == 0 
+            || mode & 0o002 > 0
             || mode & 0o200 > 0 && self.unix_credential.uid == metadata.uid()
             || mode & 0o020 > 0 && self.unix_credential.gids.contains(&metadata.gid())
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn can_exec(&self, metadata: &Metadata) -> bool {
         let mode = metadata.mode();
-        mode & 0o001 > 0
+        self.unix_credential.uid == 0
+            || mode & 0o001 > 0
             || mode & 0o100 > 0 && self.unix_credential.uid == metadata.uid()
             || mode & 0o010 > 0 && self.unix_credential.gids.contains(&metadata.gid())
     }
 
+    #[inline(always)]
     pub(crate) fn can_mount(&self, metadata: &Metadata, readonly: bool) -> bool {
         self.can_exec(metadata) && self.can_read(metadata) && (readonly || self.can_write(metadata))
     }
