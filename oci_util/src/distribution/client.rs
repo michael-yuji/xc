@@ -24,8 +24,8 @@
 
 use crate::digest::{Hasher, OciDigest};
 use crate::models::{
-    Descriptor, ImageManifest, ImageManifestList, ManifestDesc, ManifestVariant, DOCKER_MANIFEST,
-    DOCKER_MANIFESTS, OCI_ARTIFACT, OCI_IMAGE_INDEX, OCI_MANIFEST,
+    AnyOciConfig, Descriptor, ImageManifest, ImageManifestList, ManifestDesc, ManifestVariant,
+    Platform, DOCKER_MANIFEST, DOCKER_MANIFESTS, OCI_ARTIFACT, OCI_IMAGE_INDEX, OCI_MANIFEST,
 };
 use futures::future::Either;
 use reqwest::{Client, ClientBuilder, RequestBuilder, Response};
@@ -35,7 +35,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tokio::sync::watch::Sender;
-use tracing::debug;
+use tracing::{debug, info};
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -522,7 +522,7 @@ impl Session {
             match filter(&manifests) {
                 None => return Ok(None),
                 Some(desc) => {
-                    manifest = self.query_manifest(&desc.digest).await?;
+                    manifest = self.query_manifest(desc.digest.as_str()).await?;
                 }
             }
         }
@@ -532,24 +532,166 @@ impl Session {
         }))
     }
 
-    pub async fn register_manifest(
+    pub async fn merge_manifest_list(
+        &mut self,
+        descriptor: &Descriptor,
+        platform: &Platform,
+        tag: &str,
+    ) -> Result<Descriptor, ClientError> {
+        // see if there an existing manifest with such tag
+        //
+        // if it is a manifest list, check if there's one matching the platform, if so, replace it
+        // and re-upload the list
+        //
+        // if it is a single manifest, and the platform is different, create a manifest list
+        //
+        // if there is none, just register this manifest
+        let manifest_variant = self.query_manifest(tag).await?;
+        let manifest_list = match manifest_variant {
+            None => todo!(),
+            Some(ManifestVariant::List(mut manifest_list)) => {
+                let mut manifests = manifest_list
+                    .manifests
+                    .into_iter()
+                    .filter(|m| !m.platform.is_compatible(platform))
+                    .collect::<Vec<_>>();
+                let desc = ManifestDesc {
+                    media_type: descriptor.media_type.to_string(),
+                    size: descriptor.size,
+                    platform: platform.clone(),
+                    digest: descriptor.digest.clone(),
+                    annotations: std::collections::HashMap::new(),
+                    artifact_type: None,
+                };
+                manifests.push(desc);
+                manifest_list.manifests = manifests;
+                manifest_list
+            }
+            Some(ManifestVariant::Manifest(manifest)) => {
+                let manifest_vec = serde_json::to_vec(&manifest).unwrap();
+                let digest = crate::digest::sha256_once(&manifest_vec);
+
+                let mut list = vec![ManifestDesc {
+                    media_type: descriptor.media_type.to_string(),
+                    size: descriptor.size,
+                    platform: platform.clone(),
+                    digest: descriptor.digest.clone(),
+                    annotations: std::collections::HashMap::new(),
+                    artifact_type: None,
+                }];
+
+                if let Some(config) = self
+                    .fetch_blob_as::<AnyOciConfig>(&manifest.config.digest)
+                    .await?
+                {
+                    let platform = Platform {
+                        os: config.os,
+                        architecture: config.architecture,
+                        os_version: None,
+                        os_features: Vec::new(),
+                        variant: None,
+                        features: Vec::new(),
+                    };
+                    list.push(ManifestDesc {
+                        media_type: manifest.media_type,
+                        size: manifest_vec.len(),
+                        digest,
+                        platform,
+                        artifact_type: None,
+                        annotations: std::collections::HashMap::new(),
+                    });
+                }
+                ImageManifestList {
+                    schema_version: 2,
+                    media_type: OCI_IMAGE_INDEX.to_string(),
+                    manifests: list,
+                }
+            }
+            _ => ImageManifestList {
+                schema_version: 2,
+                media_type: OCI_IMAGE_INDEX.to_string(),
+                manifests: vec![ManifestDesc {
+                    media_type: descriptor.media_type.to_string(),
+                    size: descriptor.size,
+                    platform: platform.clone(),
+                    digest: descriptor.digest.clone(),
+                    annotations: std::collections::HashMap::new(),
+                    artifact_type: None,
+                }],
+            },
+        };
+        self.register_manifest_list(tag, &manifest_list).await
+    }
+
+    pub async fn push_manifest_with_tags(
         &mut self,
         tag: &str,
         manifest: &ImageManifest,
+        platform: &Platform,
+        other_tags: &[impl AsRef<str>],
     ) -> Result<(), ClientError> {
+        info!("registering manifest as {tag}");
+        let descriptor = self.register_manifest(tag, manifest).await?;
+        info!("registered manifest {tag}");
+        for tag in other_tags {
+            self.merge_manifest_list(&descriptor, platform, tag.as_ref())
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn register_manifest_list(
+        &mut self,
+        tag: &str,
+        manifest: &ImageManifestList,
+    ) -> Result<Descriptor, ClientError> {
         let repository = &self.repository;
         let base_url = &self.registry.base_url;
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        let size = bytes.len();
+        let digest = crate::digest::sha256_once(&bytes);
         let request = self
             .registry
             .client
             .put(format!("{base_url}/v2/{repository}/manifests/{tag}"))
             .header("content-type", &manifest.media_type)
-            .body(serde_json::to_vec(&manifest).unwrap());
+            .body(bytes);
         let response = self.request_with_try_auth(request).await?;
         if !response.status().is_success() {
             Err(ClientError::UnsuccessfulResponse(response))
         } else {
-            Ok(())
+            Ok(Descriptor {
+                media_type: manifest.media_type.to_string(),
+                size,
+                digest,
+            })
+        }
+    }
+    pub async fn register_manifest(
+        &mut self,
+        tag: &str,
+        manifest: &ImageManifest,
+    ) -> Result<Descriptor, ClientError> {
+        let repository = &self.repository;
+        let base_url = &self.registry.base_url;
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        let size = bytes.len();
+        let digest = crate::digest::sha256_once(&bytes);
+        let request = self
+            .registry
+            .client
+            .put(format!("{base_url}/v2/{repository}/manifests/{tag}"))
+            .header("content-type", &manifest.media_type)
+            .body(bytes);
+        let response = self.request_with_try_auth(request).await?;
+        if !response.status().is_success() {
+            Err(ClientError::UnsuccessfulResponse(response))
+        } else {
+            Ok(Descriptor {
+                media_type: manifest.media_type.to_string(),
+                size,
+                digest,
+            })
         }
     }
 

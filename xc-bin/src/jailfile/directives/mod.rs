@@ -225,7 +225,8 @@ impl Directive for ConfigMod {
 
                 while let Some((key, value)) = curr.and_then(|c| c.split_once('=')) {
                     envs.insert(
-                        Var::new(key).context("Invalid environ key, must conform to IEEE Std 1003.1-2001")?,
+                        Var::new(key)
+                            .context("Invalid environ key, must conform to IEEE Std 1003.1-2001")?,
                         InterpolatedString::new(value).context("Invalid environ value")?,
                     );
                     curr = args_iter.next();

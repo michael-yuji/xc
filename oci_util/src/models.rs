@@ -85,12 +85,18 @@ pub struct Platform {
     pub features: Vec<String>,
 }
 
+impl Platform {
+    pub fn is_compatible(&self, platform: &Platform) -> bool {
+        self.os == platform.os && self.architecture == platform.architecture
+    }
+}
+
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ManifestDesc {
     pub media_type: String,
     pub size: usize,
-    pub digest: String,
+    pub digest: OciDigest,
     pub platform: Platform,
     pub artifact_type: Option<String>,
     #[serde(default)]
