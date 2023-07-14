@@ -24,6 +24,7 @@
 
 ascii_alphanum_upper = _{ ASCII_ALPHA_UPPER | ASCII_DIGIT }
 ascii_alpha_upper = { ASCII_ALPHA_UPPER }
+comment = { WHITESPACE* ~ "#" ~ (!NEWLINE ~ ANY)* }
 var_name = { (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
 escaped_char = @{"\\" ~ (
   "{"|"}"|"["|"]"|"("|")"|"<"|">"|"|"
@@ -31,7 +32,7 @@ escaped_char = @{"\\" ~ (
 dquoted_string = @{ "\"" ~ ("\\\"" | (!"\"" ~ ANY))* ~ "\"" }
 squoted_string = @{ "\'" ~ ("\\\'" | (!"\'" ~ ANY))* ~ "\'" }
 literal = @{ (!(WHITESPACE | NEWLINE | "\"" | "\'") ~ ANY)+ }
-value = @{ dquoted_string | squoted_string | literal }
+value = @{ dquoted_string | squoted_string | literal ~ (&"\"" ~ dquoted_string | &"\'" ~ squoted_string | literal)* }
 directive_key={var_name}
 upper_name = @{ (ASCII_ALPHA_UPPER | "_") ~ (ascii_alphanum_upper | "_")* }
 WHITESPACE = _{ " " | "\t" | "\\\n" }
@@ -43,5 +44,7 @@ directive_activator = {
 heredoc_body = { (!PEEK ~ ANY)* }
 heredoc = ${ "<<" ~ "-"? ~ PUSH(upper_name) ~ heredoc_body ~ POP }
 action_args = { value ~ (WHITESPACE ~ value)* }
-action = { (WHITESPACE | NEWLINE)* ~ directive_activator ~ WHITESPACE* ~ (!"<<" ~ value)* ~ WHITESPACE* ~ heredoc? ~ (EOI|NEWLINE) }
-rules = { action* }
+action = {
+	directive_activator ~ WHITESPACE* ~ (!"<<" ~ value)* ~ WHITESPACE* ~ heredoc?
+}
+rules = { (comment | NEWLINE | (WHITESPACE* ~ action ~ WHITESPACE*))* ~ EOI }

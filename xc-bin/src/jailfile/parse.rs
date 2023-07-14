@@ -45,9 +45,10 @@ pub(crate) fn parse_jailfile(input: &str) -> Result<Vec<Action>, anyhow::Error> 
         .next()
         .unwrap()
         .into_inner()
+        .filter(|rule| rule.as_rule() == Rule::action)
         .map(|action| {
             //    let actions = parsed.into_iter().map(|action| {
-            let mut iterator = action.into_inner().into_iter();
+            let mut iterator = action.into_inner();
             let directive_tokens = iterator.next().unwrap();
             let mut args = Vec::new();
             let mut heredoc = None;
@@ -92,7 +93,10 @@ mod tests {
     #[test]
     fn test_jailfile() {
         let input = r#"
+        # abcd
         FROM node:18-alpine
+
+        #efg
         WORKDIR /app
         COPY . .
         RUN yarn install --production
@@ -100,6 +104,10 @@ mod tests {
         This is some
         funny string
         EOF
+
+        CMD ${ARG:="${DEFAULT:=123}"}
+
+
         "#;
 
         let parsed = super::parse_jailfile(input).expect("cannot parse input");
@@ -152,7 +160,15 @@ mod tests {
                 heredoc: Some("\n        This is some\n        funny string\n        ".to_string())
             }
         );
-
+        assert_eq!(
+            parsed[5],
+            Action {
+                directive_name: "CMD".to_string(),
+                directive_args: HashMap::new(),
+                args: vec!["${ARG:=\"${DEFAULT:=123}\"}".to_string()],
+                heredoc: None
+            }
+        );
         /*
         eprintln!("{parsed:?}");
         assert!(false);
