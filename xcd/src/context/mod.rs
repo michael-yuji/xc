@@ -294,7 +294,7 @@ impl ServerContext {
 
         let output = child.wait_with_output()?;
 
-        zfs.destroy(format!("{running_dataset}@{commit_id}"), true, true)?;
+        zfs.destroy(format!("{running_dataset}@{commit_id}"), true, true, true)?;
 
         let diff_id = std::str::from_utf8(&output.stderr).unwrap().trim();
         Ok(OciDigest::from_str(diff_id)?)

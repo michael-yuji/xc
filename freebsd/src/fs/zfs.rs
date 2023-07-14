@@ -268,15 +268,17 @@ impl ZfsHandle {
         })
     }
 
-    /// # Paramaters
-    /// * dataset
-    /// * resursive
-    /// * remove_dependents
+    /// # Arguments
+    /// * `dataset`
+    /// * `resursive`
+    /// * `remove_dependents`
+    /// * `not_very_nicely`: I mean forcefully
     pub fn destroy(
         &self,
         dataset: impl AsRef<Path>,
         recursive: bool,
         remove_dependents: bool,
+        not_very_nicely: bool,
     ) -> Result<()> {
         self.use_command(|c| {
             c.arg("destroy");
@@ -285,6 +287,9 @@ impl ZfsHandle {
             }
             if remove_dependents {
                 c.arg("-R");
+            }
+            if not_very_nicely {
+                c.arg("-f");
             }
             c.arg(dataset.as_ref());
         })

@@ -116,15 +116,6 @@ macro_rules! impl_undos {
                             panic!()
                         }
                     }
-                    /*
-                    if let Ok(r) = res {
-                        self.undos.push(Undo::$name { result: r.clone(), $($arg: $arg.clone()),* });
-                        Ok(r)
-                    } else {
-                        println!("panic at {}", stringify!($name));
-                        panic!()
-                    }
-                    */
                 }
             }
         )*
@@ -166,7 +157,7 @@ impl_undos! {
         handle.create2(&dataset, false, false),
 //        create_dataset(&dataset),
         |_| {
-            handle.destroy(dataset, false, false)
+            handle.destroy(dataset, true, true, true)
         }
     };
 
@@ -182,7 +173,7 @@ impl_undos! {
             handle.clone2(&src, &tag, &dest).map(|_| ())
         },
         |result| {
-            handle.destroy(dest, false, false)
+            handle.destroy(dest, true, true, true)
         }
     };
 
@@ -194,7 +185,7 @@ impl_undos! {
         "Take a ZFS snapshot named `tag`",
         handle.snapshot2(&src, &tag),
         |_| {
-            handle.destroy(format!("{src}@{tag}"), false, false)
+            handle.destroy(format!("{src}@{tag}"), true, true, true)
         }
     };
 
