@@ -349,6 +349,8 @@ impl ServerContext {
         let output = std::process::Command::new("ocitar")
             .arg("-cf")
             .arg(temp_file.clone())
+            .arg("--compression")
+            .arg("zstd")
             .arg("--zfs-diff")
             .arg(format!("{zfs_origin}@xc"))
             .arg(format!("{dst_dataset}@xc"))
