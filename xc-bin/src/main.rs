@@ -612,77 +612,75 @@ fn main() -> Result<(), ActionError> {
             }
 
             let entry_point = entry_point.unwrap_or_else(|| "main".to_string());
+            let envs = {
+                let mut map = std::collections::HashMap::new();
+                for env in envs.into_iter() {
+                    map.insert(env.key, env.value);
+                }
+                map
+            };
+
+            let dns = if empty_dns {
+                DnsSetting::Specified {
+                    servers: Vec::new(),
+                    search_domains: Vec::new(),
+                }
+            } else if dns_servers.is_empty() && dns_searchs.is_empty() {
+                DnsSetting::Inherit
+            } else {
+                DnsSetting::Specified {
+                    servers: dns_servers,
+                    search_domains: dns_searchs,
+                }
+            };
+
+            let hostname = hostname.or_else(|| name.clone());
+
+            let mount_req = mounts
+                .iter()
+                .map(|mount| {
+                    let source = std::fs::canonicalize(mount.source.clone())
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
+                    MountReq {
+                        source,
+                        dest: mount.destination.clone(),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let copies: List<CopyFile> = copy
+                .into_iter()
+                .map(|bind| {
+                    let file = std::fs::OpenOptions::new()
+                        .read(true)
+                        .open(bind.source)
+                        .expect("cannot open file for reading");
+                    let source = Fd(file.into_raw_fd());
+                    CopyFile {
+                        source,
+                        destination: bind.destination,
+                    }
+                })
+                .collect();
+
+            let mut extra_layer_files = Vec::new();
+
+            for layer in extra_layers.iter() {
+                extra_layer_files.push(std::fs::OpenOptions::new().read(true).open(layer)?);
+            }
+
+            let extra_layers =
+                List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
 
             let (res, notify) = {
-                let envs = {
-                    let mut map = std::collections::HashMap::new();
-                    for env in envs.into_iter() {
-                        map.insert(env.key, env.value);
-                    }
-                    map
-                };
-
-                let dns = if empty_dns {
-                    DnsSetting::Specified {
-                        servers: Vec::new(),
-                        search_domains: Vec::new(),
-                    }
-                } else if dns_servers.is_empty() && dns_searchs.is_empty() {
-                    DnsSetting::Inherit
-                } else {
-                    DnsSetting::Specified {
-                        servers: dns_servers,
-                        search_domains: dns_searchs,
-                    }
-                };
-
-                let hostname = hostname.or_else(|| name.clone());
-
-                let mount_req = mounts
-                    .iter()
-                    .map(|mount| {
-                        let source = std::fs::canonicalize(mount.source.clone())
-                            .unwrap()
-                            .to_string_lossy()
-                            .to_string();
-                        MountReq {
-                            source,
-                            dest: mount.destination.clone(),
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                let copies: List<CopyFile> = copy
-                    .into_iter()
-                    .map(|bind| {
-                        let file = std::fs::OpenOptions::new()
-                            .read(true)
-                            .open(bind.source)
-                            .expect("cannot open file for reading");
-                        let source = Fd(file.into_raw_fd());
-                        CopyFile {
-                            source,
-                            destination: bind.destination,
-                        }
-                    })
-                    .collect();
-
                 let main_started_notify = if detach {
                     Maybe::None
                 } else {
                     let fd = unsafe { eventfd(0, nix::libc::EFD_NONBLOCK) };
                     Maybe::Some(Fd(fd))
                 };
-
-                let mut extra_layer_files = Vec::new();
-
-                for layer in extra_layers.iter() {
-                    extra_layer_files.push(std::fs::OpenOptions::new().read(true).open(layer)?);
-                }
-
-                let extra_layers =
-                    List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
-
                 let mut reqt = InstantiateRequest {
                     alt_root: None,
                     name,

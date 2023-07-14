@@ -137,7 +137,6 @@ mod tests {
     fn test_parse_args() {
         let input = ["oo", "--from", "abcde", "--to", "fgh", ".", "."];
         let parsed = CopyDirective::parse_from(input);
-        println!("{parsed:?}");
         assert_eq!(parsed.from, Some("abcde".to_string()));
         assert_eq!(parsed.to, Some("fgh".to_string()));
         assert_eq!(parsed.source_path, ".".to_string());

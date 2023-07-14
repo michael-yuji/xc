@@ -378,7 +378,9 @@ mod tests {
             var,
             Variable::OrElse(
                 "PROFILE".to_string(),
-                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))));
+                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))
+            )
+        );
         assert_eq!(v2, None);
     }
 
@@ -391,7 +393,9 @@ mod tests {
             var,
             Variable::OrElse(
                 "PROFILE".to_string(),
-                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))));
+                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))
+            )
+        );
         assert_eq!(v2, None);
     }
 
@@ -405,7 +409,9 @@ mod tests {
             var,
             &Variable::OrElse(
                 "PROFILE".to_string(),
-                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))));
+                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))
+            )
+        );
         assert_eq!(v2, None);
     }
     #[test]

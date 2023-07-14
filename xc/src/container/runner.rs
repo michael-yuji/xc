@@ -338,6 +338,7 @@ impl ProcessRunner {
         exec: &Jexec,
         notify: Option<Arc<EventFdNotify>>,
     ) -> Result<SpawnInfo, ExecError> {
+        debug!("spawn: {exec:#?}");
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
         let paths = exec
             .envs
@@ -446,7 +447,9 @@ impl ProcessRunner {
 
     pub fn run_main(&mut self) {
         if let Some(main) = self.container.main_proto.clone() {
-            _ = self.spawn_process("main", &main, None);
+            if let Err(error) = self.spawn_process("main", &main, None) {
+                error!("cannot spawn main: {error:#?}");
+            }
             self.container.main_started_notify.notify_waiters();
             self.main_started = true;
             self.should_run_main = false;
