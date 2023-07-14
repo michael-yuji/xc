@@ -31,7 +31,7 @@ use crate::jailfile::parse::Action;
 
 use anyhow::Context;
 use std::collections::HashMap;
-use varutil::string_interpolation::InterpolatedString;
+use varutil::string_interpolation::{InterpolatedString, Var};
 use xc::models::jail_image::{JailConfig, SpecialMount};
 use xc::models::{EntryPoint, MountSpec, SystemVPropValue};
 
@@ -50,7 +50,7 @@ pub(crate) enum ConfigMod {
     Deinit,
     NoDeinit,
     Expose,
-    EntryPoint(String, String),
+    EntryPoint(String, String, HashMap<Var, InterpolatedString>),
     Cmd(String, Vec<String>),
     Volume(String, MountSpec),
     Mount(String, String),
@@ -124,13 +124,11 @@ impl ConfigMod {
                             .insert(entry_point.to_string(), entrypoint);
                     }
                     Some(entry_point) => {
-                        eprintln!("setting work dir");
                         entry_point.work_dir = Some(work_dir);
-                        eprintln!("{config:#?}");
                     }
                 }
             }
-            Self::EntryPoint(entry_point, cmd) => {
+            Self::EntryPoint(entry_point, cmd, environ) => {
                 let exec = cmd.to_string();
                 match config.entry_points.get_mut(entry_point) {
                     None => {
@@ -139,7 +137,7 @@ impl ConfigMod {
                             args: Vec::new(),
                             default_args: Vec::new(),
                             required_envs: Vec::new(),
-                            environ: HashMap::new(),
+                            environ: environ.clone(),
                             work_dir: None,
                         };
                         config
@@ -155,8 +153,9 @@ impl ConfigMod {
                 let default_args = args
                     .iter()
                     .map(|arg| {
-                        InterpolatedString::new(arg.as_str())
-                            .expect("cannot parse interpolate string")
+                        let parsed = InterpolatedString::new(arg.as_str())
+                            .expect(&format!("cannot parse interpolate string: {arg}"));
+                        parsed
                     })
                     .collect();
 
@@ -220,11 +219,23 @@ impl Directive for ConfigMod {
                     .map(|s| s.as_str())
                     .unwrap_or_else(|| "main")
                     .to_string();
-                let arg0 = action
-                    .args
-                    .get(0)
+                let mut args_iter = action.args.iter();
+                let mut curr = args_iter.next();
+                let mut envs = HashMap::new();
+
+                while let Some((key, value)) = curr.and_then(|c| c.split_once('=')) {
+                    envs.insert(
+                        Var::new(key).context("Invalid environ key, must conform to IEEE Std 1003.1-2001")?,
+                        InterpolatedString::new(value).context("Invalid environ value")?,
+                    );
+                    curr = args_iter.next();
+                }
+
+                let arg0 = curr
+                    .as_ref()
+                    .clone()
                     .context("entry point requires one variable")?;
-                Ok(ConfigMod::EntryPoint(entry_point, arg0.to_string()))
+                Ok(ConfigMod::EntryPoint(entry_point, arg0.to_string(), envs))
             }
             "CMD" => {
                 let entry_point = action
