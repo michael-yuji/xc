@@ -149,6 +149,8 @@ impl<'a> ParseContext<'a> {
         }
     }
 
+    /// take from the token stream until end_token is found, but do not include the end_token in to
+    /// the returned string
     pub fn take_until_token_no_consume(&mut self, end_token: char) -> String {
         let mut buffer = String::new();
         while self.last_char != Some(end_token) {
@@ -240,6 +242,8 @@ impl<'a> ParseContext<'a> {
                                         }
                                         _ => {
                                             let value = self.take_until_token('}')?;
+                                            // consume the end bracket
+                                            self.next();
                                             Box::new(Variable::Const(value))
                                         }
                                     };
@@ -365,6 +369,45 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_interpolate_x() {
+        let mut quoted = ParseContext::new("${PROFILE:=\"profile-arm64-minimum.txt\"}");
+        let var = quoted.take_interpolate_args().unwrap();
+        let v2 = quoted.take_interpolate_args();
+        assert_eq!(
+            var,
+            Variable::OrElse(
+                "PROFILE".to_string(),
+                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))));
+        assert_eq!(v2, None);
+    }
+
+    #[test]
+    fn test_interpolate_x2() {
+        let mut quoted = ParseContext::new("${PROFILE:-profile-arm64-minimum.txt}");
+        let var = quoted.take_interpolate_args().unwrap();
+        let v2 = quoted.take_interpolate_args();
+        assert_eq!(
+            var,
+            Variable::OrElse(
+                "PROFILE".to_string(),
+                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))));
+        assert_eq!(v2, None);
+    }
+
+    #[test]
+    fn test_interpolate_x3() {
+        let mut quoted = ParseContext::new("${PROFILE:-profile-arm64-minimum.txt}");
+        let vars = quoted.take_parts().expect("cannot parse");
+        let var = &vars[0];
+        let v2 = vars.get(1);
+        assert_eq!(
+            var,
+            &Variable::OrElse(
+                "PROFILE".to_string(),
+                Box::new(Variable::Const("profile-arm64-minimum.txt".to_string()))));
+        assert_eq!(v2, None);
+    }
     #[test]
     fn test_interpolate_args_nested() {
         let mut quoted = ParseContext::new("${HELLO:-${World:-hahaha   }}");
