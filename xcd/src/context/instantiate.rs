@@ -29,7 +29,7 @@ use crate::network_manager::NetworkManager;
 
 use anyhow::Context;
 use freebsd::event::EventFdNotify;
-use freebsd::libc::{EINVAL, EIO, ENOENT, ENOTDIR, EPERM};
+use freebsd::libc::{EEXIST, EINVAL, EIO, ENOENT, ENOTDIR, EPERM};
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -179,7 +179,9 @@ impl InstantiateBlueprint {
                 destination: c.destination.to_string(),
             })
             .collect();
+
         let mut mount_req = Vec::new();
+
         for special_mount in config.special_mounts.iter() {
             if special_mount.mount_type.as_str() == "procfs" {
                 mount_req.push(Mount::procfs(&special_mount.mount_point));
@@ -187,6 +189,10 @@ impl InstantiateBlueprint {
                 mount_req.push(Mount::fdescfs(&special_mount.mount_point));
             }
         }
+
+        let mut mount_specs = oci_config.jail_config().mounts;
+        let mut added_mount_specs = HashMap::new();
+
         for req in request.mount_req.iter() {
             let source_path = std::path::Path::new(&req.source);
             if !source_path.exists() {
@@ -204,8 +210,28 @@ impl InstantiateBlueprint {
             if !cred.can_mount(&meta, false) {
                 precondition_failure!(EPERM, "permission denied: {source_path:?}")
             }
-            // use snapdir to check destination mount-ability
-            mount_req.push(Mount::nullfs(&req.source, &req.dest));
+            if let Some(mount_spec) = mount_specs.remove(&req.dest) {
+                // XXX: mount options
+                let mut mount = Mount::nullfs(&req.source, &mount_spec.destination);
+                if mount_spec.read_only {
+                    mount.options.push("ro".to_string());
+                }
+                mount_req.push(mount);
+                added_mount_specs.insert(&req.dest, mount_spec);
+            } else if req.dest.starts_with('/') {
+                // use snapdir to check destination mount-ability
+                mount_req.push(Mount::nullfs(&req.source, &req.dest));
+            } else if added_mount_specs.get(&req.dest).is_some() {
+                precondition_failure!(EEXIST, "duplicated mount detected {}", &req.dest);
+            } else {
+                precondition_failure!(ENOENT, "no such volume {}", &req.dest);
+            }
+        }
+
+        for (key, spec) in mount_specs.iter() {
+            if spec.required {
+                precondition_failure!(ENOENT, "Required volume {key} is not mounted");
+            }
         }
 
         let mut ip_alloc = request.ips.clone();
@@ -314,10 +340,6 @@ impl InstantiateBlueprint {
             main_norun: request.main_norun,
             persist: request.persist,
             no_clean: request.no_clean,
-            /*
-            linux_no_create_sys_dir: false,
-            linux_no_create_proc_dir: false,
-            */
             dns: request.dns,
             origin_image: Some(oci_config.clone()),
             allowing,
