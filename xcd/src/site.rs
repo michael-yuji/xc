@@ -300,6 +300,7 @@ impl Site {
 
                 for (i, layer_fd) in blueprint.extra_layers.iter().enumerate() {
                     let file = unsafe { std::fs::File::from_raw_fd(*layer_fd) };
+                    info!("extracting extra layer: {i}");
                     let exit_status = std::process::Command::new("ocitar")
                         .arg("-xf-")
                         .arg("-C")
@@ -315,6 +316,10 @@ impl Site {
                             "ocitar exit with unsuccessful exit code {exit_status} at offset {i}"
                         );
                     }
+                }
+
+                if blueprint.extra_layers.is_empty() {
+                    info!("no extra layers to extract");
                 }
 
                 let container = Container {
