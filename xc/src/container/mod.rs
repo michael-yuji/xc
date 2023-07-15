@@ -99,6 +99,7 @@ impl Container {
             .with_context(|| format!("failed finding /etc/resolv.conf in jail {}", self.id))?;
 
         match &self.dns {
+            DnsSetting::Nop => {},
             DnsSetting::Inherit => {
                 std::fs::copy("/etc/resolv.conf", resolv_conf_path).with_context(|| {
                     format!(
@@ -122,7 +123,7 @@ impl Container {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let resolv_conf = format!("{domains}\n{servers}\n");
-                std::fs::write(format!("{root}/etc/resolv.conf"), resolv_conf)?;
+                std::fs::write(resolv_conf_path, resolv_conf)?;
             }
         }
 

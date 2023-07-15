@@ -168,8 +168,12 @@ enum Action {
         link: bool,
         #[clap(long = "publish", short = 'p', multiple_occurrences = true)]
         publish: Vec<PublishSpec>,
+        /// Use empty resolv.conf
         #[clap(long = "empty-dns", action)]
         empty_dns: bool,
+        /// Do not attempt to generate resolv.conf
+        #[clap(long = "dns-nop", action)]
+        dns_nop: bool,
         #[clap(long = "dns", multiple_occurrences = true)]
         dns_servers: Vec<String>,
         #[clap(long = "dns-search", multiple_occurrences = true)]
@@ -610,6 +614,7 @@ fn main() -> Result<(), ActionError> {
             name,
             vnet,
             empty_dns,
+            dns_nop,
             dns_servers,
             dns_searchs,
             hostname,
@@ -620,6 +625,10 @@ fn main() -> Result<(), ActionError> {
         } => {
             if detach && link {
                 panic!("detach and link flags are mutually exclusive");
+            }
+
+            if dns_nop && empty_dns {
+                panic!("--dns-nop and --empty-dns are mutually exclusive");
             }
 
             let entry_point = entry_point.unwrap_or_else(|| "main".to_string());
@@ -636,7 +645,9 @@ fn main() -> Result<(), ActionError> {
                     servers: Vec::new(),
                     search_domains: Vec::new(),
                 }
-            } else if dns_servers.is_empty() && dns_searchs.is_empty() {
+            } else if dns_nop {
+                DnsSetting::Nop
+            }else if dns_servers.is_empty() && dns_searchs.is_empty() {
                 DnsSetting::Inherit
             } else {
                 DnsSetting::Specified {
