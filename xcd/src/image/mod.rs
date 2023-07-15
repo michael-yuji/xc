@@ -34,6 +34,7 @@ use oci_util::digest::{DigestAlgorithm, Hasher, OciDigest};
 use oci_util::distribution::client::*;
 use oci_util::layer::ChainId;
 use oci_util::models::Descriptor;
+use oci_util::models::ImageManifest;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -130,11 +131,24 @@ impl ImageManager {
         name: &str,
         tag: &str,
     ) -> Result<ImageRecord, ImageStoreError> {
-        self.context
-            .image_store
-            .lock()
-            .await
-            .query_manifest(name, tag)
+
+        if name == "xc-predefine" && tag == "empty" {
+            let manifest = JailImage::default();
+            let digest = manifest.digest().to_string();
+            let record = ImageRecord {
+                name: "xc-predefine".to_string(),
+                tag: "empty".to_string(),
+                manifest,
+                digest
+            };
+            Ok(record)
+        } else {
+            self.context
+                .image_store
+                .lock()
+                .await
+                .query_manifest(name, tag)
+        }
     }
 
     pub async fn query_tags(&self, name: &str) -> Result<Vec<ImageRecord>, ImageStoreError> {
