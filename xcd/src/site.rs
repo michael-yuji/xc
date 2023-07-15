@@ -22,15 +22,21 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use crate::context::instantiate::InstantiateBlueprint;
+
 use anyhow::{anyhow, bail, Context};
 use freebsd::event::{EventFdNotify, Notify};
 use freebsd::fs::zfs::ZfsHandle;
 use ipc::packet::Packet;
 use ipc::proto::Request;
 use ipc::transport::PacketTransport;
+use oci_util::digest::OciDigest;
 use std::ffi::OsString;
+use std::fs::File;
 use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::process::Stdio;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 use tracing::{error, info};
@@ -52,9 +58,13 @@ pub struct Site {
     id: String,
     undo: UndoStack,
     config: Receiver<XcConfig>,
-    zfs: ZfsHandle,
+    pub(crate) zfs: ZfsHandle,
     root: Option<OsString>,
+    /// The dataset contains the root of the container
+    pub(crate) root_dataset: Option<String>,
+    /// The dataset where the root dataset cloned from
     zfs_origin: Option<String>,
+    zfs_snapshots: Vec<String>,
     container: Option<Receiver<ContainerManifest>>,
     notify: Arc<Notify>,
     pub main_notify: Option<Arc<EventFdNotify>>,
@@ -88,7 +98,9 @@ impl Site {
             config,
             zfs: ZfsHandle::default(),
             root: None,
+            root_dataset: None,
             zfs_origin: None,
+            zfs_snapshots: Vec::new(),
             container: None,
             notify: Arc::new(Notify::new()),
             main_notify: None,
@@ -108,6 +120,108 @@ impl Site {
         for interest in self.main_started_interests.iter() {
             interest.notify_waiters();
         }
+    }
+
+    /// Clone and promote a snapshot to a dataset, any previous snapshot will become snapshot of
+    /// the promoted dataset
+    ///
+    /// # Arugments
+    ///
+    /// `tag`: The snapshot to promote
+    /// `dst_dataset`: The dataset which the promoted snapshot should become
+    ///
+    pub fn promote_snapshot(
+        &mut self,
+        tag: &str,
+        dst_dataset: impl AsRef<Path>,
+    ) -> anyhow::Result<()> {
+        if let Some(root_dataset) = &self.root_dataset {
+            self.zfs_snapshots
+                .iter()
+                .position(|s| s == tag)
+                .context("no such snapshot")?;
+            self.zfs.clone2(&root_dataset, &tag, dst_dataset.as_ref())?;
+            self.zfs.promote(dst_dataset.as_ref())?;
+            self.zfs_snapshots.drain(..self.zfs_snapshots.len());
+        }
+        Ok(())
+    }
+
+    pub fn snapshot_with_generated_tag(&mut self) -> anyhow::Result<String> {
+        let mut tag = xc::util::gen_id();
+        while self.zfs_snapshots.contains(&tag) {
+            tag = xc::util::gen_id();
+        }
+        self.snapshot(&tag)?;
+        Ok(tag)
+    }
+
+    pub fn snapshot(&mut self, tag: &str) -> anyhow::Result<()> {
+        if self.zfs_snapshots.contains(&String::from(tag)) {
+            bail!("duplicate tag");
+        }
+        if let Some(root_dataset) = &self.root_dataset {
+            self.zfs.snapshot2(&root_dataset.to_string(), tag)?;
+            self.zfs_snapshots.push(tag.to_string())
+        }
+        Ok(())
+    }
+
+    pub fn commit_to_file(
+        &mut self,
+        start_tag: &str,
+        end_tag: &str,
+        file: File,
+    ) -> anyhow::Result<(OciDigest, OciDigest)> {
+        let Some(root_dataset) = &self.root_dataset else {
+            bail!("container is not backed by zfs");
+        };
+
+        let mut contains_start_tag = false;
+        let mut contains_end_tag = false;
+
+        for tag in self.zfs_snapshots.iter() {
+            if tag == start_tag {
+                contains_start_tag = true;
+            } else if tag == end_tag {
+                if !contains_start_tag {
+                    bail!("end tag detected before start tag");
+                }
+                contains_end_tag = true;
+            }
+        }
+
+        if !contains_start_tag {
+            bail!("no such start tag");
+        }
+
+        if !contains_end_tag {
+            bail!("no such end tag");
+        }
+
+        let output = std::process::Command::new("ocitar")
+            .arg("-cf-")
+            .arg("--write-to-stderr")
+            .stdout(file)
+            .arg("--compression")
+            .arg("zstd")
+            .stderr(Stdio::piped())
+            .arg("--zfs-diff")
+            .arg(format!("{root_dataset}@{start_tag}"))
+            .arg(format!("{root_dataset}@{end_tag}"))
+            .output()
+            .context("cannot spawn ocitar")?;
+
+        let (diff_id, digest) = {
+            let mut results = std::str::from_utf8(&output.stderr).unwrap().trim().lines();
+            let diff_id = results.next().expect("unexpceted output");
+            let digest = results.next().expect("unexpected output");
+            (
+                OciDigest::from_str(diff_id).unwrap(),
+                OciDigest::from_str(digest).unwrap(),
+            )
+        };
+        Ok((diff_id, digest))
     }
 
     pub fn unwind(&mut self) -> anyhow::Result<()> {
@@ -259,11 +373,8 @@ impl Site {
     pub fn stage(&mut self, oci_config: &JailImage) -> anyhow::Result<()> {
         if let SiteState::Empty = self.state {
             guard!(self, {
-                let (root, zfs_origin) = self
-                    .create_rootfs(oci_config)
+                self.create_rootfs(oci_config)
                     .context("cannot create root file system")?;
-                self.root = Some(root);
-                self.zfs_origin = zfs_origin;
                 self.state = SiteState::RootFsOnly;
                 Ok(())
             })
@@ -272,7 +383,7 @@ impl Site {
         }
     }
 
-    fn create_rootfs(&mut self, image: &JailImage) -> anyhow::Result<(OsString, Option<String>)> {
+    fn create_rootfs(&mut self, image: &JailImage) -> anyhow::Result<()> {
         let config = self.config.borrow().clone();
         let image_dataset = config.image_dataset;
         let container_dataset = config.container_dataset;
@@ -298,12 +409,19 @@ impl Site {
                     .context("while cloning dataset for container")?;
             }
         }
+
         let mount_point = self
             .zfs
             .mount_point(dest_dataset.clone())
             .with_context(|| format!("cannot get mount point for {dest_dataset}"))?
             .with_context(|| format!("dataset {dest_dataset} does not have a mount point"))?
             .into_os_string();
-        Ok((mount_point, zfs_origin))
+        self.root_dataset = Some(dest_dataset);
+        self.root = Some(mount_point);
+        self.zfs_origin = zfs_origin;
+
+        self.snapshot("init").context("fail on initial snapshot")?;
+
+        Ok(())
     }
 }

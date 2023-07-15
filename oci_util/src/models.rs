@@ -132,6 +132,14 @@ pub struct FreeOciConfig<T> {
     pub os: String,
     pub config: Option<T>,
     pub rootfs: OciConfigRootFs,
+    pub history: Vec<Histroy>,
+}
+
+#[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]
+pub struct Histroy {
+    created: String,
+    created_by: String,
+    empty_layer: Option<bool>,
 }
 
 impl<T> FreeOciConfig<T> {

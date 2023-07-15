@@ -200,7 +200,27 @@ impl ZfsHandle {
             Err(ZfsError::Generic(output.status, stderr.to_string()))
         }
     }
+    pub fn list_snapshots(&self, dataset: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
+        let output = self.use_command_with_output(|cmd| {
+            cmd.arg("list")
+                .arg("-H")
+                .arg("-t")
+                .arg("snap")
+                .arg("-o")
+                .arg("name")
+                .arg("-d")
+                .arg("1")
+                .arg(dataset.as_ref());
+        })?;
 
+        let mut bufs = Vec::new();
+
+        for line in output.lines().flatten() {
+            bufs.push(Path::new(&line).to_path_buf());
+        }
+
+        Ok(bufs)
+    }
     pub fn list_direct_children(&self, dataset: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
         let output = self.use_command_with_output(|cmd| {
             cmd.arg("list")

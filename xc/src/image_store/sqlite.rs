@@ -74,7 +74,8 @@ impl SqliteImageStore {
 
             create table if not exists image_manifests (
                 manifest text not null,
-                digest text not null primary key
+                digest text not null primary key,
+                origin text
             );
 
             create table if not exists image_manifest_tags (
@@ -86,13 +87,9 @@ impl SqliteImageStore {
                     references image_manifests(digest)
                     on delete cascade
             );
-
-            create table if not exists commit_assoc (
-                commit_id text not null,
-                digest text not null
-            );
             ",
-        );
+        )?;
+
         // only for people installed and used xc prior to July 6th, 2023
         if self
             .db
@@ -106,6 +103,15 @@ impl SqliteImageStore {
 }
 
 impl ImageStore for SqliteImageStore {
+    fn purge_all_untagged_manifest(&self) -> Result<(), ImageStoreError> {
+        self.db.execute(
+            "
+            delete from image_manifests where digest not in (select digest from image_manifest_tags)
+            ",
+            [],
+        )?;
+        Ok(())
+    }
     fn query_diff_id(&self, digest: &OciDigest) -> Result<Option<DiffIdMap>, ImageStoreError> {
         let mut stmt = self.db.prepare_cached(
             "

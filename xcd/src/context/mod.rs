@@ -39,7 +39,7 @@ use crate::util::TwoWayMap;
 use anyhow::Context;
 use freebsd::fs::zfs::{ZfsHandle, ZfsSnapshot};
 use freebsd::net::pf;
-use oci_util::digest::OciDigest;
+use oci_util::digest::{DigestAlgorithm, OciDigest};
 use oci_util::image_reference::ImageReference;
 use oci_util::layer::ChainId;
 use std::collections::HashMap;
@@ -170,6 +170,94 @@ impl ServerContext {
         self.sites.get(id).cloned()
     }
 
+    // XXX: Potential race condition when trying to import/commit/pull images during purge
+    pub(crate) async fn purge_images(&self) -> anyhow::Result<()> {
+        let config = self.config();
+        let layers_dir = &config.layers_dir;
+        let im = self.image_manager.read().await;
+        _ = im.purge().await?;
+
+        let files = std::fs::read_dir(&layers_dir).and_then(|dir| {
+            let mut files = Vec::new();
+            for entry in dir {
+                let entry = entry?;
+                if entry.file_type()?.is_file() {
+                    if let Some(filename) = entry
+                        .file_name()
+                        .to_str()
+                        .and_then(|s| s.parse::<OciDigest>().ok())
+                    {
+                        files.push(filename);
+                    }
+                }
+            }
+            Ok(files)
+        })?;
+
+        let zfs = ZfsHandle::default();
+        let chain_ids = ZfsHandle::default()
+            .list_direct_children(&config.image_dataset)?
+            .into_iter()
+            .filter_map(|pb| {
+                pb.file_name()
+                    .and_then(|oss| oss.to_str())
+                    .and_then(|s| s.parse::<ChainId>().ok())
+            });
+
+        let mut file_set: std::collections::HashSet<OciDigest> =
+            std::collections::HashSet::from_iter(files.into_iter());
+        let mut chain_id_set: std::collections::HashSet<ChainId> =
+            std::collections::HashSet::from_iter(chain_ids);
+
+        let records = im.list_all_tagged().await?;
+
+        for record in records.iter() {
+            if !file_set.is_empty() {
+                let files = record.manifest.layers();
+                for file in files.iter() {
+                    for repr in im.query_archives(&file).await?.iter() {
+                        file_set.remove(&repr.archive_digest);
+                        file_set.remove(&repr.diff_id);
+                    }
+                }
+            }
+            if !chain_id_set.is_empty() {
+                if let Some(cid) = record.manifest.chain_id() {
+                    chain_id_set.remove(&cid);
+                    let props = zfs.get_props(format!("{}/{cid}", config.image_dataset))?;
+                    let mut origin_chain = None;
+                    while {
+                        if let Some(Some(origin)) = props.get("origin") {
+                            if let Some(c) = origin
+                                .split_once('@')
+                                .and_then(|(_, c)| ChainId::from_str(c).ok())
+                            {
+                                chain_id_set.remove(&c);
+                                origin_chain = Some(c);
+                            }
+                        }
+
+                        origin_chain.is_some()
+                    } {}
+                }
+            }
+        }
+
+        for garbage in file_set.iter() {
+            std::fs::remove_file(format!("{layers_dir}/{garbage}"))?;
+        }
+
+        for chain_id in chain_id_set.iter() {
+            _ = zfs.destroy(
+                format!("{}/{chain_id}", config.image_dataset),
+                false,
+                false,
+                false,
+            );
+        }
+        Ok(())
+    }
+
     pub async fn resolve_image(
         &self,
         name: impl AsRef<str>,
@@ -260,51 +348,17 @@ impl ServerContext {
         }
         ret
     }
+
     pub(crate) async fn do_commit_file(
         &mut self,
         container_name: &str,
         file_fd: RawFd,
     ) -> Result<OciDigest, anyhow::Error> {
         let file = unsafe { std::fs::File::from_raw_fd(file_fd) };
-        let container = self
-            .resolve_container_by_name(container_name)
-            .await
-            .expect("no such container");
-        let container_id = container.id;
-        let commit_id = xc::util::gen_id();
-        let config = self.config();
-        let running_dataset = format!("{}/{}", config.container_dataset, container_id);
-
-        let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
-        let zfs_origin = container.zfs_origin.expect("missing zfs origin");
-        let zfs = ZfsHandle::default();
-        zfs.snapshot2(&running_dataset, &commit_id).unwrap();
-
-        debug!("taking zfs snapshot for {dst_dataset}@xc");
-        let child = std::process::Command::new("ocitar")
-            .arg("-cf-")
-            .arg("--write-to-stderr")
-            .stdout(file)
-            .stderr(Stdio::piped())
-            .arg("--zfs-diff")
-            .arg(format!("{zfs_origin}@xc"))
-            .arg(format!("{running_dataset}@{commit_id}"))
-            .spawn()
-            .expect("fail to spawn ocitar");
-
-        let output = child.wait_with_output()?;
-
-        let (diff_id, _digest) = {
-            let mut results = std::str::from_utf8(&output.stdout).unwrap().trim().lines();
-            let diff_id = results.next().expect("unexpected output");
-            let digest = results.next().expect("unexpected output");
-            eprintln!("diff_id: {diff_id}");
-            (
-                OciDigest::from_str(diff_id).unwrap(),
-                OciDigest::from_str(digest).unwrap()
-            )
-        };
-        zfs.destroy(format!("{running_dataset}@{commit_id}"), true, true, true)?;
+        let site = self.get_site(container_name).context("no surch site")?;
+        let mut site = site.write().await;
+        let snapshot = site.snapshot_with_generated_tag()?;
+        let (diff_id, _digest) = site.commit_to_file("init", &snapshot, file)?;
         Ok(diff_id)
     }
 
@@ -313,88 +367,121 @@ impl ServerContext {
         container_name: &str,
         name: &str,
         tag: &str,
-    ) -> Result<String, anyhow::Error> {
-        let container = self
-            .resolve_container_by_name(container_name)
-            .await
-            .expect("no such container");
-        let container_id = container.id.to_string();
-        let commit_id = xc::util::gen_id();
+    ) -> Result<OciDigest, anyhow::Error> {
         let config = self.config();
         let layers_dir = &config.layers_dir;
-        let temp_file = format!("{layers_dir}/{commit_id}");
-        //
-        let running_dataset = format!("{}/{}", config.container_dataset, container_id);
-        let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
-
-        let zfs_origin = container.zfs_origin.clone().expect("missing zfs origin");
-
-        let zfs = ZfsHandle::default();
-        let mut manifest = container
-            .origin_image
-            .clone()
-            .expect("missing origin image");
-
-        {
-            zfs.snapshot2(running_dataset.clone(), &commit_id.to_string())
-                .unwrap();
-            zfs.clone2(
-                running_dataset.clone(),
-                &commit_id.to_string(),
-                dst_dataset.clone(),
-            )
-            .unwrap();
-            zfs.promote(dst_dataset.clone()).unwrap();
-        }
-        let snapshot = ZfsSnapshot::new(&dst_dataset, "xc");
-        debug!("taking zfs snapshot for {dst_dataset}@xc");
-        snapshot.execute(&zfs)?;
-
-        let prev_chain_id = zfs_origin.rsplit_once('/').expect("").1;
-        debug!("prev_chain_id: {prev_chain_id:#?}");
-        let mut chain_id = ChainId::from_str(prev_chain_id)?;
-
-        let output = std::process::Command::new("ocitar")
-            .arg("-cf")
-            .arg(temp_file.clone())
-            .arg("--compression")
-            .arg("zstd")
-            .arg("--zfs-diff")
-            .arg(format!("{zfs_origin}@xc"))
-            .arg(format!("{dst_dataset}@xc"))
-            .output()
-            .expect("fail to spawn ocitar");
-
-        let (diff_id, digest) = {
-            let mut results = std::str::from_utf8(&output.stdout).unwrap().trim().lines();
-            let diff_id = results.next().expect("unexpected output");
-            let digest = results.next().expect("unexpected output");
-            eprintln!("diff_id: {diff_id}");
-            eprintln!("rename: {temp_file} -> {}/{digest}", config.layers_dir);
-            std::fs::rename(temp_file, format!("{}/{digest}", config.layers_dir))?;
-            (
-                OciDigest::from_str(diff_id).unwrap(),
-                OciDigest::from_str(digest).unwrap()
-            )
-        };
-
-        chain_id.consume_diff_id(oci_util::digest::DigestAlgorithm::Sha256, &diff_id);
-        let new_name = format!("{}/{chain_id}", config.image_dataset);
-        zfs.rename(&dst_dataset, new_name)?;
-
-        manifest.push_layer(&diff_id);
-
+        let commit_id = xc::util::gen_id();
+        let site = self.get_site(container_name).context("no such site")?;
+        let mut site = site.write().await;
+        let snapshot = site.snapshot_with_generated_tag()?;
+        let temp_file_path = format!("{layers_dir}/{commit_id}");
+        let temp_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&temp_file_path)?;
+        let (diff_id, digest) = site.commit_to_file("init", &snapshot, temp_file)?;
+        // XXX: otherwise default to null image
+        let mut image = site.container_dump().and_then(|c| c.origin_image).unwrap();
+        image.push_layer(&diff_id);
+        let chain_id = image.chain_id().unwrap();
+        let dst_dataset = format!("{}/{chain_id}", config.image_dataset);
+        site.promote_snapshot(&snapshot, &dst_dataset)?;
+        site.zfs.snapshot2(&dst_dataset, "xc")?;
         let context = self.image_manager.read().await;
-
-        _ = context
-            .register_and_tag_manifest(name, tag, &manifest)
-            .await;
-
+        _ = context.register_and_tag_manifest(name, &tag, &image).await;
         context.map_diff_id(&diff_id, &digest, "zstd").await?;
 
-        Ok(commit_id)
+        std::fs::rename(&temp_file_path, format!("{layers_dir}/{digest}"))?;
+        Ok(diff_id)
     }
+    /*
+        pub(crate) async fn do_commit(
+            &mut self,
+            container_name: &str,
+            name: &str,
+            tag: &str,
+        ) -> Result<String, anyhow::Error> {
+            let container = self
+                .resolve_container_by_name(container_name)
+                .await
+                .expect("no such container");
+            let container_id = container.id.to_string();
+            let commit_id = xc::util::gen_id();
+            let config = self.config();
+            let layers_dir = &config.layers_dir;
+            let temp_file = format!("{layers_dir}/{commit_id}");
+            //
+            let running_dataset = format!("{}/{}", config.container_dataset, container_id);
+            let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
 
+            let zfs_origin = container.zfs_origin.clone().expect("missing zfs origin");
+
+            let zfs = ZfsHandle::default();
+            let mut manifest = container
+                .origin_image
+                .clone()
+                .expect("missing origin image");
+
+            {
+                zfs.snapshot2(running_dataset.clone(), &commit_id.to_string())
+                    .unwrap();
+                zfs.clone2(
+                    running_dataset.clone(),
+                    &commit_id.to_string(),
+                    dst_dataset.clone(),
+                )
+                .unwrap();
+                zfs.promote(dst_dataset.clone()).unwrap();
+            }
+            let snapshot = ZfsSnapshot::new(&dst_dataset, "xc");
+            debug!("taking zfs snapshot for {dst_dataset}@xc");
+            snapshot.execute(&zfs)?;
+
+            let prev_chain_id = zfs_origin.rsplit_once('/').expect("").1;
+            debug!("prev_chain_id: {prev_chain_id:#?}");
+            let mut chain_id = ChainId::from_str(prev_chain_id)?;
+
+            let output = std::process::Command::new("ocitar")
+                .arg("-cf")
+                .arg(temp_file.clone())
+                .arg("--compression")
+                .arg("zstd")
+                .arg("--zfs-diff")
+                .arg(format!("{zfs_origin}@xc"))
+                .arg(format!("{dst_dataset}@xc"))
+                .output()
+                .expect("fail to spawn ocitar");
+
+            let (diff_id, digest) = {
+                let mut results = std::str::from_utf8(&output.stdout).unwrap().trim().lines();
+                let diff_id = results.next().expect("unexpected output");
+                let digest = results.next().expect("unexpected output");
+                eprintln!("diff_id: {diff_id}");
+                eprintln!("rename: {temp_file} -> {}/{digest}", config.layers_dir);
+                std::fs::rename(temp_file, format!("{}/{digest}", config.layers_dir))?;
+                (
+                    OciDigest::from_str(diff_id).unwrap(),
+                    OciDigest::from_str(digest).unwrap()
+                )
+            };
+
+            chain_id.consume_diff_id(oci_util::digest::DigestAlgorithm::Sha256, &diff_id);
+            let new_name = format!("{}/{chain_id}", config.image_dataset);
+            zfs.rename(&dst_dataset, new_name)?;
+
+            manifest.push_layer(&diff_id);
+
+            let context = self.image_manager.read().await;
+
+            _ = context
+                .register_and_tag_manifest(name, tag, &manifest)
+                .await;
+
+            context.map_diff_id(&diff_id, &digest, "zstd").await?;
+
+            Ok(commit_id)
+        }
+    */
     pub(crate) async fn do_rdr(
         &mut self,
         name: &str,

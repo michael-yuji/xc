@@ -40,6 +40,9 @@ pub(crate) struct AddEnvDirective {
 }
 
 impl Directive for AddEnvDirective {
+    fn up_to_date(&self) -> bool {
+        true
+    }
     fn from_action(action: &Action) -> Result<AddEnvDirective> {
         let mut args = vec!["dummy".to_string()];
         args.extend(action.args.clone());

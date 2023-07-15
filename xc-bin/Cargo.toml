@@ -7,6 +7,9 @@ edition = "2021"
 name = "xc"
 path = "src/main.rs"
 
+[dev-dependencies]
+serial_test = "0.8.0"
+
 [dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }

@@ -100,7 +100,7 @@ macro_rules! impl_undos {
             paste! {
                 #[doc = $doc]
                 #[doc = ""]
-                #[doc = "# Parameters"]
+                #[doc = "# Arguments"]
                 $(
                     #[doc = "* `" $arg "` - " $($adoc)? ""]
                 )*

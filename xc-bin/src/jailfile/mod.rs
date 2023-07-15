@@ -23,6 +23,7 @@
 // SUCH DAMAGE.
 pub mod directives;
 pub mod parse;
+pub mod statefile;
 
 use ipc::packet::codec::{Fd, Maybe};
 use oci_util::image_reference::ImageReference;

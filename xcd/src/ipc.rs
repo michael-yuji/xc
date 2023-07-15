@@ -421,6 +421,34 @@ async fn describe_images(
     Ok(rows)
 }
 
+#[ipc_method(method = "remove_image")]
+async fn remove_image(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: ImageReference,
+) -> GenericResult<()> {
+    // XXX: Handle @<digest> tag
+    context
+        .read()
+        .await
+        .image_manager
+        .read()
+        .await
+        .untag_image(&request.name, &request.tag.to_string())
+        .await
+        .unwrap();
+    Ok(())
+}
+
+#[ipc_method(method = "purge")]
+async fn purge(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: (),
+) -> GenericResult<()> {
+    context.read().await.purge_images().await.unwrap();
+    Ok(())
+}
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListNetworkRequest {}
 
@@ -729,13 +757,12 @@ async fn commit_container(
 ) -> GenericResult<CommitResponse> {
     let mut ctx = context.write().await;
     let result = if let Maybe::Some(fd) = request.alt_out {
-        ctx.do_commit_file(&request.container_name, fd.0)
-            .await
-            .map(|a| a.to_string())
+        ctx.do_commit_file(&request.container_name, fd.0).await
     } else {
         ctx.do_commit(&request.container_name, &request.name, &request.tag)
             .await
-    };
+    }
+    .map(|s| s.to_string());
     match result {
         Ok(commit_id) => {
             let response = CommitResponse { commit_id };
@@ -967,6 +994,8 @@ pub(crate) async fn register_to_service(
     service: &mut Service<tokio::sync::RwLock<ServerContext>, Variables>,
 ) {
     service.register_event_delegate(on_channel_closed).await;
+    service.register(purge).await;
+    service.register(remove_image).await;
     service.register(create_channel).await;
     service.register(exec).await;
     service.register(fd_import).await;

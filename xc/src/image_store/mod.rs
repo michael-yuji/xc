@@ -62,6 +62,8 @@ pub trait ImageStore {
 
     fn register_manifest(&self, manifest: &JailImage) -> Result<OciDigest, ImageStoreError>;
 
+    fn purge_all_untagged_manifest(&self) -> Result<(), ImageStoreError>;
+
     fn tag_manifest(
         &self,
         manifest: &OciDigest,

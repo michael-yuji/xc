@@ -90,7 +90,6 @@ impl<R: Read> Read for DigestReaderHandle<R> {
     }
 }
 
-
 pub struct DigestSink<W: Write> {
     sink: W,
     digest: Rc<RefCell<Sha256>>,
@@ -100,10 +99,7 @@ pub struct DigestSink<W: Write> {
 
 impl<T: Write> DigestSink<T> {
     pub fn new<W: Write>(sink: W, digest: Rc<RefCell<Sha256>>) -> DigestSink<W> {
-        DigestSink {
-            sink,
-            digest,
-        }
+        DigestSink { sink, digest }
     }
 }
 impl<W: Write> Write for DigestSink<W> {

@@ -43,6 +43,9 @@ pub(crate) struct CopyDirective {
 }
 
 impl Directive for CopyDirective {
+    fn up_to_date(&self) -> bool {
+        true
+    }
     fn from_action(action: &Action) -> Result<CopyDirective> {
         if action.directive_name != "COPY" {
             bail!("directive_name is not COPY")

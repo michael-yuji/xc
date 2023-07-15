@@ -43,6 +43,9 @@ pub(crate) struct VolumeDirective {
     name: Option<String>,
 }
 impl Directive for VolumeDirective {
+    fn up_to_date(&self) -> bool {
+        true
+    }
     fn from_action(action: &Action) -> Result<VolumeDirective> {
         if action.directive_name != "VOLUME" {
             bail!("directive_name is not VOLUME")

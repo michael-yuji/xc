@@ -26,6 +26,7 @@ mod config_manager;
 mod context;
 mod devfs_store;
 mod image;
+mod layer_manager;
 mod network_manager;
 mod port;
 mod registry;

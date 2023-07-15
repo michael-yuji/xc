@@ -95,6 +95,9 @@ pub(crate) struct RunDirective {
 }
 
 impl Directive for RunDirective {
+    fn up_to_date(&self) -> bool {
+        true
+    }
     fn from_action(action: &Action) -> Result<RunDirective> {
         let mut args_iter = action.args.iter();
         let mut envs = HashMap::new();

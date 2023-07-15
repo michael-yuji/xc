@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
         .expect("manifest not found");
 
     let config_descriptor = manifest.config;
-    let config: FreeOciConfig<Value> = session
+    let config: Value = session
         .fetch_blob_as(&config_descriptor.digest)
         .await?
         .expect("config not found");

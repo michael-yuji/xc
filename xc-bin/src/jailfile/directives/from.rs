@@ -39,6 +39,11 @@ pub(crate) struct FromDirective {
 }
 
 impl Directive for FromDirective {
+    fn up_to_date(&self) -> bool {
+        // XXX: Technically, we should check against the image manifest digest to verify the same
+        // tag is still pointing to the same image, but hey, I'm lazy!
+        true
+    }
     fn from_action(action: &Action) -> Result<FromDirective> {
         if action.directive_name != "FROM" {
             bail!("directive_name is not FROM");

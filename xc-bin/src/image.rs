@@ -52,6 +52,9 @@ pub(crate) enum ImageAction {
     GetConfig {
         image_id: String,
     },
+    Remove {
+        image_id: ImageReference,
+    },
     SetConfig {
         image_id: String,
         meta_path: String,
@@ -376,6 +379,9 @@ pub(crate) fn use_image_action(
                     println!("{json}");
                 }
             }
+        }
+        ImageAction::Remove { image_id } => {
+            do_remove_image(conn, image_id)?;
         }
         ImageAction::SetConfig {
             image_id,

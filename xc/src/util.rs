@@ -38,6 +38,23 @@ where
     Ok(opt.unwrap_or_default())
 }
 
+pub fn sha256_hex_file_r_bytes(path: impl AsRef<Path>) -> Result<[u8; 32], anyhow::Error> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let stat = std::fs::metadata(path.as_ref())?;
+    let mut file = std::fs::OpenOptions::new().read(true).open(path.as_ref())?;
+    let mut buf = [0u8; 4096];
+    let mut hasher = Sha256::new();
+    let mut remaining = stat.len() as usize;
+    while remaining > 0 {
+        let nread = file.read(&mut buf)?;
+        hasher.update(&buf[..(4096.min(nread))]);
+        remaining -= nread;
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    Ok(digest)
+}
+
 #[derive(Debug, Clone)]
 pub enum PathComp {
     RootDir,
@@ -349,7 +366,7 @@ mod tests {
         let root = "/usr/home/yuuji/test_xc_realpath/root";
         let path = "/a/b/c";
         let expected = "/usr/home/yuuji/test_xc_realpath/root/usr";
-        let result = realpath(root, path, 16);
+        let result = realpath(root, path);
         eprintln!("result: {result:#?}");
         assert!(false);
         //        assert_eq!(result, Ok(Some(std::path::PathBuf::from(expected))))

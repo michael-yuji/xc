@@ -48,9 +48,10 @@ use xc::image_store::{DiffIdMap, ImageRecord, ImageStore, ImageStoreError};
 use xc::models::jail_image::JailImage;
 use xc::tasks::{DownloadLayerStatus, ImportImageState, ImportImageStatus};
 
-struct DiffMap {
-    diff_id: OciDigest,
-    descriptor: Descriptor,
+#[derive(Clone)]
+pub struct DiffMap {
+    pub diff_id: OciDigest,
+    pub descriptor: Descriptor,
 }
 
 /// Shared environment accessible to workers
@@ -169,19 +170,6 @@ impl ImageManager {
             .map_diff_id(diff_id, archive, content_type)
     }
 
-    #[allow(dead_code)]
-    pub async fn associate_commit_manifest(
-        &self,
-        commit_id: &str,
-        manifest: &JailImage,
-    ) -> Result<(), ImageStoreError> {
-        self.context
-            .image_store
-            .lock()
-            .await
-            .associate_commit_manifest(commit_id, manifest)
-    }
-
     pub async fn query_archives(
         &self,
         diff_id: &OciDigest,
@@ -191,6 +179,19 @@ impl ImageManager {
             .lock()
             .await
             .query_archives(diff_id)
+    }
+
+    pub async fn untag_image(&self, name: &str, tag: &str) -> Result<(), ImageStoreError> {
+        self.context.image_store.lock().await.untag(name, tag)
+    }
+
+    pub async fn purge(&self) -> Result<(), ImageStoreError> {
+        self.context
+            .image_store
+            .lock()
+            .await
+            .purge_all_untagged_manifest()?;
+        Ok(())
     }
 
     pub fn get_upload_state(&mut self, id: &str) -> PushImageStatusDesc {
@@ -436,13 +437,14 @@ impl ImageManager {
 /// desired rootfs
 #[derive(Clone, Debug)]
 pub struct RootFsRecipe {
-    chain_id: ChainId,
+    /// expected chain_id
+    pub chain_id: ChainId,
     /// The dataset to be cloned
-    source: Option<ChainId>,
+    pub source: Option<ChainId>,
     /// The filesystem layers to be extracted at the cloned root
-    digests: Vec<Descriptor>, //    digests: Vec<OciDigest>,
+    pub digests: Vec<Descriptor>, //    digests: Vec<OciDigest>,
 
-    diff_ids: Vec<OciDigest>,
+    pub diff_ids: Vec<OciDigest>,
 }
 
 /// Given a dataset, get all the children datasets that have their name conform to the OCI chain id
@@ -543,7 +545,10 @@ impl RootFsRecipe {
             if !handle.exists(&source_dataset) {
                 return Err(StageLayerError::SourceDatasetNotFound(id.clone()));
             }
-            handle.clone2(&source_dataset, "xc", &target_dataset)?;
+            // TODO: rollback the dataset first
+            handle.snapshot2(&source_dataset, "xc2")?;
+            handle.clone2(&source_dataset, "xc2", &target_dataset)?;
+            handle.promote(&target_dataset)?;
         } else {
             debug!("creating new dataset as no ancestors found");
             handle.create2(&target_dataset, false, false)?;

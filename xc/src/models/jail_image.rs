@@ -193,6 +193,7 @@ impl Default for JailImage {
                 typ: "layers".to_string(),
                 diff_ids: Vec::new(),
             },
+            history: Vec::new(),
         })
     }
 }
@@ -242,6 +243,7 @@ impl JailConfig {
                 typ: "layers".to_string(),
                 diff_ids,
             },
+            history: Vec::new(),
         })
     }
     pub fn from_json(value: serde_json::Value) -> Option<JailImage> {

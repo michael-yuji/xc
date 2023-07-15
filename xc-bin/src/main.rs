@@ -142,6 +142,7 @@ enum Action {
         no_print_header: bool,
         format: Option<String>,
     },
+    Purge,
     Pull {
         image_id: ImageReference,
         local_reference: Option<ImageReference>,
@@ -437,6 +438,9 @@ fn main() -> Result<(), ActionError> {
         }
         Action::Network(action) => {
             _ = use_network_action(&mut conn, action);
+        }
+        Action::Purge => {
+            do_purge(&mut conn, ())?.unwrap();
         }
         Action::Ps {
             no_print_header,

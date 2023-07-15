@@ -39,6 +39,7 @@ use xc::models::{EntryPoint, EnvSpec, MountSpec, SystemVPropValue};
 pub(crate) trait Directive: Sized {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error>;
     fn run_in_context(&self, context: &mut JailContext) -> Result<(), anyhow::Error>;
+    fn up_to_date(&self) -> bool;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -202,6 +203,10 @@ impl ConfigMod {
 }
 
 impl Directive for ConfigMod {
+    fn up_to_date(&self) -> bool {
+        true
+    }
+
     fn from_action(action: &Action) -> Result<Self, anyhow::Error> {
         match action.directive_name.as_str() {
             "WORKDIR" => {
