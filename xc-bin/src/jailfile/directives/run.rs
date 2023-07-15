@@ -88,8 +88,12 @@ impl InputSource for VecSlice {
 }
 
 pub(crate) struct RunDirective {
+    /*
     arg0: String,
     args: Vec<String>,
+    */
+    shell: String,
+    command: String,
     envs: HashMap<String, String>,
     input: Input,
 }
@@ -99,10 +103,10 @@ impl Directive for RunDirective {
         true
     }
     fn from_action(action: &Action) -> Result<RunDirective> {
-        let mut args_iter = action.args.iter();
-        let mut envs = HashMap::new();
-        let mut args = Vec::new();
+//        let mut envs = HashMap::new();
 
+        let command = action.args.join(" ").to_string();
+/*
         let mut curr = args_iter.next();
 
         while let Some((key, value)) = curr.and_then(|c| c.split_once('=')) {
@@ -117,16 +121,17 @@ impl Directive for RunDirective {
         for arg in args_iter {
             args.push(arg.to_string());
         }
-
+*/
         let input = match &action.heredoc {
             Some(value) => Input::Content(value.to_string()),
             None => Input::None,
         };
 
         Ok(RunDirective {
-            arg0: arg0.to_string(),
-            args,
-            envs,
+//            arg0: arg0.to_string(),
+            shell: "/bin/sh".to_string(),
+            command,
+            envs: HashMap::new(),
             input,
         })
     }
@@ -139,14 +144,17 @@ impl Directive for RunDirective {
 
         let kq = unsafe { nix::libc::kqueue() };
 
+        info!("RUN: (shell = {}) {}", self.shell, self.command);
+/*
         info!(
             "RUN: {} {:?} with stdin: {:?}",
             self.arg0, self.args, self.input
         );
+*/
         let request = ExecCommandRequest {
             name: context.container_id.clone().expect("container not set"),
-            arg0: self.arg0.clone(),
-            args: self.args.clone(),
+            arg0: self.shell.clone(),
+            args: vec!["-c".to_string(), self.command.to_string()],
             envs: self.envs.clone(),
             stdin: Maybe::Some(Fd(stdin_b)),
             stdout: Maybe::Some(Fd(stdout_b)),

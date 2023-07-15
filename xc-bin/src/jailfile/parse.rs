@@ -71,6 +71,10 @@ pub(crate) fn parse_jailfile(input: &str) -> Result<Vec<Action>, anyhow::Error> 
                     let _heredoc_tag = heredoc_tokens.next().unwrap();
                     heredoc = Some(heredoc_tokens.next().unwrap().as_str().to_string());
                     break;
+                } else if value.as_str().starts_with("\"") {
+                    args.push(value.as_str().strip_prefix('\"').unwrap().strip_suffix('\"').unwrap().to_string())
+                } else if value.as_str().starts_with("\'") {
+                    args.push(value.as_str().strip_prefix('\'').unwrap().strip_suffix('\'').unwrap().to_string())
                 } else {
                     args.push(value.as_str().to_string());
                 }

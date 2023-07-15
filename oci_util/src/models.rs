@@ -132,6 +132,7 @@ pub struct FreeOciConfig<T> {
     pub os: String,
     pub config: Option<T>,
     pub rootfs: OciConfigRootFs,
+    #[serde(default)]
     pub history: Vec<Histroy>,
 }
 
