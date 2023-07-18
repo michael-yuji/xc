@@ -243,10 +243,27 @@ impl Container {
         for allow in self.allowing.iter() {
             proto = proto.param(format!("allow.{allow}"), Value::Int(1));
         }
-
         if self.linux {
+
             proto = proto.param("linux", Value::Int(1));
-            //            proto = proto.param("elf.fallback_brand", Value::Int(3));
+
+            let config = &self.origin_image.as_ref().map(|ji| ji.jail_config());
+
+            if let Some(osname) = config.as_ref().and_then(|s| s.linux_osname.clone()) {
+                proto = proto.param("linux.osname", Value::String(osname));
+            }
+            if let Some(osrelease) = config.as_ref().and_then(|s| s.linux_osrelease.clone()) {
+                proto = proto.param("linux.osrelease", Value::String(osrelease));
+            }
+            if let Some(oss_version) = config.as_ref().and_then(|s| s.linux_oss_version.clone()) {
+                proto = proto.param("linux.osreldate", Value::String(oss_version));
+            }
+            if let Some(osrelease) = config.as_ref().and_then(|s| s.osrelease.clone()) {
+                proto = proto.param("osrelease", Value::String(osrelease));
+            }
+            if let Some(osreldate) = config.as_ref().and_then(|s| s.osreldate.clone()) {
+                proto = proto.param("osreldate", Value::Int(osreldate));
+            }
 
             let proc_path = format!("{root}/proc");
             let sys_path = format!("{root}/sys");

@@ -176,8 +176,21 @@ pub struct JailConfig {
     #[serde(default)]
     pub linux: bool,
 
+    /// The Linux OS name associated with the conatiner
+    pub linux_osname: Option<String>,
+
+    /// The Linux OS relasea associated with the container
+    pub linux_osrelease: Option<String>,
+
+    /// The Linux OSS version associated with the container
+    pub linux_oss_version: Option<String>,
+
     #[serde(default, deserialize_with = "default_on_missing")]
     pub labels: HashMap<String, String>,
+
+    pub osrelease: Option<String>,
+
+    pub osreldate: Option<i32>,
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]

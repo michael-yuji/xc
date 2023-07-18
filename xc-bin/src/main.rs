@@ -839,11 +839,19 @@ fn main() -> Result<(), ActionError> {
             args,
         } => {
             let n = EventFdNotify::new();
+            let mut envs = std::collections::HashMap::new();
+
+            if terminal {
+                if let Ok(term) = std::env::var("TERM") {
+                    envs.insert("TERM".to_string(), term.to_string());
+                }
+            }
+
             let request = ExecCommandRequest {
                 name,
                 arg0,
                 args,
-                envs: std::collections::HashMap::new(),
+                envs,
                 stdin: if terminal {
                     Maybe::None
                 } else {
