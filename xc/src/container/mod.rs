@@ -40,6 +40,7 @@ use anyhow::Context;
 use effect::UndoStack;
 use freebsd::event::EventFdNotify;
 use freebsd::net::ifconfig::IFCONFIG_CMD;
+use ipcidr::IpCidr;
 use jail::param::Value;
 use jail::StoppedJail;
 use oci_util::image_reference::ImageReference;
@@ -86,16 +87,8 @@ pub struct Container {
 }
 
 impl Container {
-    pub fn start_transactionally(&self, undo: &mut UndoStack) -> anyhow::Result<RunningContainer> {
-        info!(name = self.name, "starting jail");
-
-        let root = &self.root;
-        let anchor = format!("xc/{}", self.id);
-
-        undo.pf_create_anchor(anchor)
-            .with_context(|| format!("failed to create pf anchor for container {}", self.id))?;
-
-        let resolv_conf_path = realpath(root, "/etc/resolv.conf")
+    fn setup_resolv_conf(&self) -> anyhow::Result<()> {
+        let resolv_conf_path = realpath(&self.root, "/etc/resolv.conf")
             .with_context(|| format!("failed finding /etc/resolv.conf in jail {}", self.id))?;
 
         match &self.dns {
@@ -126,6 +119,19 @@ impl Container {
                 std::fs::write(resolv_conf_path, resolv_conf)?;
             }
         }
+        Ok(())
+    }
+
+    pub fn start_transactionally(&self, undo: &mut UndoStack) -> anyhow::Result<RunningContainer> {
+        info!(name = self.name, "starting jail");
+
+        let root = &self.root;
+        let anchor = format!("xc/{}", self.id);
+
+        undo.pf_create_anchor(anchor)
+            .with_context(|| format!("failed to create pf anchor for container {}", self.id))?;
+
+        self.setup_resolv_conf()?;
 
         let devfs_ruleset = self.devfs_ruleset_id;
 
@@ -243,11 +249,18 @@ impl Container {
         for allow in self.allowing.iter() {
             proto = proto.param(format!("allow.{allow}"), Value::Int(1));
         }
+
+        let config = &self.origin_image.as_ref().map(|ji| ji.jail_config());
+
+        if let Some(osrelease) = config.as_ref().and_then(|s| s.osrelease.clone()) {
+            proto = proto.param("osrelease", Value::String(osrelease));
+        }
+        if let Some(osreldate) = config.as_ref().and_then(|s| s.osreldate.clone()) {
+            proto = proto.param("osreldate", Value::Int(osreldate));
+        }
+
         if self.linux {
-
             proto = proto.param("linux", Value::Int(1));
-
-            let config = &self.origin_image.as_ref().map(|ji| ji.jail_config());
 
             if let Some(osname) = config.as_ref().and_then(|s| s.linux_osname.clone()) {
                 proto = proto.param("linux.osname", Value::String(osname));
@@ -257,12 +270,6 @@ impl Container {
             }
             if let Some(oss_version) = config.as_ref().and_then(|s| s.linux_oss_version.clone()) {
                 proto = proto.param("linux.osreldate", Value::String(oss_version));
-            }
-            if let Some(osrelease) = config.as_ref().and_then(|s| s.osrelease.clone()) {
-                proto = proto.param("osrelease", Value::String(osrelease));
-            }
-            if let Some(osreldate) = config.as_ref().and_then(|s| s.osreldate.clone()) {
-                proto = proto.param("osreldate", Value::Int(osreldate));
             }
 
             let proc_path = format!("{root}/proc");
@@ -425,4 +432,24 @@ pub struct ContainerManifest {
     pub origin_image: Option<JailImage>,
     pub allowing: Vec<String>,
     pub image_reference: Option<ImageReference>,
+}
+
+impl ContainerManifest {
+    /// Get the main address for a given managed network, that is, defined as the
+    /// first address created in such network
+    pub fn main_ip_for_network(&self, network: &str) -> Option<IpCidr> {
+        for alloc in self.ip_alloc.iter() {
+            if alloc
+                .network
+                .as_ref()
+                .map(|n| n == network)
+                .unwrap_or_default()
+            {
+                if let Some(first) = alloc.addresses.first() {
+                    return Some(first.clone());
+                }
+            }
+        }
+        None
+    }
 }

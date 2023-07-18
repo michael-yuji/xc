@@ -28,6 +28,7 @@ use crate::container::running::RunningContainer;
 use crate::container::{ContainerManifest, ProcessStat};
 use crate::elf::{brand_elf_if_unsupported, ElfBrand};
 use crate::models::exec::{Jexec, StdioMode};
+use crate::models::network::HostEntry;
 use crate::util::exists_exec;
 
 use anyhow::Context;
@@ -458,8 +459,7 @@ impl ProcessRunner {
                 Ok(spawn_info) => {
                     debug!("main spawn: {spawn_info:#?}");
                 }
-                Err(error) => error!("cannot spawn main: {error:#?}")
-
+                Err(error) => error!("cannot spawn main: {error:#?}"),
             }
             self.container.main_started_notify.notify_waiters();
             self.main_started = true;
@@ -470,6 +470,7 @@ impl ProcessRunner {
     fn handle_control_stream_cmd(&mut self, mut fd: i32, method: String, request: JsonPacket) {
         use ipc::proto::{write_response, Response};
         use ipc::transport::PacketTransport;
+        use std::io::Write;
         if method == "exec" {
             let jexec: Jexec = serde_json::from_value(request.data).unwrap();
             let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
@@ -479,13 +480,6 @@ impl ProcessRunner {
                 Ok(spawn_info) => {
                     let packet = write_response(0, spawn_info).unwrap();
                     _ = fd.send_packet(&packet).unwrap();
-                    /*
-                    let value = serde_json::to_value(&spawn_info).unwrap();
-                    let data = serde_json::to_value(&Response { errno: 0, value }).unwrap();
-                    // XXX: Naively assume we can always write to the remote socket
-                    let packet = JsonPacket { data, fds: Vec::new() };
-                    _ = fd.send_packet(&packet.to_packet().unwrap());
-                    */
                 }
                 Err(_err) => {
                     let packet = write_response(
@@ -496,20 +490,28 @@ impl ProcessRunner {
                     )
                     .unwrap();
                     _ = fd.send_packet(&packet).unwrap();
-                    /*
-                    let data = serde_json::to_value(&Response {
-                        errno: freebsd::libc::EIO,
-                        value: serde_json::json!({
-                            "message": "failed to spawn"
-                        })
-                    }).unwrap();
-                    let packet = JsonPacket { data, fds: Vec::new() };
-                    _ = fd.send_packet(&packet.to_packet().unwrap());
-                    */
                 }
             }
         } else if method == "run_main" {
             self.should_run_main = true;
+        } else if method == "write_hosts" {
+            let recv: Vec<HostEntry> = serde_json::from_value(request.data).unwrap();
+            if let Ok(host_path) = crate::util::realpath(&self.container.root, "/etc/hosts") {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .create(true)
+                    .open(host_path)
+                {
+                    writeln!(&mut file, "::1 localhost");
+                    writeln!(&mut file, "127.0.0.1 localhost");
+                    for entry in recv.iter() {
+                        writeln!(&mut file, "{} {}", entry.ip_addr, entry.hostname);
+                    }
+                }
+            }
+            let res_packet = write_response(0, ()).unwrap();
+            _ = fd.send_packet(&res_packet).unwrap()
         }
     }
 

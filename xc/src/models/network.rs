@@ -24,6 +24,7 @@
 use crate::util::mk_string;
 use ipcidr::IpCidr;
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 
 /// Policy to generate /etc/resolv.conf
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -148,6 +149,12 @@ impl PortRedirection {
         }
         self.dest_addr = Some(main_ip)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct HostEntry {
+    pub ip_addr: IpAddr,
+    pub hostname: String,
 }
 
 #[cfg(test)]

@@ -37,14 +37,13 @@ use crate::site::Site;
 use crate::util::TwoWayMap;
 
 use anyhow::Context;
-use freebsd::fs::zfs::{ZfsHandle, ZfsSnapshot};
+use freebsd::fs::zfs::ZfsHandle;
 use freebsd::net::pf;
-use oci_util::digest::{DigestAlgorithm, OciDigest};
+use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
 use oci_util::layer::ChainId;
 use std::collections::HashMap;
 use std::os::fd::{FromRawFd, RawFd};
-use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -59,11 +58,18 @@ use xc::models::network::*;
 pub struct ServerContext {
     pub(crate) network_manager: Arc<Mutex<NetworkManager>>,
     pub(crate) sites: HashMap<String, Arc<RwLock<Site>>>,
+
+    // map from alias to container id
     pub(crate) alias_map: TwoWayMap<String, String>,
+
     pub(crate) devfs_store: DevfsRulesetStore,
     pub(crate) image_manager: Arc<RwLock<ImageManager>>,
     pub(crate) config_manager: ConfigManager,
     pub(crate) port_forward_table: PortForwardTable,
+
+    // map from id to netgroups
+    pub(crate) ng2jails: HashMap<String, Vec<String>>,
+    pub(crate) jail2ngs: HashMap<String, Vec<String>>,
 }
 
 impl ServerContext {
@@ -102,6 +108,8 @@ impl ServerContext {
             sites: HashMap::new(),
             config_manager,
             port_forward_table: PortForwardTable::new(),
+            ng2jails: HashMap::new(),
+            jail2ngs: HashMap::new(),
         }
     }
 
@@ -168,6 +176,25 @@ impl ServerContext {
     pub(super) fn get_site(&self, name: &str) -> Option<Arc<RwLock<Site>>> {
         let id = self.alias_map.get(name)?;
         self.sites.get(id).cloned()
+    }
+
+    pub(super) async fn update_hosts(&mut self, network: &str) {
+        let mut hosts = Vec::new();
+        if let Some(jails) = self.ng2jails.get(network) {
+            for jail in jails.iter() {
+                if let Some(manifest) = self.resolve_container_by_name(jail).await {
+                    if let Some(cidr) = manifest.main_ip_for_network(network) {
+                        hosts.push((manifest.name.clone(), cidr.addr()));
+                    }
+                }
+            }
+            for jail in jails.iter() {
+                if let Some(site) = self.get_site(&jail) {
+                    let mut site = site.write().await;
+                    site.update_host_file(network, &hosts);
+                }
+            }
+        }
     }
 
     // XXX: Potential race condition when trying to import/commit/pull images during purge
@@ -337,6 +364,18 @@ impl ServerContext {
             self.port_forward_table.remove_rules(id);
             self.reload_pf_rdr_anchor()?;
             self.alias_map.remove_all_referenced(id);
+
+            if let Some(networks) = self.jail2ngs.get(id) {
+                for network in networks.iter() {
+                    if let Some(vs) = self.ng2jails.get_mut(network) {
+                        if let Some(position) = vs.iter().position(|s| s == id) {
+                            vs.remove(position);
+                        }
+                    }
+                }
+
+                self.jail2ngs.remove(id);
+            }
         }
         Ok(())
     }
@@ -394,94 +433,7 @@ impl ServerContext {
         std::fs::rename(&temp_file_path, format!("{layers_dir}/{digest}"))?;
         Ok(diff_id)
     }
-    /*
-        pub(crate) async fn do_commit(
-            &mut self,
-            container_name: &str,
-            name: &str,
-            tag: &str,
-        ) -> Result<String, anyhow::Error> {
-            let container = self
-                .resolve_container_by_name(container_name)
-                .await
-                .expect("no such container");
-            let container_id = container.id.to_string();
-            let commit_id = xc::util::gen_id();
-            let config = self.config();
-            let layers_dir = &config.layers_dir;
-            let temp_file = format!("{layers_dir}/{commit_id}");
-            //
-            let running_dataset = format!("{}/{}", config.container_dataset, container_id);
-            let dst_dataset = format!("{}/{}", config.container_dataset, commit_id);
 
-            let zfs_origin = container.zfs_origin.clone().expect("missing zfs origin");
-
-            let zfs = ZfsHandle::default();
-            let mut manifest = container
-                .origin_image
-                .clone()
-                .expect("missing origin image");
-
-            {
-                zfs.snapshot2(running_dataset.clone(), &commit_id.to_string())
-                    .unwrap();
-                zfs.clone2(
-                    running_dataset.clone(),
-                    &commit_id.to_string(),
-                    dst_dataset.clone(),
-                )
-                .unwrap();
-                zfs.promote(dst_dataset.clone()).unwrap();
-            }
-            let snapshot = ZfsSnapshot::new(&dst_dataset, "xc");
-            debug!("taking zfs snapshot for {dst_dataset}@xc");
-            snapshot.execute(&zfs)?;
-
-            let prev_chain_id = zfs_origin.rsplit_once('/').expect("").1;
-            debug!("prev_chain_id: {prev_chain_id:#?}");
-            let mut chain_id = ChainId::from_str(prev_chain_id)?;
-
-            let output = std::process::Command::new("ocitar")
-                .arg("-cf")
-                .arg(temp_file.clone())
-                .arg("--compression")
-                .arg("zstd")
-                .arg("--zfs-diff")
-                .arg(format!("{zfs_origin}@xc"))
-                .arg(format!("{dst_dataset}@xc"))
-                .output()
-                .expect("fail to spawn ocitar");
-
-            let (diff_id, digest) = {
-                let mut results = std::str::from_utf8(&output.stdout).unwrap().trim().lines();
-                let diff_id = results.next().expect("unexpected output");
-                let digest = results.next().expect("unexpected output");
-                eprintln!("diff_id: {diff_id}");
-                eprintln!("rename: {temp_file} -> {}/{digest}", config.layers_dir);
-                std::fs::rename(temp_file, format!("{}/{digest}", config.layers_dir))?;
-                (
-                    OciDigest::from_str(diff_id).unwrap(),
-                    OciDigest::from_str(digest).unwrap()
-                )
-            };
-
-            chain_id.consume_diff_id(oci_util::digest::DigestAlgorithm::Sha256, &diff_id);
-            let new_name = format!("{}/{chain_id}", config.image_dataset);
-            zfs.rename(&dst_dataset, new_name)?;
-
-            manifest.push_layer(&diff_id);
-
-            let context = self.image_manager.read().await;
-
-            _ = context
-                .register_and_tag_manifest(name, tag, &manifest)
-                .await;
-
-            context.map_diff_id(&diff_id, &digest, "zstd").await?;
-
-            Ok(commit_id)
-        }
-    */
     pub(crate) async fn do_rdr(
         &mut self,
         name: &str,

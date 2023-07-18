@@ -874,12 +874,7 @@ pub struct ExecCommandRequest {
     pub notify: Maybe<Fd>,
     pub use_tty: bool,
 }
-/*
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ExecCommandResponse {
-    pub spawn_info: xc::container::process::SpawnInfo,
-}
-*/
+
 #[ipc_method(method = "exec")]
 async fn exec(
     context: Arc<RwLock<ServerContext>>,
@@ -906,16 +901,74 @@ async fn exec(
     if let Some(arc_site) = context.write().await.get_site(&request.name) {
         let mut site = arc_site.write().await;
         site.exec(jexec)
-        /*
-        if let Ok(spawn_info) = site.exec(jexec) {
-            eprintln!("spawn_info: {spawn_info:#?}");
-            Ok(ExecCommandResponse { spawn_info })
-        } else {
-            ipc_err(EIO, "something went wrong")
-        }
-        */
     } else {
-        enoent("site not found")
+        enoent("container not found")
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct NetgroupCommit {
+    pub netgroup_name: String,
+}
+
+#[ipc_method(method = "commit_netgroup")]
+async fn commit_netgroup(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: NetgroupCommit,
+) -> GenericResult<()> {
+    context
+        .write()
+        .await
+        .update_hosts(&request.netgroup_name)
+        .await;
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct NetgroupAddContainerRequest {
+    pub netgroup_name: String,
+    pub container_name: String,
+    pub auto_create_netgroup: bool,
+    pub commit_immediately: bool,
+}
+
+#[ipc_method(method = "add-netgroup")]
+async fn add_container_to_netgroup(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: NetgroupAddContainerRequest,
+) -> GenericResult<()> {
+    let ng_name = request.netgroup_name.to_string();
+    let mut context = context.write().await;
+
+    if let Some(container_id) = context.alias_map.get(&request.container_name) {
+        let cid = container_id.to_string();
+
+        let js = if let Some(jails) = context.ng2jails.get_mut(&request.netgroup_name) {
+            jails.push(cid.to_string());
+            jails.clone()
+        } else if request.auto_create_netgroup {
+            context
+                .ng2jails
+                .insert(ng_name.to_string(), vec![cid.to_string()]);
+            vec![cid.to_string()]
+        } else {
+            return enoent("netgroup not found");
+        };
+
+        if let Some(ngs) = context.jail2ngs.get_mut(&cid) {
+            ngs.push(ng_name.to_string());
+        } else {
+            context.jail2ngs.insert(cid, vec![ng_name.to_string()]);
+        };
+
+        if request.commit_immediately {
+            context.update_hosts(&ng_name).await;
+        }
+        Ok(())
+    } else {
+        enoent("container not found")
     }
 }
 
@@ -1004,6 +1057,8 @@ pub(crate) async fn register_to_service(
     service: &mut Service<tokio::sync::RwLock<ServerContext>, Variables>,
 ) {
     service.register_event_delegate(on_channel_closed).await;
+    service.register(commit_netgroup).await;
+    service.register(add_container_to_netgroup).await;
     service.register(purge).await;
     service.register(remove_image).await;
     service.register(create_channel).await;

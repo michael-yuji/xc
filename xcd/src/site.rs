@@ -30,8 +30,11 @@ use ipc::packet::Packet;
 use ipc::proto::{Request, Response};
 use ipc::transport::PacketTransport;
 use oci_util::digest::OciDigest;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::File;
+use std::net::IpAddr;
 use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -45,6 +48,7 @@ use xc::container::effect::UndoStack;
 use xc::container::{Container, ContainerManifest};
 use xc::models::exec::Jexec;
 use xc::models::jail_image::JailImage;
+use xc::models::network::HostEntry;
 
 enum SiteState {
     Empty,
@@ -76,6 +80,8 @@ pub struct Site {
 
     // clients who interested when the main process started
     main_started_interests: Vec<EventFdNotify>,
+
+    hosts_cache: HashMap<String, Vec<(String, IpAddr)>>,
 }
 
 macro_rules! guard {
@@ -109,6 +115,7 @@ impl Site {
             state: SiteState::Empty,
             main_started_interests: Vec::new(),
             control_stream: None,
+            hosts_cache: HashMap::new(),
         }
     }
 
@@ -120,6 +127,32 @@ impl Site {
         for interest in self.main_started_interests.iter() {
             interest.notify_waiters();
         }
+    }
+
+    pub fn update_host_file(&mut self, network: &str, hosts: &Vec<(String, IpAddr)>) {
+        use ipc::packet::codec::FromPacket;
+        use ipc::proto::ipc_err;
+
+        self.hosts_cache.insert(network.to_string(), hosts.clone());
+
+        let mut host_entries = Vec::new();
+
+        for (_, entries) in self.hosts_cache.iter() {
+            for (hostname, ip_addr) in entries.iter() {
+                host_entries.push(HostEntry {
+                    ip_addr: *ip_addr,
+                    hostname: hostname.clone(),
+                })
+            }
+        }
+
+        let Some(stream) = self.control_stream.as_mut() else {
+            return
+        };
+
+        let packet = ipc::proto::write_request("write_hosts", host_entries).unwrap();
+        let Ok(_) = stream.send_packet(&packet) else { return };
+        _ = stream.recv_packet();
     }
 
     /// Clone and promote a snapshot to a dataset, any previous snapshot will become snapshot of

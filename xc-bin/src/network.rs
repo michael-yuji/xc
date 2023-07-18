@@ -41,6 +41,15 @@ pub(crate) enum NetworkAction {
         default_router: Option<IpAddr>,
     },
     List,
+    Tag {
+        #[clap(long = "no-commit", action)]
+        no_commit: bool,
+        network: String,
+        container: String,
+    },
+    CommitTag {
+        network: String,
+    },
 }
 
 pub(crate) fn use_network_action(
@@ -48,6 +57,25 @@ pub(crate) fn use_network_action(
     action: NetworkAction,
 ) -> Result<(), crate::ActionError> {
     match action {
+        NetworkAction::Tag {
+            no_commit,
+            network,
+            container,
+        } => {
+            let request = NetgroupAddContainerRequest {
+                netgroup_name: network,
+                container_name: container,
+                auto_create_netgroup: true,
+                commit_immediately: !no_commit,
+            };
+            do_add_container_to_netgroup(conn, request)?;
+        }
+        NetworkAction::CommitTag { network } => {
+            let request = NetgroupCommit {
+                netgroup_name: network.to_string(),
+            };
+            do_commit_netgroup(conn, request)?;
+        }
         NetworkAction::List => {
             let req = ListNetworkRequest {};
             let res = do_list_networks(conn, req)?;
