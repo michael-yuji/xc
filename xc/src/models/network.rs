@@ -33,7 +33,7 @@ pub enum DnsSetting {
         servers: Vec<String>,
         search_domains: Vec<String>,
     },
-    Nop
+    Nop,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -131,7 +131,6 @@ impl ImageManager {
         name: &str,
         tag: &str,
     ) -> Result<ImageRecord, ImageStoreError> {
-
         if name == "xc-predefine" && tag == "empty" {
             let manifest = JailImage::default();
             let digest = manifest.digest().to_string();
@@ -139,7 +138,7 @@ impl ImageManager {
                 name: "xc-predefine".to_string(),
                 tag: "empty".to_string(),
                 manifest,
-                digest
+                digest,
             };
             Ok(record)
         } else {

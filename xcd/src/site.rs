@@ -27,7 +27,7 @@ use anyhow::{anyhow, bail, Context};
 use freebsd::event::{EventFdNotify, Notify};
 use freebsd::fs::zfs::ZfsHandle;
 use ipc::packet::Packet;
-use ipc::proto::Request;
+use ipc::proto::{Request, Response};
 use ipc::transport::PacketTransport;
 use oci_util::digest::OciDigest;
 use std::ffi::OsString;
@@ -231,7 +231,13 @@ impl Site {
         Ok(())
     }
 
-    pub fn exec(&mut self, jexec: Jexec) {
+    pub fn exec(
+        &mut self,
+        jexec: Jexec,
+    ) -> ipc::proto::GenericResult<xc::container::process::SpawnInfo> {
+        use ipc::packet::codec::FromPacket;
+        use ipc::proto::ipc_err;
+
         let value = serde_json::to_value(jexec).unwrap();
         let request = Request {
             method: "exec".to_string(),
@@ -242,8 +248,24 @@ impl Site {
             data: encoded,
             fds: Vec::new(),
         };
-        if let Some(stream) = self.control_stream.as_mut() {
-            let _result = stream.send_packet(&packet);
+
+        let Some(stream) = self.control_stream.as_mut() else {
+            return ipc_err(freebsd::libc::ENOENT, "no much control stream")
+        };
+
+        let _result = stream.send_packet(&packet);
+
+        let Ok(packet) = stream.recv_packet() else {
+            return ipc_err(freebsd::libc::EIO, "no response from container")
+        };
+
+        let response =
+            Response::from_packet(packet, |bytes| serde_json::from_slice(&bytes).unwrap());
+
+        if response.errno == 0 {
+            Ok(serde_json::from_value(response.value).unwrap())
+        } else {
+            ipc_err(freebsd::libc::EIO, "something went wrong")
         }
     }
 

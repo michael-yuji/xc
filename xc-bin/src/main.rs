@@ -81,6 +81,7 @@ struct Args {
 #[allow(clippy::large_enum_variant)]
 #[derive(Parser, Debug)]
 enum Action {
+    /// Attach to the tty of the main process of the container, if available
     Attach {
         name: String,
     },
@@ -109,13 +110,14 @@ enum Action {
     #[clap(subcommand)]
     Image(ImageAction),
     Info,
+    /// Kill a container by either name, jail id, or id
     Kill {
         name: String,
     },
     Link {
         name: String,
     },
-    /// Login to a container
+    /// Login to a container registry
     ///
     /// This command does not actually verify the username/password against the registry, but just
     /// record the credential for later use
@@ -142,14 +144,21 @@ enum Action {
         no_print_header: bool,
         format: Option<String>,
     },
+    /// Remove un-referenced resources
     Purge,
+    /// Pull image from registries
     Pull {
+        /// The image to pull, in the format of {registry}/{repo}:{tag}, if registry is missing,
+        /// assume the default registry
         image_id: ImageReference,
+        /// Rename the imported image
         local_reference: Option<ImageReference>,
     },
-
+    /// Upload a locally available image to the remote registry
     Push {
+        /// The local image to push
         image_reference: ImageReference,
+        /// Destination of the upload
         new_image_reference: ImageReference,
     },
     #[clap(subcommand)]
@@ -216,6 +225,8 @@ enum Action {
     },
 
     Exec {
+        #[clap(short = 't', action)]
+        terminal: bool,
         name: String,
         arg0: String,
         args: Vec<String>,
@@ -335,7 +346,7 @@ fn main() -> Result<(), ActionError> {
                 if action.directive_name == "FROM" {
                     let directive = FromDirective::from_action(action)?;
                     directive.run_in_context(&mut context)?;
-                    std::thread::sleep_ms(500);
+                    std::thread::sleep(std::time::Duration::from_millis(500));
                 } else if ConfigMod::implemented_directives()
                     .contains(&action.directive_name.as_str())
                 {
@@ -343,24 +354,7 @@ fn main() -> Result<(), ActionError> {
                     directive.run_in_context(&mut context)?;
                 }
             }
-
-            debug!("before commit");
-            /*
-            let req = CommitRequest {
-                name: image_reference.name.to_string(),
-                tag: image_reference.tag.to_string(),
-                container_name: context.container_id.clone().unwrap(),
-            };
-            let response = do_commit_container(&mut context.conn, req)?.unwrap();
-            eprintln!("{response:#?}");
-
-            crate::image::patch_image(&mut context.conn, &image_reference, |config| {
-                context.apply_config(config);
-            })?;
-            */
-
             context.release(image_reference)?;
-            //            let response: CommitResponse = request(&mut conn, "commit", req)?;
         }
         Action::Channel(action) => {
             use_channel_action(&mut conn, action)?;
@@ -647,7 +641,7 @@ fn main() -> Result<(), ActionError> {
                 }
             } else if dns_nop {
                 DnsSetting::Nop
-            }else if dns_servers.is_empty() && dns_searchs.is_empty() {
+            } else if dns_servers.is_empty() && dns_searchs.is_empty() {
                 DnsSetting::Inherit
             } else {
                 DnsSetting::Specified {
@@ -751,7 +745,7 @@ fn main() -> Result<(), ActionError> {
                     if let Maybe::Some(notify) = notify {
                         EventFdNotify::from_fd(notify.as_raw_fd()).notified_sync();
                     }
-                    //                    std::thread::sleep(std::time::Duration::from_millis(100));
+
                     let id = res.id;
 
                     if let Ok(container) =
@@ -760,7 +754,7 @@ fn main() -> Result<(), ActionError> {
                         let spawn_info = container
                             .running_container
                             .processes
-                            .get(&entry_point)
+                            .get("main")
                             .as_ref()
                             .and_then(|proc| proc.spawn_info.as_ref())
                             .expect("process not started yet or not found");
@@ -769,27 +763,9 @@ fn main() -> Result<(), ActionError> {
                         } else {
                             info!("main process is not running with tty");
                         }
-                        /*
-                        if let Some(main_proc) = container.running_container.processes.get(&entry_point) {
-                            if let Some(spawn_info) = main_proc.spawn_info {
-                                if let Some(socket) = spawn_info.terminal_socket {
-                                }
-                            } else {
-                                panic!("main process has not started yet");
-                            }
-                        }
-                        */
                     } else {
                         panic!("cannot find container");
                     }
-
-                    /*
-                    let path = format!("/var/run/xc.{id}.main");
-                    let path = std::path::Path::new(&path);
-                    if path.exists() {
-                        _ = attach::run(path);
-                    }
-                    */
                 }
             } else {
                 eprintln!("{res:#?}");
@@ -856,20 +832,41 @@ fn main() -> Result<(), ActionError> {
                 eprintln!("no such container");
             }
         }
-        Action::Exec { name, arg0, args } => {
+        Action::Exec {
+            terminal,
+            name,
+            arg0,
+            args,
+        } => {
             let n = EventFdNotify::new();
             let request = ExecCommandRequest {
                 name,
                 arg0,
                 args,
                 envs: std::collections::HashMap::new(),
-                stdin: Maybe::Some(ipc::packet::codec::Fd(0)),
-                stdout: Maybe::Some(ipc::packet::codec::Fd(1)),
-                stderr: Maybe::Some(ipc::packet::codec::Fd(2)),
+                stdin: if terminal {
+                    Maybe::None
+                } else {
+                    Maybe::Some(ipc::packet::codec::Fd(0))
+                },
+                stdout: if terminal {
+                    Maybe::None
+                } else {
+                    Maybe::Some(ipc::packet::codec::Fd(1))
+                },
+                stderr: if terminal {
+                    Maybe::None
+                } else {
+                    Maybe::Some(ipc::packet::codec::Fd(2))
+                },
                 uid: 0,
                 notify: Maybe::Some(ipc::packet::codec::Fd(n.as_raw_fd())),
+                use_tty: terminal,
             };
             if let Ok(response) = do_exec(&mut conn, request)? {
+                if let Some(socket) = response.terminal_socket {
+                    _ = attach::run(socket);
+                }
                 n.notified_sync();
             }
         }

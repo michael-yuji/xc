@@ -103,32 +103,32 @@ impl Directive for RunDirective {
         true
     }
     fn from_action(action: &Action) -> Result<RunDirective> {
-//        let mut envs = HashMap::new();
+        //        let mut envs = HashMap::new();
 
         let command = action.args.join(" ").to_string();
-/*
-        let mut curr = args_iter.next();
+        /*
+                let mut curr = args_iter.next();
 
-        while let Some((key, value)) = curr.and_then(|c| c.split_once('=')) {
-            envs.insert(key.to_string(), value.to_string());
-            curr = args_iter.next();
-        }
+                while let Some((key, value)) = curr.and_then(|c| c.split_once('=')) {
+                    envs.insert(key.to_string(), value.to_string());
+                    curr = args_iter.next();
+                }
 
-        let Some(arg0) = curr else {
-            bail!("cannot determine arg0");
-        };
+                let Some(arg0) = curr else {
+                    bail!("cannot determine arg0");
+                };
 
-        for arg in args_iter {
-            args.push(arg.to_string());
-        }
-*/
+                for arg in args_iter {
+                    args.push(arg.to_string());
+                }
+        */
         let input = match &action.heredoc {
             Some(value) => Input::Content(value.to_string()),
             None => Input::None,
         };
 
         Ok(RunDirective {
-//            arg0: arg0.to_string(),
+            //            arg0: arg0.to_string(),
             shell: "/bin/sh".to_string(),
             command,
             envs: HashMap::new(),
@@ -145,12 +145,12 @@ impl Directive for RunDirective {
         let kq = unsafe { nix::libc::kqueue() };
 
         info!("RUN: (shell = {}) {}", self.shell, self.command);
-/*
-        info!(
-            "RUN: {} {:?} with stdin: {:?}",
-            self.arg0, self.args, self.input
-        );
-*/
+        /*
+                info!(
+                    "RUN: {} {:?} with stdin: {:?}",
+                    self.arg0, self.args, self.input
+                );
+        */
         let request = ExecCommandRequest {
             name: context.container_id.clone().expect("container not set"),
             arg0: self.shell.clone(),
@@ -161,6 +161,7 @@ impl Directive for RunDirective {
             stderr: Maybe::Some(Fd(stderr_b)),
             uid: 0,
             notify: Maybe::Some(Fd(notify.as_raw_fd())),
+            use_tty: false,
         };
 
         match do_exec(&mut context.conn, request)? {

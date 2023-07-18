@@ -27,6 +27,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 
+use crate::packet::codec::FromPacket;
+use crate::packet::Packet;
+
 #[derive(Error, Debug)]
 pub enum IpcError {
     #[error("serialization error: {0}")]
@@ -54,6 +57,22 @@ impl Response {
             value: serde_json::from_value(self.value).map_err(IpcError::Serde)?,
         })
     }
+}
+
+pub fn write_request<V: FromPacket>(method: &str, value: V) -> serde_json::Result<Packet> {
+    value
+        .to_packet_failable(|dual| serde_json::to_value(&dual))?
+        .map_into_failable(|value| {
+            serde_json::to_vec(&Request {
+                method: method.to_string(),
+                value,
+            })
+        })
+}
+
+pub fn write_response<V: FromPacket>(errno: i32, value: V) -> serde_json::Result<Packet> {
+    let packet = value.to_packet_failable(|dual| serde_json::to_value(&dual))?;
+    packet.map_into_failable(|value| serde_json::to_vec(&Response { errno, value }))
 }
 
 #[derive(Serialize, Deserialize, Error, Debug)]

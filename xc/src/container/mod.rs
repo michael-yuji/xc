@@ -99,7 +99,7 @@ impl Container {
             .with_context(|| format!("failed finding /etc/resolv.conf in jail {}", self.id))?;
 
         match &self.dns {
-            DnsSetting::Nop => {},
+            DnsSetting::Nop => {}
             DnsSetting::Inherit => {
                 std::fs::copy("/etc/resolv.conf", resolv_conf_path).with_context(|| {
                     format!(

@@ -77,6 +77,72 @@ impl<T: std::error::Error> ChannelError<T> {
     }
 }
 
+impl PacketTransport for RawFd {
+    type Err = std::io::Error;
+
+    fn max_supported_fds(&self) -> usize {
+        64
+    }
+
+    fn send_packet(&mut self, packet: &Packet) -> Result<(), ChannelError<Self::Err>> {
+        let data = &packet.data;
+        let bytes_count = packet.data.len() as u64;
+        let fds_len = packet.fds.len() as u64;
+
+        let mut header = Vec::new();
+        header.extend(bytes_count.to_be_bytes());
+        header.extend(fds_len.to_be_bytes());
+
+        let mut sptr = 0usize;
+
+        while sptr != header.len() {
+            let size = nix::sys::socket::send(*self, &header[sptr..], MsgFlags::empty())
+                .map_err(|e| std::io::Error::from(e))?;
+            sptr += size;
+        }
+
+        if packet.fds.len() > self.max_supported_fds() {
+            return Err(ChannelError::ExceededPredefinedFdsLimit);
+        }
+
+        let mut count = send_once(self.as_raw_fd(), data, &packet.fds)?;
+        while count != bytes_count as usize {
+            let len = nix::sys::socket::send(*self, &data[count..], MsgFlags::empty())
+                .map_err(|e| std::io::Error::from(e))?;
+            //            let len = self.write(&data[count..])?;
+            count += len;
+        }
+        Ok(())
+    }
+
+    fn recv_packet(&mut self) -> Result<Packet, ChannelError<Self::Err>> {
+        let mut header_bytes = [0u8; 16];
+        _ = nix::sys::socket::recv(*self, &mut header_bytes, MsgFlags::empty())
+            .map_err(|e| std::io::Error::from(e))?;
+        //        _ = self.read(&mut header_bytes)?;
+
+        let bytes_count = u64::from_be_bytes(header_bytes[0..8].try_into().unwrap()) as usize;
+        let fds_count = u64::from_be_bytes(header_bytes[8..].try_into().unwrap()) as usize;
+
+        if fds_count > self.max_supported_fds() {
+            return Err(ChannelError::ExceededPredefinedFdsLimit);
+        }
+        let mut data = vec![0u8; bytes_count];
+        let mut fds = Vec::new();
+
+        let mut received = recv_packet_once(self.as_raw_fd(), fds_count, &mut data, &mut fds)?;
+
+        while received != bytes_count {
+            let len = nix::sys::socket::recv(*self, &mut data[received..], MsgFlags::empty())
+                .map_err(|e| std::io::Error::from(e))?;
+            //            let len = self.read(&mut data[received..])?;
+            received += len;
+        }
+
+        Ok(Packet { data, fds })
+    }
+}
+
 impl PacketTransport for UnixStream {
     type Err = std::io::Error;
 

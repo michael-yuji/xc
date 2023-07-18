@@ -42,6 +42,17 @@ impl<T> TypedPacket<T> {
             fds: self.fds.clone(),
         }
     }
+
+    pub fn map_into_failable<A, F, E>(self, func: F) -> Result<TypedPacket<A>, E>
+    where
+        F: FnOnce(T) -> Result<A, E>,
+    {
+        func(self.data).map(|data| TypedPacket {
+            data,
+            fds: self.fds,
+        })
+    }
+
     pub fn map_failable<A, F, E>(&self, func: F) -> Result<TypedPacket<A>, E>
     where
         F: Fn(&T) -> Result<A, E>,

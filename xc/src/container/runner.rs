@@ -454,8 +454,12 @@ impl ProcessRunner {
 
     pub fn run_main(&mut self) {
         if let Some(main) = self.container.main_proto.clone() {
-            if let Err(error) = self.spawn_process("main", &main, None) {
-                error!("cannot spawn main: {error:#?}");
+            match self.spawn_process("main", &main, None) {
+                Ok(spawn_info) => {
+                    debug!("main spawn: {spawn_info:#?}");
+                }
+                Err(error) => error!("cannot spawn main: {error:#?}")
+
             }
             self.container.main_started_notify.notify_waiters();
             self.main_started = true;
@@ -463,11 +467,47 @@ impl ProcessRunner {
         }
     }
 
-    fn handle_control_stream_cmd(&mut self, method: String, request: JsonPacket) {
+    fn handle_control_stream_cmd(&mut self, mut fd: i32, method: String, request: JsonPacket) {
+        use ipc::proto::{write_response, Response};
+        use ipc::transport::PacketTransport;
         if method == "exec" {
             let jexec: Jexec = serde_json::from_value(request.data).unwrap();
             let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
-            let _result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify));
+            let result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify));
+
+            match result {
+                Ok(spawn_info) => {
+                    let packet = write_response(0, spawn_info).unwrap();
+                    _ = fd.send_packet(&packet).unwrap();
+                    /*
+                    let value = serde_json::to_value(&spawn_info).unwrap();
+                    let data = serde_json::to_value(&Response { errno: 0, value }).unwrap();
+                    // XXX: Naively assume we can always write to the remote socket
+                    let packet = JsonPacket { data, fds: Vec::new() };
+                    _ = fd.send_packet(&packet.to_packet().unwrap());
+                    */
+                }
+                Err(_err) => {
+                    let packet = write_response(
+                        freebsd::libc::EIO,
+                        serde_json::json!({
+                            "message": "failed to spawn"
+                        }),
+                    )
+                    .unwrap();
+                    _ = fd.send_packet(&packet).unwrap();
+                    /*
+                    let data = serde_json::to_value(&Response {
+                        errno: freebsd::libc::EIO,
+                        value: serde_json::json!({
+                            "message": "failed to spawn"
+                        })
+                    }).unwrap();
+                    let packet = JsonPacket { data, fds: Vec::new() };
+                    _ = fd.send_packet(&packet.to_packet().unwrap());
+                    */
+                }
+            }
         } else if method == "run_main" {
             self.should_run_main = true;
         }
@@ -613,19 +653,17 @@ impl ProcessRunner {
                         break 'kq;
                     }
                     EventFilter::EVFILT_READ => {
-                        warn!("handling EVFILT_READ");
+                        let fd = event.ident() as i32;
                         if event.data() == 0 {
-                            self.control_streams.remove(&(event.ident() as i32));
-                        } else if let Some(control_stream) =
-                            self.control_streams.get_mut(&(event.ident() as i32))
-                        {
+                            self.control_streams.remove(&fd);
+                        } else if let Some(control_stream) = self.control_streams.get_mut(&fd) {
                             match control_stream.try_get_request(event.data() as usize) {
                                 Err(_) => {
-                                    self.control_streams.remove(&(event.ident() as i32));
+                                    self.control_streams.remove(&fd);
                                 }
                                 Ok(Readiness::Pending) => {}
                                 Ok(Readiness::Ready((method, request))) => {
-                                    self.handle_control_stream_cmd(method, request);
+                                    self.handle_control_stream_cmd(fd, method, request);
                                 }
                             }
                         }

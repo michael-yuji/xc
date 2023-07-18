@@ -872,38 +872,48 @@ pub struct ExecCommandRequest {
     pub stderr: Maybe<Fd>,
     pub uid: u32,
     pub notify: Maybe<Fd>,
+    pub use_tty: bool,
 }
-
+/*
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ExecCommandResponse {
-    pub cid: String,
+    pub spawn_info: xc::container::process::SpawnInfo,
 }
-
+*/
 #[ipc_method(method = "exec")]
 async fn exec(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
     request: ExecCommandRequest,
-) -> GenericResult<ExecCommandResponse> {
-    info!("exec!!!");
-    let cid = gen_id();
+) -> GenericResult<xc::container::process::SpawnInfo> {
     let jexec = Jexec {
         arg0: request.arg0,
         args: request.args,
         envs: request.envs,
         uid: request.uid,
-        output_mode: StdioMode::Forward {
-            stdin: request.stdin.to_option().map(|fd| fd.0),
-            stdout: request.stdout.to_option().map(|fd| fd.0),
-            stderr: request.stderr.to_option().map(|fd| fd.0),
+        output_mode: if request.use_tty {
+            StdioMode::Terminal
+        } else {
+            StdioMode::Forward {
+                stdin: request.stdin.to_option().map(|fd| fd.0),
+                stdout: request.stdout.to_option().map(|fd| fd.0),
+                stderr: request.stderr.to_option().map(|fd| fd.0),
+            }
         },
         notify: request.notify.to_option().map(|fd| fd.0),
         work_dir: None,
     };
     if let Some(arc_site) = context.write().await.get_site(&request.name) {
         let mut site = arc_site.write().await;
-        site.exec(jexec);
-        Ok(ExecCommandResponse { cid })
+        site.exec(jexec)
+        /*
+        if let Ok(spawn_info) = site.exec(jexec) {
+            eprintln!("spawn_info: {spawn_info:#?}");
+            Ok(ExecCommandResponse { spawn_info })
+        } else {
+            ipc_err(EIO, "something went wrong")
+        }
+        */
     } else {
         enoent("site not found")
     }

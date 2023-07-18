@@ -31,15 +31,15 @@ use anyhow::Context;
 use freebsd::event::EventFdNotify;
 use freebsd::libc::{EEXIST, EINVAL, EIO, ENOENT, ENOTDIR, EPERM};
 use oci_util::image_reference::ImageReference;
-use xc::models::EntryPoint;
-use xc::models::cmd_arg::CmdArg;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::os::fd::{AsRawFd, RawFd};
 use xc::container::request::{CopyFileReq, Mount, NetworkAllocRequest};
+use xc::models::cmd_arg::CmdArg;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
 use xc::models::network::{DnsSetting, IpAssign};
+use xc::models::EntryPoint;
 use xc::precondition_failure;
 
 pub struct InstantiateBlueprint {
@@ -127,14 +127,14 @@ impl InstantiateBlueprint {
                 default_args: Vec::new(),
                 environ: HashMap::new(),
                 work_dir: None,
-                required_envs: Vec::new()
+                required_envs: Vec::new(),
             }
         };
-/*
-        let Some(entry_point) = config.entry_points.get(&request.entry_point) else {
-            precondition_failure!(ENOENT, "requested entry point not found: {}", request.entry_point);
-        };
-*/
+        /*
+                let Some(entry_point) = config.entry_points.get(&request.entry_point) else {
+                    precondition_failure!(ENOENT, "requested entry point not found: {}", request.entry_point);
+                };
+        */
         let entry_point_args = if request.entry_point_args.is_empty() {
             entry_point
                 .default_args
