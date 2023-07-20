@@ -206,9 +206,7 @@ pub struct InstantiateRequest {
     pub no_clean: bool,
     pub name: Option<String>,
     pub dns: DnsSetting,
-
     pub extra_layers: List<Fd>,
-
     pub main_started_notify: Maybe<Fd>,
 }
 
