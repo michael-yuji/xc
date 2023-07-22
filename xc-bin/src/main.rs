@@ -32,7 +32,7 @@ mod redirect;
 
 use crate::channel::{use_channel_action, ChannelAction};
 use crate::error::ActionError;
-use crate::format::{BindMount, EnvPair, IpWant, PublishSpec};
+use crate::format::{format_bandwidth, format_capacity, BindMount, EnvPair, IpWant, PublishSpec};
 use crate::image::{use_image_action, ImageAction};
 use crate::jailfile::directives::volume::VolumeDirective;
 use crate::network::{use_network_action, NetworkAction};
@@ -510,83 +510,69 @@ fn main() -> Result<(), ActionError> {
                 image_reference: image_reference.clone(),
                 remote_reference: new_image_reference.clone(),
             };
-            if let Ok(_res) = do_push_image(&mut conn, req)? {
-                let mut lines_count = 0;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    if lines_count > 0 {
-                        eprint!("{}\x1B[0J", "\x1B[F".repeat(lines_count));
-                    }
+            match do_push_image(&mut conn, req)? {
+                Ok(_) => {
+                    let mut lines_count = 0;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                        if lines_count > 0 {
+                            eprint!("{}\x1B[0J", "\x1B[F".repeat(lines_count));
+                        }
 
-                    let reqt = UploadStat {
-                        image_reference: image_reference.clone(),
-                        remote_reference: new_image_reference.clone(),
-                    };
-                    let res = do_upload_stat(&mut conn, reqt)?.unwrap();
-                    if let Some(error) = res.fault {
-                        eprintln!("{error}");
-                        return Ok(());
-                    } else if res.layers.is_empty() {
-                        lines_count = 1;
-                        eprintln!("initializing");
-                    } else if res.done {
-                        eprintln!("Completed");
-                        return Ok(());
-                    } else {
-                        lines_count = res.layers.len() + 2;
-                        let x = res.current_upload.unwrap_or(0);
-                        for (i, digest) in res.layers.iter().enumerate() {
-                            match i.cmp(&x) {
-                                Ordering::Less => eprintln!("{digest} ... done"),
-                                Ordering::Equal => {
-                                    let speed = res.duration_secs.and_then(|secs| {
-                                        res.bytes.map(|bytes| (bytes * 8) as f64 / secs as f64)
-                                    });
-                                    let uploaded = res
-                                        .bytes
-                                        .map(|bytes| {
-                                            let bytes = bytes as f64;
-                                            if bytes > 1000000000.0 {
-                                                format!("{:.2} GB", bytes / 1000000000.0)
-                                            } else if bytes > 1000000.0 {
-                                                format!("{:.2} MB", bytes / 1000000.0)
-                                            } else if bytes > 1000.0 {
-                                                format!("{:.2} KB", bytes / 1000.0)
-                                            } else {
-                                                format!("{:.2} B", bytes)
-                                            }
-                                        })
-                                        .unwrap_or_else(|| "".to_string());
-                                    let label = match speed {
-                                        None => "".to_string(),
-                                        Some(speed) => {
-                                            if speed > 1000000000.0 {
-                                                format!("{:.2} gbps", speed / 1000000000.0)
-                                            } else if speed > 1000000.0 {
-                                                format!("{:.2} mbps", speed / 1000000.0)
-                                            } else if speed > 1000.0 {
-                                                format!("{:.2} kbps", speed / 1000.0)
-                                            } else {
-                                                format!("{:.2} bps", speed)
-                                            }
-                                        }
-                                    };
-                                    eprintln!("{digest} ... uploading {uploaded} @ {label}");
-                                }
-                                Ordering::Greater => eprintln!("{digest}"),
-                            };
-                        }
-                        if res.push_config {
-                            eprintln!("Image config ... done");
+                        let reqt = UploadStat {
+                            image_reference: image_reference.clone(),
+                            remote_reference: new_image_reference.clone(),
+                        };
+                        let res = do_upload_stat(&mut conn, reqt)?.unwrap();
+                        if let Some(error) = res.fault {
+                            eprintln!("{error}");
+                            return Ok(());
+                        } else if res.layers.is_empty() {
+                            lines_count = 1;
+                            eprintln!("initializing");
+                        } else if res.done {
+                            eprintln!("Completed");
+                            return Ok(());
                         } else {
-                            eprintln!("Image config");
-                        }
-                        if res.push_manifest {
-                            eprintln!("Image manifest ... done")
-                        } else {
-                            eprintln!("Image manifest")
+                            lines_count = res.layers.len() + 2;
+                            let x = res.current_upload_idx.unwrap_or(0);
+                            for (i, digest) in res.layers.iter().enumerate() {
+                                match i.cmp(&x) {
+                                    Ordering::Less => eprintln!("{digest} ... done"),
+                                    Ordering::Equal => {
+                                        let uploaded =
+                                            res.bytes.map(format_capacity).unwrap_or_default();
+                                        let bandwidth = res
+                                            .bytes
+                                            .and_then(|bytes| {
+                                                res.duration_secs
+                                                    .map(|sec| format_bandwidth(bytes, sec))
+                                            })
+                                            .unwrap_or_default();
+                                        let total = res
+                                            .current_layer_size
+                                            .map(format_capacity)
+                                            .unwrap_or_default();
+                                        eprintln!("{digest} ... uploading {uploaded}/{total} @ {bandwidth}");
+                                    }
+                                    Ordering::Greater => eprintln!("{digest}"),
+                                };
+                            }
+                            if res.push_config {
+                                eprintln!("Image config ... done");
+                            } else {
+                                eprintln!("Image config");
+                            }
+                            if res.push_manifest {
+                                eprintln!("Image manifest ... done")
+                            } else {
+                                eprintln!("Image manifest")
+                            }
                         }
                     }
+                }
+                Err(err) => {
+                    eprintln!("cannot push image: {err:#?}")
                 }
             }
         }
@@ -698,7 +684,6 @@ fn main() -> Result<(), ActionError> {
                     Maybe::Some(Fd(fd))
                 };
                 let mut reqt = InstantiateRequest {
-                    alt_root: None,
                     name,
                     hostname,
                     copies,
@@ -710,14 +695,12 @@ fn main() -> Result<(), ActionError> {
                     entry_point_args,
                     extra_layers,
                     no_clean,
-                    main_norun: false,
-                    init_norun: false,
-                    deinit_norun: false,
                     persist,
                     dns,
                     image_reference,
                     ips: ips.into_iter().map(|v| v.0).collect(),
                     main_started_notify: main_started_notify.clone(),
+                    ..InstantiateRequest::default()
                 };
 
                 if create_only {

@@ -112,6 +112,9 @@ impl<T: FromPacket> List<T> {
     pub fn to_vec(self) -> Vec<T> {
         self.0
     }
+    pub fn push(&mut self, item: T) {
+        self.0.push(item)
+    }
 }
 
 impl<T: FromPacket> Default for List<T> {

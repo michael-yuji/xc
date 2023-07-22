@@ -68,12 +68,15 @@ pub struct InstantiateBlueprint {
     pub envs: HashMap<String, String>,
     pub entry_point: String,
     pub entry_point_args: Vec<String>,
-
     pub devfs_ruleset_id: u16,
     pub ip_alloc: Vec<IpAssign>,
     pub default_router: Option<IpAddr>,
-
     pub main_started_notify: Option<EventFdNotify>,
+    pub create_only: bool,
+    pub linux_no_create_sys_dir: bool,
+    pub linux_no_create_proc_dir: bool,
+    pub linux_no_mount_sys: bool,
+    pub linux_no_mount_proc: bool,
 }
 
 impl InstantiateBlueprint {
@@ -130,11 +133,7 @@ impl InstantiateBlueprint {
                 required_envs: Vec::new(),
             }
         };
-        /*
-                let Some(entry_point) = config.entry_points.get(&request.entry_point) else {
-                    precondition_failure!(ENOENT, "requested entry point not found: {}", request.entry_point);
-                };
-        */
+
         let entry_point_args = if request.entry_point_args.is_empty() {
             entry_point
                 .default_args
@@ -367,6 +366,11 @@ impl InstantiateBlueprint {
             devfs_ruleset_id,
             default_router,
             main_started_notify,
+            create_only: request.create_only,
+            linux_no_create_sys_dir: request.linux_no_create_sys_dir,
+            linux_no_create_proc_dir: request.linux_no_create_proc_dir,
+            linux_no_mount_sys: request.linux_no_mount_sys,
+            linux_no_mount_proc: request.linux_no_mount_proc,
         })
     }
 }

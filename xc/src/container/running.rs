@@ -27,14 +27,19 @@ use crate::container::request::Mount;
 use crate::container::ContainerManifest;
 use crate::models::exec::Jexec;
 use crate::models::jail_image::JailImage;
-use crate::models::network::IpAssign;
+use crate::models::network::{DnsSetting, IpAssign};
+use crate::util::realpath;
 
+use anyhow::Context;
 use freebsd::event::EventFdNotify;
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
+
+use super::request::CopyFileReq;
 
 #[derive(Clone, Debug)]
 pub struct RunningContainer {
@@ -76,6 +81,69 @@ pub struct RunningContainer {
 }
 
 impl RunningContainer {
+    pub fn copyin(&self, req: &CopyFileReq) -> anyhow::Result<()> {
+        let dest = realpath(&self.root, &req.destination)?;
+        let in_fd = req.source;
+        let file = unsafe { std::fs::File::from_raw_fd(in_fd) };
+        let metadata = file.metadata().unwrap();
+        let sink = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(dest)
+            .unwrap();
+
+        let sfd = sink.as_raw_fd();
+
+        let _size = unsafe {
+            nix::libc::copy_file_range(
+                in_fd,
+                std::ptr::null_mut(),
+                sfd,
+                std::ptr::null_mut(),
+                metadata.len() as usize,
+                0,
+            )
+        };
+
+        Ok(())
+        //        eprintln!("copied: {size}");
+    }
+
+    pub fn setup_resolv_conf(&self, dns: &DnsSetting) -> anyhow::Result<()> {
+        let resolv_conf_path = realpath(&self.root, "/etc/resolv.conf")
+            .with_context(|| format!("failed finding /etc/resolv.conf in jail {}", self.id))?;
+
+        match dns {
+            DnsSetting::Nop => {}
+            DnsSetting::Inherit => {
+                std::fs::copy("/etc/resolv.conf", resolv_conf_path).with_context(|| {
+                    format!(
+                        "failed copying resolv.conf to destination container: {}",
+                        self.id
+                    )
+                })?;
+            }
+            DnsSetting::Specified {
+                servers,
+                search_domains,
+            } => {
+                let servers = servers
+                    .iter()
+                    .map(|host| format!("nameserver {host}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let domains = search_domains
+                    .iter()
+                    .map(|host| format!("domain {host}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let resolv_conf = format!("{domains}\n{servers}\n");
+                std::fs::write(resolv_conf_path, resolv_conf)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn serialized(&self) -> ContainerManifest {
         let mut processes = HashMap::new();
 

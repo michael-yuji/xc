@@ -30,7 +30,6 @@ use ipc::packet::Packet;
 use ipc::proto::{Request, Response};
 use ipc::transport::PacketTransport;
 use oci_util::digest::OciDigest;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::File;
@@ -45,7 +44,7 @@ use tokio::sync::watch::Receiver;
 use tracing::{error, info};
 use xc::config::XcConfig;
 use xc::container::effect::UndoStack;
-use xc::container::{Container, ContainerManifest};
+use xc::container::{ContainerManifest, CreateContainer};
 use xc::models::exec::Jexec;
 use xc::models::jail_image::JailImage;
 use xc::models::network::HostEntry;
@@ -377,7 +376,7 @@ impl Site {
                     info!("no extra layers to extract");
                 }
 
-                let container = Container {
+                let container = CreateContainer {
                     name: blueprint.name,
                     hostname: blueprint.hostname,
                     id: blueprint.id,
@@ -395,24 +394,33 @@ impl Site {
                     main_norun: blueprint.main_norun,
                     persist: blueprint.persist,
                     no_clean: blueprint.no_clean,
-                    linux_no_create_sys_dir: false,
-                    linux_no_create_proc_dir: false,
+                    linux_no_create_sys_dir: blueprint.linux_no_create_sys_dir,
+                    linux_no_mount_sys: blueprint.linux_no_mount_sys,
+                    linux_no_create_proc_dir: blueprint.linux_no_create_proc_dir,
+                    linux_no_mount_proc: blueprint.linux_no_mount_proc,
                     zfs_origin,
-                    dns: blueprint.dns,
                     origin_image: blueprint.origin_image,
                     allowing: blueprint.allowing,
                     image_reference: blueprint.image_reference,
-                    copies: blueprint.copies,
                     default_router: blueprint.default_router,
                 };
 
                 let running_container = container
-                    .start_transactionally(&mut self.undo)
+                    .create_transactionally(&mut self.undo)
                     .context("fail to start container")?;
+
+                _ = running_container.setup_resolv_conf(&blueprint.dns);
+
+                for copy in blueprint.copies.into_iter() {
+                    _ = running_container.copyin(&copy);
+                }
+
                 let container_notify = running_container.notify.clone();
                 let main_started_notify = running_container.main_started_notify.clone();
 
-                let (kq, recv) = xc::container::runner::run(running_container, sock_b);
+                let (kq, recv) =
+                    xc::container::runner::run(running_container, sock_b, !blueprint.create_only);
+
                 self.container = Some(recv);
                 self.ctl_channel = Some(kq);
                 self.container_notify = Some(container_notify);

@@ -34,7 +34,7 @@ use ipc::service::{ConnectionContext, Service};
 use ipc_macro::{ipc_method, FromPacket};
 use oci_util::digest::OciDigest;
 use oci_util::distribution::client::{BasicAuth, Registry};
-use oci_util::image_reference::ImageReference;
+use oci_util::image_reference::{ImageReference, ImageTag};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Seek;
@@ -208,6 +208,68 @@ pub struct InstantiateRequest {
     pub dns: DnsSetting,
     pub extra_layers: List<Fd>,
     pub main_started_notify: Maybe<Fd>,
+    pub create_only: bool,
+
+    pub linux_no_create_sys_dir: bool,
+    pub linux_no_mount_sys: bool,
+    pub linux_no_create_proc_dir: bool,
+    pub linux_no_mount_proc: bool,
+}
+
+impl InstantiateRequest {
+    pub fn dns(&mut self, dns: DnsSetting) {
+        self.dns = dns;
+    }
+
+    pub fn add_mount_req(&mut self, mount_req: MountReq) {
+        self.mount_req.push(mount_req);
+    }
+
+    pub fn add_copyin(&mut self, req: CopyFile) {
+        self.copies.push(req);
+    }
+
+    pub fn add_extra_layer(&mut self, extra_layer_fd: i32) {
+        self.extra_layers.push(Fd(extra_layer_fd));
+    }
+}
+
+impl Default for InstantiateRequest {
+    fn default() -> InstantiateRequest {
+        let image_reference = ImageReference {
+            hostname: None,
+            name: "xc-predefine".to_string(),
+            tag: ImageTag::Tag("empty".to_string()),
+        };
+
+        InstantiateRequest {
+            image_reference,
+            alt_root: None,
+            envs: HashMap::new(),
+            vnet: false,
+            ips: Vec::new(),
+            ipreq: Vec::new(),
+            mount_req: Vec::new(),
+            copies: List::new(),
+            entry_point: String::new(),
+            entry_point_args: Vec::new(),
+            hostname: None,
+            main_norun: false,
+            init_norun: false,
+            deinit_norun: false,
+            persist: false,
+            no_clean: false,
+            name: None,
+            dns: DnsSetting::Nop,
+            extra_layers: List::new(),
+            main_started_notify: Maybe::None,
+            create_only: false,
+            linux_no_create_sys_dir: false,
+            linux_no_mount_sys: false,
+            linux_no_create_proc_dir: false,
+            linux_no_mount_proc: false,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

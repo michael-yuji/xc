@@ -73,29 +73,24 @@ impl Directive for FromDirective {
             }
         }
         let name = format!("build-{}", gen_id());
+
         /* create container */
         let req = InstantiateRequest {
-            alt_root: None,
             name: Some(name.to_string()),
-            hostname: None,
-            copies: List::new(),
             dns: context.dns.clone(),
             image_reference: self.image_reference.clone(),
-            no_clean: false,
             main_norun: true,
             init_norun: true,
             deinit_norun: true,
             persist: true,
-            ips: Vec::new(),
             main_started_notify: Maybe::None,
             entry_point: "main".to_string(),
             entry_point_args: Vec::new(),
             envs: HashMap::new(),
-            vnet: false,
-            mount_req: Vec::new(),
-            extra_layers: List::new(),
             ipreq: context.network.clone(),
+            ..InstantiateRequest::default()
         };
+
         eprintln!("before instantiate");
         match do_instantiate(&mut context.conn, req)? {
             Ok(response) => {

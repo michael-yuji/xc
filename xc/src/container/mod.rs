@@ -33,7 +33,7 @@ use self::process::ProcessStat;
 use crate::container::running::RunningContainer;
 use crate::models::exec::Jexec;
 use crate::models::jail_image::JailImage;
-use crate::models::network::{DnsSetting, IpAssign};
+use crate::models::network::IpAssign;
 use crate::util::realpath;
 
 use anyhow::Context;
@@ -44,19 +44,17 @@ use ipcidr::IpCidr;
 use jail::param::Value;
 use jail::StoppedJail;
 use oci_util::image_reference::ImageReference;
-use request::{CopyFileReq, Mount};
+use request::Mount;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::net::IpAddr;
-use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
-/// Represents an instance of container
 #[derive(Debug, Clone)]
-pub struct Container {
+pub struct CreateContainer {
     pub id: String,
     pub name: String,
     pub hostname: String,
@@ -75,54 +73,23 @@ pub struct Container {
     pub deinit_norun: bool,
     pub persist: bool,
     pub no_clean: bool,
+    /// Do not create /proc automatically and abort mounting procfs if the directory is missing.
     pub linux_no_create_proc_dir: bool,
+    /// Do not cerate /sys automatically and abort mounting sysfs if the directory is missing
     pub linux_no_create_sys_dir: bool,
+    /// Do not mount linux sysfs
+    pub linux_no_mount_sys: bool,
+    /// Do not mount linux procfs
+    pub linux_no_mount_proc: bool,
     pub zfs_origin: Option<String>,
-    pub dns: DnsSetting,
     pub origin_image: Option<JailImage>,
     pub allowing: Vec<String>,
     pub image_reference: Option<ImageReference>,
-    pub copies: Vec<CopyFileReq>,
     pub default_router: Option<IpAddr>,
 }
 
-impl Container {
-    fn setup_resolv_conf(&self) -> anyhow::Result<()> {
-        let resolv_conf_path = realpath(&self.root, "/etc/resolv.conf")
-            .with_context(|| format!("failed finding /etc/resolv.conf in jail {}", self.id))?;
-
-        match &self.dns {
-            DnsSetting::Nop => {}
-            DnsSetting::Inherit => {
-                std::fs::copy("/etc/resolv.conf", resolv_conf_path).with_context(|| {
-                    format!(
-                        "failed copying resolv.conf to destination container: {}",
-                        self.id
-                    )
-                })?;
-            }
-            DnsSetting::Specified {
-                servers,
-                search_domains,
-            } => {
-                let servers = servers
-                    .iter()
-                    .map(|host| format!("nameserver {host}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let domains = search_domains
-                    .iter()
-                    .map(|host| format!("domain {host}"))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let resolv_conf = format!("{domains}\n{servers}\n");
-                std::fs::write(resolv_conf_path, resolv_conf)?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn start_transactionally(&self, undo: &mut UndoStack) -> anyhow::Result<RunningContainer> {
+impl CreateContainer {
+    pub fn create_transactionally(&self, undo: &mut UndoStack) -> anyhow::Result<RunningContainer> {
         info!(name = self.name, "starting jail");
 
         let root = &self.root;
@@ -130,8 +97,6 @@ impl Container {
 
         undo.pf_create_anchor(anchor)
             .with_context(|| format!("failed to create pf anchor for container {}", self.id))?;
-
-        self.setup_resolv_conf()?;
 
         let devfs_ruleset = self.devfs_ruleset_id;
 
@@ -161,33 +126,6 @@ impl Container {
             )?;
         }
 
-        for copy in self.copies.iter() {
-            let dest = realpath(root, &copy.destination)?;
-            let in_fd = copy.source;
-            let file = unsafe { std::fs::File::from_raw_fd(copy.source) };
-            let metadata = file.metadata().unwrap();
-
-            let sink = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(dest)
-                .unwrap();
-
-            let sfd = sink.as_raw_fd();
-
-            let size = unsafe {
-                nix::libc::copy_file_range(
-                    in_fd,
-                    std::ptr::null_mut(),
-                    sfd,
-                    std::ptr::null_mut(),
-                    metadata.len() as usize,
-                    0,
-                )
-            };
-
-            eprintln!("copied: {size}");
-        }
         let mut ifaces_to_move = HashMap::new();
 
         if !self.vnet {
@@ -275,7 +213,7 @@ impl Container {
             let proc_path = format!("{root}/proc");
             let sys_path = format!("{root}/sys");
 
-            {
+            if !self.linux_no_mount_proc {
                 let path = std::path::Path::new(&proc_path);
                 let path_existed = path.exists();
 
@@ -291,7 +229,8 @@ impl Container {
                     )?;
                 }
             }
-            {
+
+            if !self.linux_no_mount_sys {
                 let path = std::path::Path::new(&sys_path);
                 let path_existed = path.exists();
 
@@ -310,9 +249,10 @@ impl Container {
         }
 
         let jail = proto.start()?;
-        let dmillis = std::time::Duration::from_millis(10);
 
         if self.vnet {
+            let dmillis = std::time::Duration::from_millis(10);
+
             for (iface, addresses) in ifaces_to_move.iter() {
                 undo.move_if(iface.to_owned(), jail.jid)?;
                 std::thread::sleep(dmillis);

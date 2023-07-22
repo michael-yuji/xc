@@ -217,6 +217,41 @@ impl FromStr for PublishSpec {
     }
 }
 
+const GB: usize = 1 << 30;
+const MB: usize = 1 << 20;
+const KB: usize = 1 << 10;
+
+const GB_F64: f64 = GB as f64;
+const MB_F64: f64 = MB as f64;
+const KB_F64: f64 = KB as f64;
+
+pub fn format_capacity(size: usize) -> String {
+    let bytes = size as f64;
+    if size > GB {
+        format!("{:.2} GB", bytes / GB_F64)
+    } else if size > MB {
+        format!("{:.2} MB", bytes / MB_F64)
+    } else if size > KB {
+        format!("{:.2} KB", bytes / KB_F64)
+    } else {
+        format!("{:.2} B", bytes)
+    }
+}
+
+pub fn format_bandwidth(size: usize, secs: u64) -> String {
+    let bits = (size * 8) as f64;
+    let ss = secs as f64;
+    if size > GB {
+        format!("{:.2} gbps", bits / GB_F64 / ss)
+    } else if size > MB {
+        format!("{:.2} mbps", bits / MB_F64 / ss)
+    } else if size > KB {
+        format!("{:.2} kbps", bits / KB_F64 / ss)
+    } else {
+        format!("{:.2} bps", bits / ss)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

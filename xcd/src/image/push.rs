@@ -55,7 +55,7 @@ impl FromId<SharedContext, String> for PushImageStatus {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PushImageStatusDesc {
     pub layers: Vec<OciDigest>,
-    pub current_upload: Option<usize>,
+    pub current_upload_idx: Option<usize>,
     pub push_config: bool,
     pub push_manifest: bool,
     pub done: bool,
@@ -63,17 +63,19 @@ pub struct PushImageStatusDesc {
 
     pub bytes: Option<usize>,
     pub duration_secs: Option<u64>,
+    pub current_layer_size: Option<usize>,
 }
 
 #[derive(Clone, Default)]
 pub struct PushImageStatus {
     pub layers: Vec<OciDigest>,
     /// the layer we are pushing, identify by the position of it in the layers stack
-    pub current_upload: Option<usize>,
+    pub current_upload_idx: Option<usize>,
     pub push_config: bool,
     pub push_manifest: bool,
     pub done: bool,
     pub fault: Option<String>,
+    pub current_layer_size: Option<usize>,
     pub upload_status: Option<Receiver<UploadStat>>,
 }
 
@@ -95,11 +97,12 @@ impl PushImageStatus {
         };
         PushImageStatusDesc {
             layers: self.layers.clone(),
-            current_upload: self.current_upload,
+            current_upload_idx: self.current_upload_idx,
             push_config: self.push_config,
             push_manifest: self.push_manifest,
             done: self.done,
             fault: self.fault.clone(),
+            current_layer_size: self.current_layer_size,
             bytes,
             duration_secs,
         }
@@ -112,6 +115,7 @@ pub async fn push_image(
     remote_reference: ImageReference,
 ) -> Result<Receiver<Task<String, PushImageStatus>>, PushImageError> {
     let id = format!("{reference}->{remote_reference}");
+    info!("push image: {id}");
     let name = remote_reference.name;
     let tag = remote_reference.tag.to_string();
 
@@ -199,21 +203,24 @@ pub async fn push_image(
             let path = format!("{layers_dir}/{}", map.archive_digest);
             let path = std::path::Path::new(&path);
             let file = std::fs::OpenOptions::new().read(true).open(path)?;
+            let metadata = file.metadata().unwrap();
+            let layer_size = metadata.len() as usize;
 
             //                let dedup_check = Ok::<bool, std::io::Error>(false);
             let dedup_check = session.exists_digest(&map.archive_digest).await;
 
             _ = emitter.use_try(|state| {
-                if state.current_upload.is_none() {
-                    state.current_upload = Some(0);
+                if state.current_upload_idx.is_none() {
+                    state.current_upload_idx = Some(0);
                 }
+                state.current_layer_size = Some(layer_size);
                 Ok(())
             });
+
             let descriptor = if dedup_check.is_ok() && dedup_check.unwrap() {
-                let metadata = file.metadata().unwrap();
                 _ = emitter.use_try(|state| {
-                    if state.current_upload.is_none() {
-                        state.current_upload = Some(0);
+                    if state.current_upload_idx.is_none() {
+                        state.current_upload_idx = Some(0);
                     }
                     Ok(())
                 });
@@ -221,7 +228,7 @@ pub async fn push_image(
                 Descriptor {
                     digest: map.archive_digest.clone(),
                     media_type: content_type.to_string(),
-                    size: metadata.len() as usize,
+                    size: layer_size,
                 }
             } else {
                 info!("pushing {path:?}");
@@ -238,7 +245,7 @@ pub async fn push_image(
             };
             uploads.push(descriptor);
             _ = emitter.use_try(|state| {
-                state.current_upload = Some(state.current_upload.unwrap() + 1);
+                state.current_upload_idx = Some(state.current_upload_idx.unwrap() + 1);
                 Ok(())
             });
         }

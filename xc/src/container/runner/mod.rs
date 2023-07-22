@@ -22,6 +22,10 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+mod control_stream;
+
+use self::control_stream::{ControlStream, Readiness};
+
 use crate::container::error::ExecError;
 use crate::container::process::*;
 use crate::container::running::RunningContainer;
@@ -35,124 +39,15 @@ use anyhow::Context;
 use freebsd::event::{EventFdNotify, KEventExt};
 use freebsd::FreeBSDCommandExt;
 use ipc::packet::codec::json::JsonPacket;
-use ipc::packet::Packet;
-use ipc::proto::Request;
 use jail::process::Jailed;
 use nix::libc::intptr_t;
 use nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
 use std::collections::{HashMap, VecDeque};
-use std::io::Read;
-use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::watch::{channel, Receiver, Sender};
 use tracing::{debug, error, info, trace, warn};
-
-#[derive(Debug)]
-struct ReadingPacket {
-    buffer: Vec<u8>,
-    read_len: usize,
-    expected_len: usize,
-    fds: Vec<RawFd>,
-}
-
-impl ReadingPacket {
-    fn ready(&self) -> bool {
-        self.read_len == self.expected_len
-    }
-
-    fn read(&mut self, socket: &mut UnixStream, known_avail: usize) -> Result<(), std::io::Error> {
-        if !self.ready() {
-            let len = socket.read(&mut self.buffer[self.read_len..][..known_avail])?;
-            self.read_len += len;
-        }
-        Ok(())
-    }
-
-    fn new(socket: &mut UnixStream) -> Result<ReadingPacket, anyhow::Error> {
-        let mut header_bytes = [0u8; 16];
-        _ = socket.read(&mut header_bytes)?;
-        let expected_len = u64::from_be_bytes(header_bytes[0..8].try_into().unwrap()) as usize;
-        let fds_count = u64::from_be_bytes(header_bytes[8..].try_into().unwrap()) as usize;
-        if fds_count > 64 {
-            panic!("")
-        }
-        let mut buffer = vec![0u8; expected_len];
-        let mut fds = Vec::new();
-        let read_len =
-            ipc::transport::recv_packet_once(socket.as_raw_fd(), fds_count, &mut buffer, &mut fds)?;
-
-        Ok(Self {
-            buffer,
-            read_len,
-            expected_len,
-            fds,
-        })
-    }
-}
-
-enum Readiness<T> {
-    Pending,
-    Ready(T),
-}
-
-// XXX: naively pretend writes always successful
-#[derive(Debug)]
-pub struct ControlStream {
-    socket: UnixStream,
-    processing: Option<ReadingPacket>,
-}
-
-impl ControlStream {
-    pub fn new(socket: UnixStream) -> ControlStream {
-        ControlStream {
-            socket,
-            processing: None,
-        }
-    }
-
-    fn try_get_request(
-        &mut self,
-        known_avail: usize,
-    ) -> Result<Readiness<(String, JsonPacket)>, anyhow::Error> {
-        self.pour_in_bytes(known_avail)
-            .and_then(|readiness| match readiness {
-                Readiness::Pending => Ok(Readiness::Pending),
-                Readiness::Ready(packet) => {
-                    let request: ipc::packet::TypedPacket<Request> =
-                        packet.map_failable(|vec| serde_json::from_slice(vec))?;
-
-                    let method = request.data.method.to_string();
-                    let packet = request.map(|req| req.value.clone());
-
-                    Ok(Readiness::Ready((method, packet)))
-                }
-            })
-    }
-
-    fn pour_in_bytes(&mut self, known_avail: usize) -> Result<Readiness<Packet>, anyhow::Error> {
-        if let Some(reading_packet) = &mut self.processing {
-            if reading_packet.ready() {
-                panic!("the client is sending more bytes than expected");
-            }
-            reading_packet.read(&mut self.socket, known_avail).unwrap();
-        } else {
-            let reading_packet = ReadingPacket::new(&mut self.socket).unwrap();
-            self.processing = Some(reading_packet);
-        }
-        let Some(processing) = self.processing.take() else { panic!() };
-        if processing.ready() {
-            Ok(Readiness::Ready(Packet {
-                data: processing.buffer,
-                fds: processing.fds,
-            }))
-        } else {
-            self.processing = Some(processing);
-            Ok(Readiness::Pending)
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct ProcessRunnerStat {
@@ -194,6 +89,14 @@ pub struct ProcessRunner {
     pub(super) rpmap: HashMap<u32, Vec<u32>>,
 
     pub(super) control_streams: HashMap<i32, ControlStream>,
+
+    /// This field records the epoch seconds when the container is "started", which defined by a
+    /// container that has completed its init-routine
+    pub(super) started: Option<u64>,
+
+    /// If `auto_start` is true, the container executes its init routine automatically after
+    /// creation
+    pub(super) auto_start: bool,
 
     container: RunningContainer,
 
@@ -276,9 +179,9 @@ impl SerialExec {
 }
 
 impl ProcessRunner {
-    pub fn add_control_stream(&mut self, control_stream: ControlStream) {
+    pub(crate) fn add_control_stream(&mut self, control_stream: ControlStream) {
         debug!("adding control stream");
-        let fd = control_stream.socket.as_raw_fd();
+        let fd = control_stream.socket_fd();
         self.control_streams.insert(fd, control_stream);
         let read_event = KEvent::from_read(fd);
         _ = kevent_ts(self.kq, &[read_event], &mut [], None);
@@ -447,9 +350,9 @@ impl ProcessRunner {
         _ = kevent_ts(self.kq, &[event], &mut [], None);
     }
 
-    pub fn new(kq: i32, container: RunningContainer) -> ProcessRunner {
+    pub fn new(kq: i32, container: RunningContainer, auto_start: bool) -> ProcessRunner {
         ProcessRunner {
-            kq, //: kqueue().unwrap(),
+            kq,
             named_process: Vec::new(),
             pmap: HashMap::new(),
             rpmap: HashMap::new(),
@@ -460,6 +363,8 @@ impl ProcessRunner {
             deinits: SerialExec::new("deinit", container.deinit_proto.clone(), false),
             main_exited: false,
             container,
+            started: None,
+            auto_start,
         }
     }
 
@@ -502,6 +407,7 @@ impl ProcessRunner {
                 let packet = write_response(0, ()).unwrap();
                 _ = fd.send_packet(&packet).unwrap()
             }
+        } else if method == "start" {
         } else if method == "write_hosts" {
             let recv: Vec<HostEntry> = serde_json::from_value(request.data).unwrap();
             if let Ok(host_path) = crate::util::realpath(&self.container.root, "/etc/hosts") {
@@ -520,6 +426,21 @@ impl ProcessRunner {
             }
             let res_packet = write_response(0, ()).unwrap();
             _ = fd.send_packet(&res_packet).unwrap()
+        }
+    }
+
+    fn start(&mut self) {
+        self.started = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        );
+        if self.inits.is_empty() && !self.container.main_norun {
+            self.run_main();
+        } else if let Some((id, jexec)) = self.inits.pop_front() {
+            self.inits.activate();
+            _ = self.spawn_process(&id, &jexec, None);
         }
     }
 
@@ -624,11 +545,8 @@ impl ProcessRunner {
 
         let mut last_deinit = None;
 
-        if self.inits.is_empty() && !self.container.main_norun {
-            self.run_main();
-        } else if let Some((id, jexec)) = self.inits.pop_front() {
-            self.inits.activate();
-            _ = self.spawn_process(&id, &jexec, None);
+        if self.auto_start {
+            self.start();
         }
 
         'kq: loop {
@@ -727,10 +645,11 @@ impl ProcessRunner {
 pub fn run(
     container: RunningContainer,
     control_stream: UnixStream,
+    auto_start: bool,
 ) -> (i32, Receiver<ContainerManifest>) {
     let kq = nix::sys::event::kqueue().unwrap();
     let (tx, rx) = channel(container.serialized());
-    let mut pr = ProcessRunner::new(kq, container);
+    let mut pr = ProcessRunner::new(kq, container, auto_start);
     pr.add_control_stream(ControlStream::new(control_stream));
     let kq = pr.kq;
     std::thread::spawn(move || {
