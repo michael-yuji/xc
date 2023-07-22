@@ -24,7 +24,7 @@
 
 use crate::auth::Credential;
 use crate::devfs_store::DevfsRulesetStore;
-use crate::ipc::InstantiateRequest;
+use crate::ipc::{EntryPointSpec, InstantiateRequest};
 use crate::network_manager::NetworkManager;
 
 use anyhow::Context;
@@ -66,8 +66,6 @@ pub struct InstantiateBlueprint {
     pub ips: Vec<IpAssign>,
     pub ipreq: Vec<NetworkAllocRequest>,
     pub envs: HashMap<String, String>,
-    pub entry_point: String,
-    pub entry_point_args: Vec<String>,
     pub devfs_ruleset_id: u16,
     pub ip_alloc: Vec<IpAssign>,
     pub default_router: Option<IpAddr>,
@@ -121,50 +119,58 @@ impl InstantiateBlueprint {
             }
         }
 
-        let entry_point = if let Some(entry_point) = config.entry_points.get(&request.entry_point) {
-            entry_point.clone()
-        } else {
-            EntryPoint {
-                exec: request.entry_point.to_string(),
-                args: vec![CmdArg::All],
-                default_args: Vec::new(),
-                environ: HashMap::new(),
-                work_dir: None,
-                required_envs: Vec::new(),
-            }
-        };
+        let main = match request.entry_point {
+            Some(spec) => {
+                let entry_point =
+                    if let Some(entry_point) = config.entry_points.get(&spec.entry_point) {
+                        entry_point.clone()
+                    } else {
+                        EntryPoint {
+                            exec: spec.entry_point.to_string(),
+                            args: vec![CmdArg::All],
+                            default_args: Vec::new(),
+                            environ: HashMap::new(),
+                            work_dir: None,
+                            required_envs: Vec::new(),
+                        }
+                    };
 
-        let entry_point_args = if request.entry_point_args.is_empty() {
-            entry_point
-                .default_args
-                .iter()
-                .map(|arg| arg.apply(&request.envs))
-                .collect()
-        } else {
-            request.entry_point_args.clone()
-        };
+                let entry_point_args = if spec.entry_point_args.is_empty() {
+                    entry_point
+                        .default_args
+                        .iter()
+                        .map(|arg| arg.apply(&request.envs))
+                        .collect()
+                } else {
+                    spec.entry_point_args.clone()
+                };
 
-        let main = {
-            let resolved_env = entry_point.resolve_args(&request.envs, &entry_point_args);
-            let envs = resolved_env.env;
+                let resolved_env = entry_point.resolve_args(&request.envs, &entry_point_args);
+                let envs = resolved_env.env;
 
-            for env in entry_point.required_envs.iter() {
-                let name = env.as_str();
-                if !envs.contains_key(name) {
-                    precondition_failure!(ENOENT, "missing required environment variable {name}");
+                for env in entry_point.required_envs.iter() {
+                    let name = env.as_str();
+                    if !envs.contains_key(name) {
+                        precondition_failure!(
+                            ENOENT,
+                            "missing required environment variable {name}"
+                        );
+                    }
                 }
-            }
 
-            Jexec {
-                arg0: resolved_env.exec,
-                args: resolved_env.args,
-                envs,
-                uid: 0,
-                output_mode: StdioMode::Terminal,
-                notify: None,
-                work_dir: entry_point.work_dir.clone(),
+                Some(Jexec {
+                    arg0: resolved_env.exec,
+                    args: resolved_env.args,
+                    envs,
+                    uid: 0,
+                    output_mode: StdioMode::Terminal,
+                    notify: None,
+                    work_dir: entry_point.work_dir.clone(),
+                })
             }
+            None => None,
         };
+
         for assign in request.ips.iter() {
             let iface = &assign.interface;
             if !existing_ifaces.contains(iface) {
@@ -344,7 +350,7 @@ impl InstantiateBlueprint {
                 .map(|s| s.resolve_args(&request.envs).jexec())
                 .collect(),
             extra_layers,
-            main: Some(main),
+            main,
             ips: request.ips,
             ipreq: request.ipreq,
             mount_req,
@@ -359,8 +365,6 @@ impl InstantiateBlueprint {
             allowing,
             image_reference: Some(request.image_reference),
             copies,
-            entry_point: request.entry_point,
-            entry_point_args: request.entry_point_args,
             envs: request.envs,
             ip_alloc,
             devfs_ruleset_id,

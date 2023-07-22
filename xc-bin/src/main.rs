@@ -29,6 +29,7 @@ mod image;
 mod jailfile;
 mod network;
 mod redirect;
+mod run;
 
 use crate::channel::{use_channel_action, ChannelAction};
 use crate::error::ActionError;
@@ -37,6 +38,7 @@ use crate::image::{use_image_action, ImageAction};
 use crate::jailfile::directives::volume::VolumeDirective;
 use crate::network::{use_network_action, NetworkAction};
 use crate::redirect::{use_rdr_action, RdrAction};
+use crate::run::{CreateArgs, RunArg};
 
 use clap::Parser;
 use freebsd::event::{eventfd, EventFdNotify};
@@ -107,6 +109,7 @@ enum Action {
         tag: String,
         container_name: String,
     },
+    Create(CreateArgs),
     #[clap(subcommand)]
     Image(ImageAction),
     Info,
@@ -163,51 +166,7 @@ enum Action {
     },
     #[clap(subcommand)]
     Rdr(RdrAction),
-    Run {
-        #[clap(long, default_value_t, action)]
-        no_clean: bool,
-        #[clap(long, default_value_t, action)]
-        persist: bool,
-        #[clap(long = "create-only", action)]
-        create_only: bool,
-        image_reference: ImageReference,
-        entry_point: Option<String>,
-        entry_point_args: Vec<String>,
-        #[clap(long = "link", action)]
-        link: bool,
-        #[clap(long = "publish", short = 'p', multiple_occurrences = true)]
-        publish: Vec<PublishSpec>,
-        /// Use empty resolv.conf
-        #[clap(long = "empty-dns", action)]
-        empty_dns: bool,
-        /// Do not attempt to generate resolv.conf
-        #[clap(long = "dns-nop", action)]
-        dns_nop: bool,
-        #[clap(long = "dns", multiple_occurrences = true)]
-        dns_servers: Vec<String>,
-        #[clap(long = "dns-search", multiple_occurrences = true)]
-        dns_searchs: Vec<String>,
-        #[clap(long = "detach", short = 'd', action)]
-        detach: bool,
-        #[clap(long = "network", multiple_occurrences = true)]
-        networks: Vec<NetworkAllocRequest>,
-        #[clap(short = 'v', multiple_occurrences = true)]
-        mounts: Vec<BindMount>,
-        #[clap(long = "env", short = 'e', multiple_occurrences = true)]
-        envs: Vec<EnvPair>,
-        #[clap(long = "name")]
-        name: Option<String>,
-        #[clap(long = "hostname")]
-        hostname: Option<String>,
-        #[clap(long = "vnet", action)]
-        vnet: bool,
-        #[clap(long = "ip", action)]
-        ips: Vec<IpWant>,
-        #[clap(long = "copy", multiple_occurrences = true)]
-        copy: Vec<BindMount>,
-        #[clap(long = "extra-layer", multiple_occurrences = true)]
-        extra_layers: Vec<PathBuf>,
-    },
+    Run(RunArg),
     RunMain {
         #[clap(long = "detach", short = 'd', action)]
         detach: bool,
@@ -579,7 +538,108 @@ fn main() -> Result<(), ActionError> {
         Action::Rdr(rdr) => {
             _ = use_rdr_action(&mut conn, rdr);
         }
-        Action::Run {
+        Action::Create(CreateArgs {
+            no_clean,
+            persist,
+            networks,
+            mounts,
+            envs,
+            name,
+            hostname,
+            vnet,
+            ips,
+            copy,
+            extra_layers,
+            publish,
+            image_reference,
+        }) => {
+            let hostname = hostname.or_else(|| name.clone());
+
+            let mount_req = mounts
+                .iter()
+                .map(|mount| {
+                    let source = std::fs::canonicalize(mount.source.clone())
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
+                    MountReq {
+                        source,
+                        dest: mount.destination.clone(),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let copies: List<CopyFile> = copy
+                .into_iter()
+                .map(|bind| {
+                    let file = std::fs::OpenOptions::new()
+                        .read(true)
+                        .open(bind.source)
+                        .expect("cannot open file for reading");
+                    let source = Fd(file.into_raw_fd());
+                    CopyFile {
+                        source,
+                        destination: bind.destination,
+                    }
+                })
+                .collect();
+
+            let envs = {
+                let mut map = std::collections::HashMap::new();
+                for env in envs.into_iter() {
+                    map.insert(env.key, env.value);
+                }
+                map
+            };
+
+            let mut extra_layer_files = Vec::new();
+
+            for layer in extra_layers.iter() {
+                extra_layer_files.push(std::fs::OpenOptions::new().read(true).open(layer)?);
+            }
+
+            let extra_layers =
+                List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
+
+            let res = {
+                let mut reqt = InstantiateRequest {
+                    create_only: true,
+                    name,
+                    hostname,
+                    copies,
+                    envs,
+                    vnet,
+                    ipreq: networks,
+                    mount_req,
+                    entry_point: None,
+                    extra_layers,
+                    no_clean,
+                    persist,
+                    image_reference,
+                    ips: ips.into_iter().map(|v| v.0).collect(),
+                    main_norun: true,
+                    init_norun: true,
+                    deinit_norun: true,
+                    ..InstantiateRequest::default()
+                };
+
+                do_instantiate(&mut conn, reqt)?
+            };
+
+            if let Ok(res) = res {
+                for publish in publish.iter() {
+                    let redirection = publish.to_host_spec();
+                    let req = DoRdr {
+                        name: res.id.clone(),
+                        redirection,
+                    };
+                    let _res = do_rdr_container(&mut conn, req)?.unwrap();
+                }
+            } else {
+                eprintln!("{res:#?}");
+            }
+        }
+        Action::Run(RunArg {
             image_reference,
             create_only,
             mut detach,
@@ -602,7 +662,7 @@ fn main() -> Result<(), ActionError> {
             publish,
             link,
             ips,
-        } => {
+        }) => {
             if detach && link {
                 panic!("detach and link flags are mutually exclusive");
             }
@@ -691,8 +751,10 @@ fn main() -> Result<(), ActionError> {
                     vnet,
                     ipreq: networks,
                     mount_req,
-                    entry_point: entry_point.to_string(),
-                    entry_point_args,
+                    entry_point: Some(EntryPointSpec {
+                        entry_point: entry_point.to_string(),
+                        entry_point_args,
+                    }),
                     extra_layers,
                     no_clean,
                     persist,
@@ -763,18 +825,31 @@ fn main() -> Result<(), ActionError> {
             };
 
             let req = RunMainRequest {
-                name,
+                name: name.to_string(),
                 notify: notify.clone(),
             };
+
             if let Ok(res) = do_run_main(&mut conn, req)? {
                 if !detach {
                     if let Maybe::Some(notify) = notify {
                         EventFdNotify::from_fd(notify.as_raw_fd()).notified_sync();
-                        let id = res.id;
-                        let path = format!("/var/run/xc.{id}.main");
-                        let path = std::path::Path::new(&path);
-                        if path.exists() {
-                            _ = attach::run(path);
+                        if let Ok(container) =
+                            do_show_container(&mut conn, ShowContainerRequest { id: name })?
+                        {
+                            let spawn_info = container
+                                .running_container
+                                .processes
+                                .get("main")
+                                .as_ref()
+                                .and_then(|proc| proc.spawn_info.as_ref())
+                                .expect("process not started yet or not found");
+                            if let Some(socket) = &spawn_info.terminal_socket {
+                                _ = attach::run(socket);
+                            } else {
+                                info!("main process is not running with tty");
+                            }
+                        } else {
+                            panic!("cannot find container");
                         }
                     }
                 }

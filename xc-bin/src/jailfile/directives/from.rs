@@ -84,8 +84,10 @@ impl Directive for FromDirective {
             deinit_norun: true,
             persist: true,
             main_started_notify: Maybe::None,
-            entry_point: "main".to_string(),
-            entry_point_args: Vec::new(),
+            entry_point: Some(EntryPointSpec {
+                entry_point: "main".to_string(),
+                entry_point_args: Vec::new(),
+            }),
             envs: HashMap::new(),
             ipreq: context.network.clone(),
             ..InstantiateRequest::default()

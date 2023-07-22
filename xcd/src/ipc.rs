@@ -186,6 +186,12 @@ pub struct CopyFile {
     pub destination: String,
 }
 
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct EntryPointSpec {
+    pub entry_point: String,
+    pub entry_point_args: Vec<String>,
+}
+
 #[derive(FromPacket)]
 pub struct InstantiateRequest {
     pub image_reference: ImageReference,
@@ -196,8 +202,7 @@ pub struct InstantiateRequest {
     pub ipreq: Vec<NetworkAllocRequest>,
     pub mount_req: Vec<MountReq>,
     pub copies: List<CopyFile>,
-    pub entry_point: String,
-    pub entry_point_args: Vec<String>,
+    pub entry_point: Option<EntryPointSpec>,
     pub hostname: Option<String>,
     pub main_norun: bool,
     pub init_norun: bool,
@@ -209,7 +214,6 @@ pub struct InstantiateRequest {
     pub extra_layers: List<Fd>,
     pub main_started_notify: Maybe<Fd>,
     pub create_only: bool,
-
     pub linux_no_create_sys_dir: bool,
     pub linux_no_mount_sys: bool,
     pub linux_no_create_proc_dir: bool,
@@ -251,8 +255,11 @@ impl Default for InstantiateRequest {
             ipreq: Vec::new(),
             mount_req: Vec::new(),
             copies: List::new(),
+            entry_point: None,
+            /*
             entry_point: String::new(),
             entry_point_args: Vec::new(),
+            */
             hostname: None,
             main_norun: false,
             init_norun: false,

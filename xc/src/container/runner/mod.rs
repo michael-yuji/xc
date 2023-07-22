@@ -408,6 +408,9 @@ impl ProcessRunner {
                 _ = fd.send_packet(&packet).unwrap()
             }
         } else if method == "start" {
+            self.start();
+            let packet = write_response(0, ()).unwrap();
+            _ = fd.send_packet(&packet).unwrap()
         } else if method == "write_hosts" {
             let recv: Vec<HostEntry> = serde_json::from_value(request.data).unwrap();
             if let Ok(host_path) = crate::util::realpath(&self.container.root, "/etc/hosts") {
@@ -430,17 +433,21 @@ impl ProcessRunner {
     }
 
     fn start(&mut self) {
-        self.started = Some(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        );
-        if self.inits.is_empty() && !self.container.main_norun {
-            self.run_main();
-        } else if let Some((id, jexec)) = self.inits.pop_front() {
-            self.inits.activate();
-            _ = self.spawn_process(&id, &jexec, None);
+        if self.started.is_none() {
+            self.started = Some(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            );
+            if self.inits.is_empty() && !self.container.main_norun {
+                self.run_main();
+            } else if let Some((id, jexec)) = self.inits.pop_front() {
+                self.inits.activate();
+                _ = self.spawn_process(&id, &jexec, None);
+            }
+        } else {
+            error!("self.start() is called but the container has already started!")
         }
     }
 
@@ -463,7 +470,7 @@ impl ProcessRunner {
             }
             let descentdant_gone = descentdant.is_empty();
             if descentdant_gone {
-                debug!("all descentdant of pid {ancestor} is are gone");
+                debug!("all descentdant of pid {ancestor} are gone");
             }
 
             if ancestor == pid || descentdant_gone {
@@ -478,7 +485,6 @@ impl ProcessRunner {
                                 .try_drain_proc_queue(stat.id(), &mut self.spawn_queue)
                                 && !self.container.main_norun
                             {
-                                info!("SHOULD RUN MAIN");
                                 if let Some(main) = self.container.main_proto.clone() {
                                     self.spawn_queue.push_back(("main".to_string(), main));
                                 }
