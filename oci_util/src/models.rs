@@ -134,6 +134,8 @@ pub struct FreeOciConfig<T> {
     pub rootfs: OciConfigRootFs,
     #[serde(default)]
     pub history: Vec<Histroy>,
+    #[serde(default)]
+    pub inherited_layers: HashMap<OciDigest, Vec<String>>,
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]
