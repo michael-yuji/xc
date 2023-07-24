@@ -199,6 +199,8 @@ impl ServerContext {
 
     // XXX: Potential race condition when trying to import/commit/pull images during purge
     pub(crate) async fn purge_images(&self) -> anyhow::Result<()> {
+        info!("begin purge");
+
         let config = self.config();
         let layers_dir = &config.layers_dir;
         let im = self.image_manager.read().await;
@@ -231,6 +233,8 @@ impl ServerContext {
                     .and_then(|s| s.parse::<ChainId>().ok())
             });
 
+        //        eprintln!("chain_ids: {chain_ids:#?}");
+
         let mut file_set: std::collections::HashSet<OciDigest> =
             std::collections::HashSet::from_iter(files.into_iter());
         let mut chain_id_set: std::collections::HashSet<ChainId> =
@@ -250,6 +254,7 @@ impl ServerContext {
             }
             if !chain_id_set.is_empty() {
                 if let Some(cid) = record.manifest.chain_id() {
+                    info!("keep: {cid}, wanted by: {}:{}", record.name, record.tag);
                     chain_id_set.remove(&cid);
                     let props = zfs.get_props(format!("{}/{cid}", config.image_dataset))?;
                     let mut origin_chain = None;
@@ -259,6 +264,7 @@ impl ServerContext {
                                 .split_once('@')
                                 .and_then(|(_, c)| ChainId::from_str(c).ok())
                             {
+                                info!("keep: {c}, referenced by {cid}");
                                 chain_id_set.remove(&c);
                                 origin_chain = Some(c);
                             }
@@ -271,14 +277,16 @@ impl ServerContext {
         }
 
         for garbage in file_set.iter() {
+            info!("removing orphaned layer: {garbage}");
             std::fs::remove_file(format!("{layers_dir}/{garbage}"))?;
         }
 
         for chain_id in chain_id_set.iter() {
+            info!("destroying ZFS dataset: {chain_id}");
             _ = zfs.destroy(
                 format!("{}/{chain_id}", config.image_dataset),
                 false,
-                false,
+                true,
                 false,
             );
         }

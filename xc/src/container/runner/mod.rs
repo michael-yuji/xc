@@ -72,7 +72,9 @@ impl ProcessRunnerStat {
             true
         });
         if let Some(notify) = &self.exit_notify {
-            notify.clone().notify_waiters_with_value(exit_code as u64);
+            notify
+                .clone()
+                .notify_waiters_with_value(exit_code as u64 + 1);
         }
     }
 
@@ -87,7 +89,9 @@ impl ProcessRunnerStat {
                 .borrow()
                 .exit_code
                 .expect("The entire tree exited but not the process itself?!");
-            notify.clone().notify_waiters_with_value(exit_code as u64);
+            notify
+                .clone()
+                .notify_waiters_with_value(exit_code as u64 + 1);
         }
     }
 }

@@ -158,7 +158,8 @@ pub(super) fn spawn_process_pty(
         .map_err(|err| ExecError::CannotOpenLogFile(log_path_str.to_string(), err))?;
     let listener = std::os::unix::net::UnixListener::bind(socket_path.as_ref())
         .map_err(ExecError::CannotBindUnixSocket)?;
-    let forwarder = PtyForwarder::from_command(listener, cmd, file);
+    let forwarder =
+        PtyForwarder::from_command(listener, cmd, file).map_err(ExecError::CannotSpawn)?;
     let pid = forwarder.pid();
     std::thread::spawn(move || {
         // XXX

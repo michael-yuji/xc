@@ -63,11 +63,10 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
         listener: UnixListener,
         mut command: Command,
         output_log: W,
-    ) -> PtyForwarder<W> {
-        let pty_result = openpty(None, None).unwrap();
-        let maybe_child = command.pty(&pty_result).spawn();
-        let child = maybe_child.unwrap();
-        PtyForwarder {
+    ) -> std::io::Result<PtyForwarder<W>> {
+        let pty_result = openpty(None, None)?;
+        let child = command.pty(&pty_result).spawn()?;
+        Ok(PtyForwarder {
             child,
             listener,
             clients: Vec::new(),
@@ -75,7 +74,7 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
             ingress: Vec::new(),
             egress: Buffer::new(),
             output_log,
-        }
+        })
     }
 
     pub fn pid(&self) -> u32 {

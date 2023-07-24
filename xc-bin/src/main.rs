@@ -935,7 +935,7 @@ fn main() -> Result<(), ActionError> {
                     _ = attach::run(socket);
                 }
                 let exit = n.notified_sync_take_value();
-                std::process::exit(exit.unwrap_or(1) as i32)
+                std::process::exit(exit.unwrap_or(2) as i32 - 1)
             }
         }
     };

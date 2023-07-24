@@ -513,7 +513,9 @@ async fn purge(
     local_context: &mut ConnectionContext<Variables>,
     request: (),
 ) -> GenericResult<()> {
-    context.read().await.purge_images().await.unwrap();
+    if let Err(error) = context.read().await.purge_images().await {
+        error!("purge error: {error:#?}");
+    }
     Ok(())
 }
 #[derive(Serialize, Deserialize, Debug)]
