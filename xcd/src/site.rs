@@ -129,9 +129,6 @@ impl Site {
     }
 
     pub fn update_host_file(&mut self, network: &str, hosts: &Vec<(String, IpAddr)>) {
-        use ipc::packet::codec::FromPacket;
-        use ipc::proto::ipc_err;
-
         self.hosts_cache.insert(network.to_string(), hosts.clone());
 
         let mut host_entries = Vec::new();
@@ -403,6 +400,7 @@ impl Site {
                     allowing: blueprint.allowing,
                     image_reference: blueprint.image_reference,
                     default_router: blueprint.default_router,
+                    log_directory: Some(std::path::PathBuf::from(&self.config.borrow().logs_dir)),
                 };
 
                 let running_container = container

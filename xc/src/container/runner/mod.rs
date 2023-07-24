@@ -54,6 +54,7 @@ pub struct ProcessRunnerStat {
     pub(super) id: String,
     pub(super) pid: u32,
     pub(super) process_stat: Sender<ProcessStat>,
+    pub(super) exit_notify: Option<Arc<EventFdNotify>>,
     pub(super) notify: Option<Arc<EventFdNotify>>,
 }
 
@@ -64,19 +65,29 @@ impl ProcessRunnerStat {
     pub(super) fn id(&self) -> &str {
         self.id.as_str()
     }
+
     pub(super) fn set_exited(&mut self, exit_code: i32) {
         self.process_stat.send_if_modified(|status| {
             status.set_exited(exit_code);
             true
         });
+        if let Some(notify) = &self.exit_notify {
+            notify.clone().notify_waiters_with_value(exit_code as u64);
+        }
     }
+
     pub(super) fn set_tree_exited(&mut self) {
         self.process_stat.send_if_modified(|status| {
             status.set_tree_exited();
             true
         });
         if let Some(notify) = &self.notify {
-            notify.clone().notify_waiters();
+            let exit_code = self
+                .process_stat
+                .borrow()
+                .exit_code
+                .expect("The entire tree exited but not the process itself?!");
+            notify.clone().notify_waiters_with_value(exit_code as u64);
         }
     }
 }
@@ -192,6 +203,7 @@ impl ProcessRunner {
         id: &str,
         pid: u32,
         stat: Sender<ProcessStat>,
+        exit_notify: Option<Arc<EventFdNotify>>,
         notify: Option<Arc<EventFdNotify>>,
     ) {
         debug!("trace process id: {id}, pid: {pid}");
@@ -199,6 +211,7 @@ impl ProcessRunner {
             pid,
             id: id.to_string(),
             process_stat: stat,
+            exit_notify,
             notify,
         };
         self.named_process.push(rstat);
@@ -247,6 +260,7 @@ impl ProcessRunner {
         &mut self,
         id: &str,
         exec: &Jexec,
+        exit_notify: Option<Arc<EventFdNotify>>,
         notify: Option<Arc<EventFdNotify>>,
     ) -> Result<SpawnInfo, ExecError> {
         debug!("spawn: {exec:#?}");
@@ -279,17 +293,36 @@ impl ProcessRunner {
         if let Some(work_dir) = &exec.work_dir {
             cmd.jwork_dir(work_dir);
         }
-
+        let devnull = std::path::PathBuf::from("/dev/null");
         let spawn_info_result = match &exec.output_mode {
             StdioMode::Terminal => {
                 let socket_path = format!("/var/run/xc.{}.{}", self.container.id, id);
-                let log_path = format!("/var/log/xc.{}.{}.log", self.container.id, id);
+                let log_path = self
+                    .container
+                    .log_directory
+                    .clone()
+                    .map(|path| {
+                        let mut path = path;
+                        path.push(format!("xc.{}.{id}.log", self.container.id));
+                        path
+                    })
+                    .unwrap_or_else(|| devnull.clone());
                 spawn_process_pty(cmd, &log_path, &socket_path)
             }
             StdioMode::Files { stdout, stderr } => spawn_process_files(&mut cmd, stdout, stderr),
             StdioMode::Inherit => {
-                let out_path = format!("/var/log/xc.{}.{}.out.log", self.container.id, id);
-                let err_path = format!("/var/log/xc.{}.{}.err.log", self.container.id, id);
+                let (out_path, err_path) = self
+                    .container
+                    .log_directory
+                    .clone()
+                    .map(|path| {
+                        let mut path = path;
+                        let mut path2 = path.clone();
+                        path.push(format!("xc.{}.{id}.out.log", self.container.id));
+                        path2.push(format!("xc.{}.{id}.err.log", self.container.id));
+                        (path, path2)
+                    })
+                    .unwrap_or_else(|| (devnull.clone(), devnull));
                 spawn_process_files(&mut cmd, &Some(out_path), &Some(err_path))
             }
             StdioMode::Forward {
@@ -317,6 +350,7 @@ impl ProcessRunner {
             pid,
             id: id.to_string(),
             process_stat: tx,
+            exit_notify,
             notify,
         };
 
@@ -382,7 +416,7 @@ impl ProcessRunner {
         if method == "exec" {
             let jexec: Jexec = serde_json::from_value(request.data).unwrap();
             let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
-            let result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify));
+            let result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify), None);
 
             match result {
                 Ok(spawn_info) => {
@@ -444,7 +478,7 @@ impl ProcessRunner {
                 self.run_main();
             } else if let Some((id, jexec)) = self.inits.pop_front() {
                 self.inits.activate();
-                _ = self.spawn_process(&id, &jexec, None);
+                _ = self.spawn_process(&id, &jexec, None, None);
             }
         } else {
             error!("self.start() is called but the container has already started!")
@@ -557,7 +591,7 @@ impl ProcessRunner {
 
         'kq: loop {
             while let Some((id, process)) = self.spawn_queue.pop_front() {
-                match self.spawn_process(&id, &process, None) {
+                match self.spawn_process(&id, &process, None, None) {
                     Ok(spawn_info) => {
                         debug!("{id} spawn: {spawn_info:#?}");
                         if id == "main" {

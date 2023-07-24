@@ -929,11 +929,13 @@ fn main() -> Result<(), ActionError> {
                 notify: Maybe::Some(ipc::packet::codec::Fd(n.as_raw_fd())),
                 use_tty: terminal,
             };
+
             if let Ok(response) = do_exec(&mut conn, request)? {
                 if let Some(socket) = response.terminal_socket {
                     _ = attach::run(socket);
                 }
-                n.notified_sync();
+                let exit = n.notified_sync_take_value();
+                std::process::exit(exit.unwrap_or(1) as i32)
             }
         }
     };

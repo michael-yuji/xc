@@ -36,6 +36,7 @@ use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::os::fd::{AsRawFd, FromRawFd};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 
@@ -78,6 +79,8 @@ pub struct RunningContainer {
     pub default_router: Option<IpAddr>,
 
     pub main_started_notify: Arc<EventFdNotify>,
+
+    pub log_directory: Option<PathBuf>,
 }
 
 impl RunningContainer {

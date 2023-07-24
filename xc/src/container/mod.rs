@@ -86,6 +86,8 @@ pub struct CreateContainer {
     pub allowing: Vec<String>,
     pub image_reference: Option<ImageReference>,
     pub default_router: Option<IpAddr>,
+
+    pub log_directory: Option<PathBuf>,
 }
 
 impl CreateContainer {
@@ -342,6 +344,7 @@ impl CreateContainer {
             allowing: self.allowing.clone(),
             image_reference: self.image_reference.clone(),
             default_router: self.default_router,
+            log_directory: self.log_directory.clone(),
         })
     }
 }

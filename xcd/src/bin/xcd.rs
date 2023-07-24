@@ -47,5 +47,7 @@ fn main() {
         .enable_io()
         .build()
         .unwrap();
-    _ = rt.block_on(xmain());
+    if let Err(error) = rt.block_on(xmain()) {
+        eprintln!("{error:#?}")
+    }
 }

@@ -147,15 +147,16 @@ pub(super) fn spawn_process_forward(
 
 pub(super) fn spawn_process_pty(
     cmd: std::process::Command,
-    log_path: &str,
-    socket_path: &str,
+    log_path: impl AsRef<Path>,
+    socket_path: impl AsRef<Path>,
 ) -> Result<SpawnInfo, ExecError> {
+    let log_path_str = log_path.as_ref().to_string_lossy().to_string();
     let file = File::options()
         .create(true)
         .write(true)
         .open(log_path)
-        .map_err(|err| ExecError::CannotOpenLogFile(log_path.to_string(), err))?;
-    let listener = std::os::unix::net::UnixListener::bind(socket_path)
+        .map_err(|err| ExecError::CannotOpenLogFile(log_path_str.to_string(), err))?;
+    let listener = std::os::unix::net::UnixListener::bind(socket_path.as_ref())
         .map_err(ExecError::CannotBindUnixSocket)?;
     let forwarder = PtyForwarder::from_command(listener, cmd, file);
     let pid = forwarder.pid();
@@ -166,9 +167,9 @@ pub(super) fn spawn_process_pty(
     });
     Ok(SpawnInfo {
         pid,
-        stdout_log_file: Some(log_path.to_string()),
-        stderr_log_file: Some(log_path.to_string()),
-        terminal_socket: Some(socket_path.to_string()),
+        stdout_log_file: Some(log_path_str.to_string()),
+        stderr_log_file: Some(log_path_str),
+        terminal_socket: Some(socket_path.as_ref().to_string_lossy().to_string()),
     })
 }
 

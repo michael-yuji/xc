@@ -73,13 +73,29 @@ impl EventFdNotify {
         EventFdNotify { fd }
     }
 
+    pub fn notify_waiters_with_value(&self, value: u64) {
+        unsafe { eventfd_write(self.fd, value) };
+    }
+
     pub fn notify_waiters(&self) {
-        unsafe { eventfd_write(self.fd, 1) };
+        self.notify_waiters_with_value(1);
     }
 
     pub fn as_async_fd(&self) -> Result<AsyncFd<RawFd>, std::io::Error> {
         let new_fd = dup(self.fd).unwrap();
         AsyncFd::new(new_fd)
+    }
+
+    pub async fn notified_take_value(&self) -> std::io::Result<u64> {
+        _ = self.as_async_fd()?.readable().await?;
+        unsafe {
+            let mut v = 0u64;
+            if eventfd_read(self.fd, &mut v) != 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(v)
+            }
+        }
     }
 
     pub async fn notified(&self) -> std::io::Result<()> {
@@ -92,6 +108,21 @@ impl EventFdNotify {
         let kq = nix::sys::event::kqueue().unwrap();
         let out = KEvent::zero();
         _ = nix::sys::event::kevent_ts(kq, &[kevent], &mut [out], None);
+    }
+
+    pub fn notified_sync_take_value(&self) -> std::io::Result<u64> {
+        let kevent = KEvent::from_read(self.fd);
+        let kq = nix::sys::event::kqueue().unwrap();
+        let out = KEvent::zero();
+        _ = nix::sys::event::kevent_ts(kq, &[kevent], &mut [out], None);
+        unsafe {
+            let mut v = 0u64;
+            if eventfd_read(self.fd, &mut v) != 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(v)
+            }
+        }
     }
 
     pub fn new() -> EventFdNotify {

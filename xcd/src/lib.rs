@@ -35,6 +35,8 @@ mod task;
 mod util;
 
 pub mod ipc;
+
+use anyhow::{bail, Context};
 use config_manager::ConfigManager;
 use context::ServerContext;
 use std::sync::Arc;
@@ -51,6 +53,26 @@ pub async fn xmain() -> Result<(), anyhow::Error> {
         }
         Ok(config_manager) => {
             let xc_config = config_manager.config();
+
+            let log_path = std::path::Path::new(&xc_config.logs_dir);
+            let layers_path = std::path::Path::new(&xc_config.layers_dir);
+
+            if !log_path.exists() || !log_path.is_dir() {
+                if !log_path.is_dir() {
+                    bail!("logs_dir is not a directory!")
+                } else {
+                    std::fs::create_dir_all(log_path).context("cannot create log directory")?;
+                }
+            }
+
+            if !layers_path.exists() || !layers_path.is_dir() {
+                if !layers_path.is_dir() {
+                    anyhow::bail!("layers_dir is not a directory!")
+                } else {
+                    std::fs::create_dir_all(log_path).context("cannot create layer directory")?;
+                }
+            }
+
             let path = xc_config.socket_path.to_string();
             info!("config: {xc_config:#?}");
             let context = Arc::new(RwLock::new(ServerContext::new(config_manager)));
