@@ -239,9 +239,28 @@ pub async fn push_image(
                 });
 
                 let maybe_descriptor = session
+                    .upload_content_known_digest(
+                        Some(tx),
+                        &map.archive_digest, content_type.to_string(), true, map.origin.clone(), file)
+                    .await?;
+
+                if let Some(descriptor) = maybe_descriptor {
+                    descriptor
+                } else {
+                    Descriptor {
+                        digest: map.archive_digest.clone(),
+                        media_type: content_type.to_string(),
+                        size: layer_size,
+                    }
+                }
+
+                /*
+                let maybe_descriptor = session
                     .upload_content(Some(tx), content_type.to_string(), file)
                     .await;
+
                 maybe_descriptor?
+                */
             };
             uploads.push(descriptor);
             _ = emitter.use_try(|state| {

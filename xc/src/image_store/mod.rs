@@ -42,6 +42,7 @@ pub struct DiffIdMap {
     pub diff_id: OciDigest,
     pub archive_digest: OciDigest,
     pub algorithm: String,
+    pub origin: Option<String>,
 }
 
 pub trait ImageStore {
@@ -100,6 +101,7 @@ pub trait ImageStore {
         diff_id: &OciDigest,
         archive: &OciDigest,
         content_type: &str,
+        origin: Option<String>,
     ) -> Result<(), ImageStoreError>;
 }
 

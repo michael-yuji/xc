@@ -69,13 +69,13 @@ impl SqliteImageStore {
                 diff_id text not null,
                 digest text not null,
                 compress_alg text not null,
+                origin text,
                 primary key (diff_id, digest)
             );
 
             create table if not exists image_manifests (
                 manifest text not null,
-                digest text not null primary key,
-                origin text
+                digest text not null primary key
             );
 
             create table if not exists image_manifest_tags (
@@ -90,14 +90,14 @@ impl SqliteImageStore {
             ",
         )?;
 
-        // only for people installed and used xc prior to July 6th, 2023
         if self
             .db
-            .execute("alter table image_manifests add column origin text;", [])
+            .execute("alter table diff_id_map add column origin text;", [])
             .is_ok()
         {
-            tracing::info!("UPDATED IMAGE DATABASE SCHEME");
+            tracing::info!("UPDATED DIFF_ID_MAP DATABASE SCHEME");
         };
+
         Ok(())
     }
 }
@@ -118,7 +118,8 @@ impl ImageStore for SqliteImageStore {
             select
                 diff_id,
                 digest,
-                compress_alg
+                compress_alg,
+                origin
             from diff_id_map where digest=?",
         )?;
         let imap: Option<DiffIdMap> = stmt
@@ -129,6 +130,7 @@ impl ImageStore for SqliteImageStore {
                     diff_id: OciDigest::from_str(&s_diff_id).unwrap(),
                     archive_digest: OciDigest::from_str(&s_digest).unwrap(),
                     algorithm: row.get(2)?,
+                    origin: row.get(3)?,
                 })
             })
             .optional()?;
@@ -149,6 +151,7 @@ impl ImageStore for SqliteImageStore {
                 diff_id: OciDigest::from_str(&s_diff_id).unwrap(),
                 archive_digest: OciDigest::from_str(&s_digest).unwrap(),
                 algorithm: row.get(2)?,
+                origin: row.get(3)?,
             });
         }
         Ok(records)
@@ -159,10 +162,11 @@ impl ImageStore for SqliteImageStore {
         diff_id: &OciDigest,
         archive: &OciDigest,
         content_type: &str,
+        origin: Option<String>,
     ) -> Result<(), ImageStoreError> {
         let mut stmt = self.db.prepare_cached(
             "
-            insert into diff_id_map (diff_id, digest, compress_alg)
+            insert into diff_id_map (diff_id, digest, compress_alg, origin)
             values (?, ?, ?), (?, ?, ?)
                 on conflict (diff_id, digest) do nothing
             ",
@@ -175,6 +179,17 @@ impl ImageStore for SqliteImageStore {
             archive.as_str(),
             content_type,
         ])?;
+
+        if let Some(origin) = origin {
+            let mut stmt = self.db.prepare_cached(
+                "update diff_id_map set origin=? where (diff_id, digest) = (?, ?)",
+            )?;
+            stmt.execute([
+                origin.as_str(),
+                diff_id.as_str(),
+                archive.as_str()
+            ])?;
+        }
         Ok(())
     }
 
@@ -404,7 +419,7 @@ mod tests {
         )
         .unwrap();
         db.create_tables().expect("cannot create tables");
-        db.map_diff_id(&dummy, &dummy, "plain").unwrap();
+        db.map_diff_id(&dummy, &dummy, "plain", None).unwrap();
         let yay = db
             .query_diff_id(&dummy)
             .expect("cannot query")
@@ -424,7 +439,7 @@ mod tests {
         )
         .unwrap();
         db.create_tables().expect("cannot create tables");
-        db.map_diff_id(&dummy, &another_dummy, "zstd").unwrap();
+        db.map_diff_id(&dummy, &another_dummy, "zstd", None).unwrap();
 
         let yay = db
             .query_diff_id(&another_dummy)
@@ -438,7 +453,7 @@ mod tests {
         assert_eq!(yay.diff_id, dummy);
         assert_eq!(yay2.diff_id, dummy);
 
-        db.map_diff_id(&dummy, &another_dummy, "zstd").unwrap();
+        db.map_diff_id(&dummy, &another_dummy, "zstd", None).unwrap();
     }
 
     #[test]

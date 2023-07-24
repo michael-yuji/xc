@@ -205,6 +205,11 @@ pub struct Session {
 }
 
 impl Session {
+
+    pub fn repository(&self) -> &String {
+        &self.repository
+    }
+
     fn extract_next_location(&self, response: &Response) -> Result<String, ClientError> {
         let headers = response.headers();
         match headers.get("Location") {
@@ -382,22 +387,34 @@ impl Session {
     pub async fn upload_content_known_digest(
         &mut self,
         progress: Option<Sender<UploadStat>>,
-        digest: OciDigest,
+        digest: &OciDigest,
         media_type: String,
+        mount: bool,
+        mount_from: Option<String>,
         mut reader: impl Read,
-    ) -> Result<Descriptor, ClientError> {
+    ) -> Result<Option<Descriptor>, ClientError> {
         let base_url = self.registry.base_url.to_string();
         let repository = &self.repository;
-        let init_res = self
-            .request_with_try_auth(
-                self.registry
-                    .client
-                    .post(format!("{base_url}/v2/{repository}/blobs/uploads/")),
-            )
-            .await?;
+        let mut hasher = Hasher::sha256();
+
+        let url = if mount {
+            if let Some(from) = mount_from {
+                format!("{base_url}/v2/{repository}/blobs/uploads/?mount={digest}&from={from}")
+            } else {
+                format!("{base_url}/v2/{repository}/blobs/uploads/?mount={digest}")
+            }
+        } else {
+            format!("{base_url}/v2/{repository}/blobs/uploads/")
+        };
+
+        let init_res = self.request_with_try_auth(self.registry.client.post(url)).await?;
 
         if !init_res.status().is_success() {
             return Err(ClientError::UnsuccessfulResponse(init_res));
+        }
+
+        if init_res.status().as_u16() == 201 {
+            return Ok(None)
         }
 
         let mut cursor = 0;
@@ -416,6 +433,8 @@ impl Session {
             debug!("uploading range: {range}");
 
             let owned_buf = buffer[..bytes].to_vec();
+            hasher.update(&owned_buf);
+
             let request = self
                 .registry
                 .client
@@ -441,6 +460,12 @@ impl Session {
             }
         }
 
+        let calc_digest = hasher.finalize();
+
+        if &calc_digest != digest {
+            return Err(ClientError::DigestMismatched(digest.clone(), calc_digest));
+        }
+
         let request = self
             .registry
             .client
@@ -449,11 +474,11 @@ impl Session {
         let response = self.request(request).await?;
 
         if response.status().is_success() {
-            Ok(Descriptor {
+            Ok(Some(Descriptor {
                 media_type,
-                digest,
+                digest: digest.clone(),
                 size: cursor,
-            })
+            }))
         } else {
             Err(ClientError::UnsuccessfulResponse(response))
         }

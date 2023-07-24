@@ -175,12 +175,13 @@ impl ImageManager {
         diff_id: &OciDigest,
         archive: &OciDigest,
         content_type: &str,
+        origin: Option<String>,
     ) -> Result<(), ImageStoreError> {
         self.context
             .image_store
             .lock()
             .await
-            .map_diff_id(diff_id, archive, content_type)
+            .map_diff_id(diff_id, archive, content_type, origin)
     }
 
     pub async fn query_archives(
@@ -371,7 +372,7 @@ impl ImageManager {
                             .image_store
                             .lock()
                             .await
-                            .map_diff_id(&diff_id, &digest, format)
+                            .map_diff_id(&diff_id, &digest, format, Some(session.repository().to_string()))
                             .unwrap();
 
                         use_state!(|_| std::fs::rename(&in_progress_path, &target_path)

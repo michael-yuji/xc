@@ -156,7 +156,7 @@ impl ServerContext {
             .image_manager
             .read()
             .await
-            .map_diff_id(diff_id, archive, content_type)
+            .map_diff_id(diff_id, archive, content_type, None)
             .await;
 
         _ = self
@@ -430,13 +430,15 @@ impl ServerContext {
         // XXX: otherwise default to null image
         let mut image = site.container_dump().and_then(|c| c.origin_image).unwrap();
         image.push_layer(&diff_id);
+
         let chain_id = image.chain_id().unwrap();
         let dst_dataset = format!("{}/{chain_id}", config.image_dataset);
         site.promote_snapshot(&snapshot, &dst_dataset)?;
         site.zfs.snapshot2(&dst_dataset, "xc")?;
+
         let context = self.image_manager.read().await;
         _ = context.register_and_tag_manifest(name, &tag, &image).await;
-        context.map_diff_id(&diff_id, &digest, "zstd").await?;
+        context.map_diff_id(&diff_id, &digest, "zstd", None).await?;
 
         std::fs::rename(&temp_file_path, format!("{layers_dir}/{digest}"))?;
         Ok(diff_id)
