@@ -205,7 +205,6 @@ pub struct Session {
 }
 
 impl Session {
-
     pub fn repository(&self) -> &String {
         &self.repository
     }
@@ -407,14 +406,16 @@ impl Session {
             format!("{base_url}/v2/{repository}/blobs/uploads/")
         };
 
-        let init_res = self.request_with_try_auth(self.registry.client.post(url)).await?;
+        let init_res = self
+            .request_with_try_auth(self.registry.client.post(url))
+            .await?;
 
         if !init_res.status().is_success() {
             return Err(ClientError::UnsuccessfulResponse(init_res));
         }
 
         if init_res.status().as_u16() == 201 {
-            return Ok(None)
+            return Ok(None);
         }
 
         let mut cursor = 0;

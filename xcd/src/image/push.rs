@@ -241,7 +241,12 @@ pub async fn push_image(
                 let maybe_descriptor = session
                     .upload_content_known_digest(
                         Some(tx),
-                        &map.archive_digest, content_type.to_string(), true, map.origin.clone(), file)
+                        &map.archive_digest,
+                        content_type.to_string(),
+                        true,
+                        map.origin.clone(),
+                        file,
+                    )
                     .await?;
 
                 if let Some(descriptor) = maybe_descriptor {

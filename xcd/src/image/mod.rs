@@ -372,7 +372,12 @@ impl ImageManager {
                             .image_store
                             .lock()
                             .await
-                            .map_diff_id(&diff_id, &digest, format, Some(session.repository().to_string()))
+                            .map_diff_id(
+                                &diff_id,
+                                &digest,
+                                format,
+                                Some(session.repository().to_string()),
+                            )
                             .unwrap();
 
                         use_state!(|_| std::fs::rename(&in_progress_path, &target_path)

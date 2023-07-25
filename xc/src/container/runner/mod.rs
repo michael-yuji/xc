@@ -23,8 +23,10 @@
 // SUCH DAMAGE.
 
 mod control_stream;
+mod process_stat;
 
 use self::control_stream::{ControlStream, Readiness};
+use self::process_stat::ProcessRunnerStat;
 
 use crate::container::error::ExecError;
 use crate::container::process::*;
@@ -48,53 +50,6 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::watch::{channel, Receiver, Sender};
 use tracing::{debug, error, info, trace, warn};
-
-#[derive(Debug)]
-pub struct ProcessRunnerStat {
-    pub(super) id: String,
-    pub(super) pid: u32,
-    pub(super) process_stat: Sender<ProcessStat>,
-    pub(super) exit_notify: Option<Arc<EventFdNotify>>,
-    pub(super) notify: Option<Arc<EventFdNotify>>,
-}
-
-impl ProcessRunnerStat {
-    pub(super) fn pid(&self) -> u32 {
-        self.pid
-    }
-    pub(super) fn id(&self) -> &str {
-        self.id.as_str()
-    }
-
-    pub(super) fn set_exited(&mut self, exit_code: i32) {
-        self.process_stat.send_if_modified(|status| {
-            status.set_exited(exit_code);
-            true
-        });
-        if let Some(notify) = &self.exit_notify {
-            notify
-                .clone()
-                .notify_waiters_with_value(exit_code as u64 + 1);
-        }
-    }
-
-    pub(super) fn set_tree_exited(&mut self) {
-        self.process_stat.send_if_modified(|status| {
-            status.set_tree_exited();
-            true
-        });
-        if let Some(notify) = &self.notify {
-            let exit_code = self
-                .process_stat
-                .borrow()
-                .exit_code
-                .expect("The entire tree exited but not the process itself?!");
-            notify
-                .clone()
-                .notify_waiters_with_value(exit_code as u64 + 1);
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct ProcessRunner {
@@ -413,42 +368,47 @@ impl ProcessRunner {
         }
     }
 
-    fn handle_control_stream_cmd(&mut self, mut fd: i32, method: String, request: JsonPacket) {
+    fn handle_control_stream_cmd(
+        &mut self,
+        mut fd: i32,
+        method: String,
+        request: JsonPacket,
+    ) -> anyhow::Result<()> {
         use ipc::proto::write_response;
         use ipc::transport::PacketTransport;
         use std::io::Write;
-        if method == "exec" {
-            let jexec: Jexec = serde_json::from_value(request.data).unwrap();
+
+        let packet = if method == "exec" {
+            let jexec: Jexec = serde_json::from_value(request.data.clone()).with_context(|| {
+                format!(
+                    "cannot deserialize request data, expected Jexec, got {}",
+                    request.data
+                )
+            })?;
+
             let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
             let result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify), None);
 
             match result {
-                Ok(spawn_info) => {
-                    let packet = write_response(0, spawn_info).unwrap();
-                    _ = fd.send_packet(&packet).unwrap();
-                }
-                Err(_err) => {
-                    let packet = write_response(
-                        freebsd::libc::EIO,
-                        serde_json::json!({
-                            "message": "failed to spawn"
-                        }),
-                    )
-                    .unwrap();
-                    _ = fd.send_packet(&packet).unwrap();
-                }
+                Ok(spawn_info) => write_response(0, spawn_info).unwrap(),
+                Err(_err) => write_response(
+                    freebsd::libc::EIO,
+                    serde_json::json!({
+                        "message": "failed to spawn"
+                    }),
+                )
+                .unwrap(),
             }
         } else if method == "run_main" {
             if let Some(main) = self.container.main_proto.clone() {
                 self.spawn_queue.push_back(("main".to_string(), main));
+                todo!()
             } else {
-                let packet = write_response(0, ()).unwrap();
-                _ = fd.send_packet(&packet).unwrap()
+                write_response(0, ()).unwrap()
             }
         } else if method == "start" {
             self.start();
-            let packet = write_response(0, ()).unwrap();
-            _ = fd.send_packet(&packet).unwrap()
+            write_response(0, ()).unwrap()
         } else if method == "write_hosts" {
             let recv: Vec<HostEntry> = serde_json::from_value(request.data).unwrap();
             if let Ok(host_path) = crate::util::realpath(&self.container.root, "/etc/hosts") {
@@ -465,9 +425,15 @@ impl ProcessRunner {
                     }
                 }
             }
-            let res_packet = write_response(0, ()).unwrap();
-            _ = fd.send_packet(&res_packet).unwrap()
-        }
+            write_response(0, ()).unwrap()
+        } else {
+            todo!()
+        };
+
+        fd.send_packet(&packet)
+            .context("failure on writing response packet for method \"{method}\"")?;
+
+        Ok(())
     }
 
     fn start(&mut self) {
@@ -637,7 +603,14 @@ impl ProcessRunner {
                                 }
                                 Ok(Readiness::Pending) => {}
                                 Ok(Readiness::Ready((method, request))) => {
-                                    self.handle_control_stream_cmd(fd, method, request);
+                                    let handled =
+                                        self.handle_control_stream_cmd(fd, method, request);
+                                    if let Err(error) = handled {
+                                        error!(
+                                            "closing control_stream {fd} due to error: {error:#?}"
+                                        );
+                                        self.control_streams.remove(&fd);
+                                    }
                                 }
                             }
                         }

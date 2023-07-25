@@ -184,11 +184,7 @@ impl ImageStore for SqliteImageStore {
             let mut stmt = self.db.prepare_cached(
                 "update diff_id_map set origin=? where (diff_id, digest) = (?, ?)",
             )?;
-            stmt.execute([
-                origin.as_str(),
-                diff_id.as_str(),
-                archive.as_str()
-            ])?;
+            stmt.execute([origin.as_str(), diff_id.as_str(), archive.as_str()])?;
         }
         Ok(())
     }
@@ -439,7 +435,8 @@ mod tests {
         )
         .unwrap();
         db.create_tables().expect("cannot create tables");
-        db.map_diff_id(&dummy, &another_dummy, "zstd", None).unwrap();
+        db.map_diff_id(&dummy, &another_dummy, "zstd", None)
+            .unwrap();
 
         let yay = db
             .query_diff_id(&another_dummy)
@@ -453,7 +450,8 @@ mod tests {
         assert_eq!(yay.diff_id, dummy);
         assert_eq!(yay2.diff_id, dummy);
 
-        db.map_diff_id(&dummy, &another_dummy, "zstd", None).unwrap();
+        db.map_diff_id(&dummy, &another_dummy, "zstd", None)
+            .unwrap();
     }
 
     #[test]
