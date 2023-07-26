@@ -40,7 +40,7 @@ use anyhow::Context;
 use freebsd::fs::zfs::ZfsHandle;
 use freebsd::net::pf;
 use oci_util::digest::OciDigest;
-use oci_util::image_reference::ImageReference;
+use oci_util::image_reference::{ImageReference, ImageTag};
 use oci_util::layer::ChainId;
 use std::collections::HashMap;
 use std::os::fd::{FromRawFd, RawFd};
@@ -146,8 +146,7 @@ impl ServerContext {
         archive: &oci_util::digest::OciDigest,
         content_type: &str,
         meta: &JailConfig,
-        image: &str,
-        tag: &str,
+        image_reference: &ImageReference,
     ) {
         let layers = vec![diff_id.clone()];
         let jail_image = meta.to_image(layers, None);
@@ -163,7 +162,7 @@ impl ServerContext {
             .image_manager
             .read()
             .await
-            .register_and_tag_manifest(image, tag, &jail_image)
+            .register_and_tag_manifest(image_reference, &jail_image)
             .await;
     }
 
@@ -254,7 +253,7 @@ impl ServerContext {
             }
             if !chain_id_set.is_empty() {
                 if let Some(cid) = record.manifest.chain_id() {
-                    info!("keep: {cid}, wanted by: {}:{}", record.name, record.tag);
+                    info!("keep: {cid}, wanted by: {}", record.image_reference);
                     chain_id_set.remove(&cid);
                     let props = zfs.get_props(format!("{}/{cid}", config.image_dataset))?;
                     let mut origin_chain = None;
@@ -295,14 +294,13 @@ impl ServerContext {
 
     pub async fn resolve_image(
         &self,
-        name: impl AsRef<str>,
-        reference: impl AsRef<str>,
+        image_reference: &ImageReference,
     ) -> Result<Option<ImageRecord>, anyhow::Error> {
         match self
             .image_manager
             .read()
             .await
-            .query_manifest(name.as_ref(), reference.as_ref())
+            .query_manifest(image_reference)
             .await
         {
             Err(xc::image_store::ImageStoreError::TagNotFound(_, _)) => Ok(None),
@@ -436,8 +434,16 @@ impl ServerContext {
         site.promote_snapshot(&snapshot, &dst_dataset)?;
         site.zfs.snapshot2(&dst_dataset, "xc")?;
 
+        let image_reference = ImageReference {
+            hostname: None,
+            name: name.to_string(),
+            tag: ImageTag::Tag(tag.to_string()),
+        };
+
         let context = self.image_manager.read().await;
-        _ = context.register_and_tag_manifest(name, &tag, &image).await;
+        _ = context
+            .register_and_tag_manifest(&image_reference, &image)
+            .await;
         context.map_diff_id(&diff_id, &digest, "zstd", None).await?;
 
         std::fs::rename(&temp_file_path, format!("{layers_dir}/{digest}"))?;

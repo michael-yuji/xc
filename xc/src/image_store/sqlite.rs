@@ -24,6 +24,7 @@
 use super::{DiffIdMap, ImageRecord, ImageStore, ImageStoreError};
 use crate::models::jail_image::JailImage;
 use oci_util::digest::OciDigest;
+use oci_util::image_reference::{ImageReference, ImageTag};
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -78,11 +79,22 @@ impl SqliteImageStore {
                 digest text not null primary key
             );
 
+            create table if not exists image_manifest_refs (
+                hostname text not null,
+                name text not null,
+                digest text not null,
+                primary key (hostname, name, digest),
+                foreign key (digest)
+                    references image_manifests(digest)
+                    on delete cascade
+            );
+
             create table if not exists image_manifest_tags (
+                hostname text,
                 name text not null,
                 tag text not null,
                 digest text not null,
-                primary key (name, tag),
+                primary key (hostname, name, tag),
                 foreign key (digest)
                     references image_manifests(digest)
                     on delete cascade
@@ -104,6 +116,7 @@ impl SqliteImageStore {
 
 impl ImageStore for SqliteImageStore {
     fn purge_all_untagged_manifest(&self) -> Result<(), ImageStoreError> {
+        // TODO: deal with digest reference
         self.db.execute(
             "
             delete from image_manifests where digest not in (select digest from image_manifest_tags)
@@ -112,6 +125,7 @@ impl ImageStore for SqliteImageStore {
         )?;
         Ok(())
     }
+
     fn query_diff_id(&self, digest: &OciDigest) -> Result<Option<DiffIdMap>, ImageStoreError> {
         let mut stmt = self.db.prepare_cached(
             "
@@ -195,14 +209,33 @@ impl ImageStore for SqliteImageStore {
         stmt.execute([digest.as_str()])?;
         let mut stmt2 = db.prepare_cached("delete from image_manifest_tags where digest=?")?;
         stmt2.execute([digest.as_str()])?;
+        let mut stmt3 = db.prepare_cached("delete from image_manifest_refs where digest=?")?;
+        stmt3.execute([digest.as_str()])?;
         Ok(())
     }
 
-    fn untag(&self, name: &str, tag: &str) -> Result<(), ImageStoreError> {
+    fn untag(&self, image_reference: &ImageReference) -> Result<(), ImageStoreError> {
         let db = &self.db;
-        let mut stmt =
-            db.prepare_cached("delete from image_manifest_tags where name=? and tag=?")?;
-        stmt.execute([&name, &tag])?;
+        match &image_reference.tag {
+            ImageTag::Tag(tag) => {
+                let mut stmt = db.prepare_cached(
+                    "delete from image_manifest_tags where hostname=? and name=? and tag=?",
+                )?;
+                let hostname = image_reference.hostname.clone().unwrap_or_default();
+                stmt.execute((&hostname, &image_reference.name, &tag))?;
+            }
+            ImageTag::Digest(digest) => {
+                let mut stmt = db.prepare_cached(
+                    "delete from image_manifest_tags where hostname=? and name=? and digest=?",
+                )?;
+                let hostname = image_reference.hostname.clone().unwrap_or_default();
+                stmt.execute((&hostname, &image_reference.name, digest.as_str()))?;
+                let mut stmt = db.prepare_cached(
+                    "delete from image_manifest_refs where hostname=? and name=? and digest=?",
+                )?;
+                stmt.execute((&hostname, &image_reference.name, digest.as_str()))?;
+            }
+        }
         Ok(())
     }
 
@@ -210,7 +243,7 @@ impl ImageStore for SqliteImageStore {
         let mut stmt = self.db.prepare_cached(
             "
             select
-                name, tag, image_manifests.digest, manifest
+                hostname, name, tag, image_manifests.digest, manifest
             from
                 image_manifest_tags
             inner join
@@ -220,12 +253,20 @@ impl ImageStore for SqliteImageStore {
         let mut rows = stmt.query([])?;
         let mut records = Vec::new();
         while let Ok(Some(row)) = rows.next() {
-            let bytes: String = row.get(3)?;
+            let bytes: String = row.get(4)?;
             let manifest: JailImage = serde_json::from_str(&bytes)?;
+
+            let hn: String = row.get(0)?;
+
+            let image_reference = ImageReference {
+                hostname: if hn.is_empty() { None } else { Some(hn) },
+                name: row.get(1)?,
+                tag: ImageTag::Tag(row.get(2)?),
+            };
+
             records.push(ImageRecord {
-                name: row.get(0)?,
-                tag: row.get(1)?,
-                digest: row.get(2)?,
+                image_reference,
+                digest: row.get(3)?,
                 manifest,
             });
         }
@@ -236,7 +277,7 @@ impl ImageStore for SqliteImageStore {
         let mut stmt = self.db.prepare_cached(
             "
             select
-                name, tag, image_manifests.digest, manifest
+                hostname, name, tag, image_manifests.digest, manifest
             from
                 image_manifest_tags
             inner join
@@ -248,12 +289,20 @@ impl ImageStore for SqliteImageStore {
         let mut rows = stmt.query([&name])?;
         let mut records = Vec::new();
         while let Ok(Some(row)) = rows.next() {
-            let bytes: String = row.get(3)?;
+            let bytes: String = row.get(4)?;
             let manifest: JailImage = serde_json::from_str(&bytes)?;
+
+            let hn: String = row.get(0)?;
+
+            let image_reference = ImageReference {
+                hostname: if hn.is_empty() { None } else { Some(hn) },
+                name: row.get(1)?,
+                tag: ImageTag::Tag(row.get(2)?),
+            };
+
             records.push(ImageRecord {
-                name: row.get(0)?,
-                tag: row.get(1)?,
-                digest: row.get(2)?,
+                image_reference,
+                digest: row.get(3)?,
                 manifest,
             });
         }
@@ -277,12 +326,13 @@ impl ImageStore for SqliteImageStore {
 
     fn register_manifest(&self, manifest: &JailImage) -> Result<OciDigest, ImageStoreError> {
         let db = &self.db;
+        let digest = manifest.digest();
+
         let mut stmt = db.prepare_cached(
             "insert into image_manifests (digest, manifest) values (?, ?)
                     on conflict(digest) do nothing",
         )?;
         let manifest_json = serde_json::to_string(manifest)?;
-        let digest = manifest.digest();
         stmt.execute([digest.as_str(), manifest_json.as_str()])?;
         Ok(digest)
     }
@@ -290,53 +340,96 @@ impl ImageStore for SqliteImageStore {
     fn tag_manifest(
         &self,
         digest: &OciDigest,
-        name: &str,
-        tag: &str,
+        image_reference: &ImageReference,
     ) -> Result<(), ImageStoreError> {
         let db = &self.db;
+        let hostname = image_reference.hostname.clone().unwrap_or_default();
+        let name = &image_reference.name;
+
+        if let ImageTag::Tag(tag) = &image_reference.tag {
+            let mut stmt = db.prepare_cached(
+                "
+                insert into image_manifest_tags (hostname, name, tag, digest) values (?, ?, ?, ?)
+                    on conflict(hostname, name, tag) do update set digest=?",
+            )?;
+
+            stmt.execute((&hostname, name, tag, digest.as_str(), digest.as_str()))?;
+        }
+
         let mut stmt = db.prepare_cached(
             "
-            insert into image_manifest_tags (name, tag, digest) values (?, ?, ?)
-                on conflict(name, tag) do update set digest=?",
+            insert into image_manifest_refs (hostname, name, digest) values (?, ?, ?)
+                on conflict(hostname, name, digest) do nothing
+            ",
         )?;
-        stmt.execute([name, tag, digest.as_str(), digest.as_str()])?;
+
+        stmt.execute((&hostname, name, digest.as_str()))?;
+
         Ok(())
     }
 
     fn register_and_tag_manifest(
         &self,
-        name: &str,
-        tag: &str,
+        image_reference: &ImageReference,
         manifest: &JailImage,
     ) -> Result<OciDigest, ImageStoreError> {
         let digest = &self.register_manifest(manifest)?;
-        self.tag_manifest(digest, name, tag)?;
+        self.tag_manifest(&digest, image_reference)?;
         Ok(digest.clone())
     }
 
-    fn query_manifest(&self, name: &str, tag: &str) -> Result<ImageRecord, ImageStoreError> {
+    fn query_manifest(
+        &self,
+        image_reference: &ImageReference,
+    ) -> Result<ImageRecord, ImageStoreError> {
+        if image_reference.tag.is_tag() {
+            self.query_manifest_tagged(image_reference)
+        } else {
+            self.query_manifest_digest(image_reference)
+        }
+    }
+}
+
+impl SqliteImageStore {
+    #[inline(always)]
+    fn query_manifest_digest(
+        &self,
+        image_reference: &ImageReference,
+    ) -> Result<ImageRecord, ImageStoreError> {
         let mut stmt = self.db.prepare_cached(
             "
             select
-                name, tag, image_manifests.digest, manifest
+                hostname, name, image_manifests.digest, manifest
             from
-                image_manifest_tags
+                image_manifest_refs
             inner join
-                image_manifests on image_manifests.digest = image_manifest_tags.digest
-            where (name, tag) = (?, ?)",
+                image_manifests on image_manifests.digest = image_manifest_refs.digest
+            where (hostname, name, image_manifest_refs.digest) = (?, ?, ?)",
         )?;
 
+        let hostname = image_reference.hostname.clone().unwrap_or_default();
+        let name = &image_reference.name;
+        let tag = image_reference.tag.to_string();
+
         let manifest = stmt
-            .query_row([&name, &tag], |row| {
+            .query_row((&hostname, &name, &tag), |row| {
                 let bytes: String = row.get(3)?;
                 let manifest: JailImage = serde_json::from_str(&bytes).unwrap();
+                let digest_str: String = row.get(2)?;
+
+                let hn: String = row.get(0)?;
+
+                let image_reference = ImageReference {
+                    hostname: if hn.is_empty() { None } else { Some(hn) },
+                    name: row.get(1)?,
+                    tag: ImageTag::Digest(OciDigest::from_str(&digest_str).unwrap()),
+                };
+
                 Ok(ImageRecord {
-                    name: row.get(0)?,
-                    tag: row.get(1)?,
+                    image_reference,
                     digest: row.get(2)?,
                     manifest,
                 })
-                //            Ok(manifest)
             })
             .optional()?;
 
@@ -349,48 +442,53 @@ impl ImageStore for SqliteImageStore {
         }
     }
 
-    fn associate_commit_manifest(
+    #[inline(always)]
+    fn query_manifest_tagged(
         &self,
-        commit_id: &str,
-        manifest: &JailImage,
-    ) -> Result<(), ImageStoreError> {
-        let digest = manifest.digest();
-        let mut stmt = self
-            .db
-            .prepare_cached("insert into commit_assoc (commit_id, digest) values (?, ?)")?;
-        stmt.execute([commit_id, digest.as_str()])?;
-        Ok(())
-    }
-
-    fn query_records_using_commit(
-        &self,
-        commit_id: &str,
-    ) -> Result<Vec<ImageRecord>, ImageStoreError> {
-        let mut records = Vec::new();
+        image_reference: &ImageReference,
+    ) -> Result<ImageRecord, ImageStoreError> {
         let mut stmt = self.db.prepare_cached(
             "
             select
-                name, tag, commit_assoc.digest, manifest
+                hostname, name, tag, image_manifests.digest, manifest
             from
-                commit_assoc
-            inner join image_manifests
-                commit_assoc.digest = image_manifests.digest
-            where
-                commit_id=?
-            ",
+                image_manifest_tags
+            inner join
+                image_manifests on image_manifests.digest = image_manifest_tags.digest
+            where (hostname, name, tag) = (?, ?, ?)",
         )?;
-        let mut rows = stmt.query([commit_id])?;
-        while let Ok(Some(row)) = rows.next() {
-            let bytes: String = row.get(3)?;
-            let manifest: JailImage = serde_json::from_str(&bytes)?;
-            records.push(ImageRecord {
-                name: row.get(0)?,
-                tag: row.get(1)?,
-                digest: row.get(2)?,
-                manifest,
-            });
+
+        let hostname = image_reference.hostname.clone().unwrap_or_default();
+        let name = &image_reference.name;
+        let tag = image_reference.tag.to_string();
+
+        let manifest = stmt
+            .query_row((&hostname, &name, &tag), |row| {
+                let bytes: String = row.get(4)?;
+                let manifest: JailImage = serde_json::from_str(&bytes).unwrap();
+                let hn: String = row.get(0)?;
+
+                let image_reference = ImageReference {
+                    hostname: if hn.is_empty() { None } else { Some(hn) },
+                    name: row.get(1)?,
+                    tag: ImageTag::Tag(row.get(2)?),
+                };
+
+                Ok(ImageRecord {
+                    image_reference,
+                    digest: row.get(3)?,
+                    manifest,
+                })
+            })
+            .optional()?;
+
+        match manifest {
+            None => Err(ImageStoreError::TagNotFound(
+                name.to_string(),
+                tag.to_string(),
+            )),
+            Some(record) => Ok(record),
         }
-        Ok(records)
     }
 }
 
@@ -400,6 +498,7 @@ mod tests {
     use crate::image_store::{ImageRecord, ImageStore};
     use crate::models::jail_image::{JailConfig, JailImage};
     use oci_util::digest::OciDigest;
+    use oci_util::image_reference::{ImageReference, ImageTag};
     use std::str::FromStr;
 
     #[test]
@@ -458,23 +557,53 @@ mod tests {
         let db = SqliteImageStore::open_in_memory();
         db.create_tables().expect("cannot create tables");
         let manifest = JailImage::default();
+        let im = "test-name:test-tag".parse::<ImageReference>().unwrap();
         let digest = db
-            .register_and_tag_manifest("test-name", "test-tag", &manifest)
+            .register_and_tag_manifest(&im, &manifest)
             .expect("cannot register and tag manifest");
         let records = db
             .list_all_tags("test-name")
             .expect("canont query all tags");
         let expected_record = ImageRecord {
-            name: "test-name".to_string(),
-            tag: "test-tag".to_string(),
+            image_reference: im.clone(),
             digest: digest.to_string(),
             manifest,
         };
+        eprintln!("records: {records:#?}");
         assert_eq!(records, vec![expected_record]);
     }
 
     #[test]
+    fn test_image_store_register_manifest_query_by_digest() {
+        let db = SqliteImageStore::open_in_memory();
+        db.create_tables().expect("cannot create tables");
+        let manifest = JailImage::default();
+        let im = "test-name:test-tag".parse::<ImageReference>().unwrap();
+
+        let digest = db
+            .register_and_tag_manifest(&im, &manifest)
+            .expect("cannot register and tag manifest");
+
+        let imm = ImageReference {
+            tag: ImageTag::Digest(digest.clone()),
+            ..im
+        };
+
+        let records = db
+            .query_manifest_digest(&imm)
+            .expect("canont query manifest by digest");
+
+        let expected_record = ImageRecord {
+            image_reference: imm,
+            digest: digest.to_string(),
+            manifest,
+        };
+        assert_eq!(records, expected_record);
+    }
+
+    #[test]
     fn test_image_store_retag_manifest() {
+        let im = "test-name:test-tag".parse::<ImageReference>().unwrap();
         let db = SqliteImageStore::open_in_memory();
         db.create_tables().expect("cannot create tables");
         let manifest1 = JailImage::default();
@@ -486,14 +615,18 @@ mod tests {
 
         let mut manifest2 = manifest1.clone();
         manifest2.set_config(&jail_config);
-        db.register_and_tag_manifest("test-name", "test-tag", &manifest1)
+        db.register_and_tag_manifest(&im, &manifest1)
             .expect("cannot register and tag manifest");
         let digest = db.register_manifest(&manifest2).expect("");
-        db.tag_manifest(&digest, "test-name", "test-tag").expect("");
+        db.tag_manifest(&digest, &im).expect("");
 
-        let manifest = db
-            .query_manifest("test-name", "test-tag")
-            .expect("cannot query manifest");
+        {
+            let records = db
+                .list_all_tags("test-name")
+                .expect("canont query all tags");
+            eprintln!("records: {records:#?}");
+        }
+        let manifest = db.query_manifest(&im).expect("cannot query manifest");
 
         assert_eq!(manifest.manifest, manifest2);
     }

@@ -38,7 +38,7 @@ use xcd::ipc::*;
 pub(crate) enum ImageAction {
     Import {
         path: String,
-        image_id: ImageReference,
+        image_reference: ImageReference,
         /// Optionally import a configuration file as skeleton
         #[arg(long = "config-file", short = 'f')]
         config_file: Option<PathBuf>,
@@ -48,21 +48,21 @@ pub(crate) enum ImageAction {
     },
     List,
     Show {
-        image_id: String,
+        image_reference: ImageReference,
     },
     Describe {
-        image_id: ImageReference,
+        image_reference: ImageReference,
     },
     GetConfig {
         #[arg(short = 'f', default_value = "yaml")]
         format: String,
-        image_id: ImageReference,
+        image_reference: ImageReference,
     },
     Remove {
-        image_id: ImageReference,
+        image_reference: ImageReference,
     },
     SetConfig {
-        image_id: String,
+        image_reference: ImageReference,
         config_file: String,
     },
     Patch {
@@ -82,11 +82,7 @@ where
 {
     let image_name = &image_reference.name;
     let tag = &image_reference.tag;
-    let reqt = DescribeImageRequest {
-        image_name: image_name.to_string(),
-        tag: tag.to_string(),
-    };
-    let res = do_describe_image(conn, reqt)?;
+    let res = do_describe_image(conn, image_reference.clone())?;
     match res {
         Err(e) => {
             eprintln!("{e:#?}");
@@ -95,8 +91,7 @@ where
             let mut config = res.jail_image.jail_config();
             f(&mut config);
             let req = SetConfigRequest {
-                name: image_name.to_string(),
-                tag: tag.to_string(),
+                image_reference: image_reference.clone(),
                 config,
             };
             _ = do_replace_meta(conn, req)?;
@@ -112,7 +107,7 @@ pub(crate) fn use_image_action(
     match action {
         ImageAction::Import {
             path,
-            image_id,
+            image_reference,
             config_file,
             subcommands,
         } => {
@@ -147,7 +142,7 @@ pub(crate) fn use_image_action(
             let request = FdImport {
                 fd,
                 config,
-                image_reference: image_id,
+                image_reference,
             };
 
             let response = do_fd_import(conn, request);
@@ -165,18 +160,13 @@ pub(crate) fn use_image_action(
                 let names = res
                     .manifests
                     .iter()
-                    .map(|row| format!("{}:{}", row.name, row.tag))
+                    .map(|row| row.image_reference.to_string())
                     .collect::<Vec<_>>();
                 println!("{names:#?}");
             }
         }
-        ImageAction::Show { image_id } => {
-            let (image_name, tag) = image_id.rsplit_once(':').expect("invalid image id");
-            let reqt = DescribeImageRequest {
-                image_name: image_name.to_string(),
-                tag: tag.to_string(),
-            };
-            let res = do_describe_image(conn, reqt)?;
+        ImageAction::Show { image_reference } => {
+            let res = do_describe_image(conn, image_reference)?;
             match res {
                 Err(e) => eprintln!("{e:#?}"),
                 Ok(res) => {
@@ -185,17 +175,14 @@ pub(crate) fn use_image_action(
                 }
             }
         }
-        ImageAction::Describe { image_id } => {
-            let image_name = image_id.name.to_string();
-            let tag = image_id.tag.to_string();
-            let reqt = DescribeImageRequest { image_name, tag };
-            let res = do_describe_image(conn, reqt)?;
+        ImageAction::Describe { image_reference } => {
+            let res = do_describe_image(conn, image_reference.clone())?;
             match res {
                 Err(e) => eprintln!("{e:#?}"),
                 Ok(res) => {
                     let image = &res.jail_image;
                     let config = image.jail_config();
-                    println!("\n{image_id}");
+                    println!("\n{image_reference}");
                     println!("    Envs:");
                     for (key, value) in config.envs.iter() {
                         println!("        {key}:");
@@ -226,12 +213,11 @@ pub(crate) fn use_image_action(
                 }
             }
         }
-        ImageAction::GetConfig { format, image_id } => {
-            let reqt = DescribeImageRequest {
-                image_name: image_id.name.to_string(),
-                tag: image_id.tag.to_string(),
-            };
-            let res = do_describe_image(conn, reqt)?;
+        ImageAction::GetConfig {
+            format,
+            image_reference,
+        } => {
+            let res = do_describe_image(conn, image_reference.clone())?;
             match res {
                 //                Err(DescribeImageError::ImageReferenceNotFound) => eprintln!("Image reference not found"),
                 Err(e) => eprintln!("{e:#?}"),
@@ -246,15 +232,13 @@ pub(crate) fn use_image_action(
                 }
             }
         }
-        ImageAction::Remove { image_id } => {
-            _ = do_remove_image(conn, image_id)?;
+        ImageAction::Remove { image_reference } => {
+            _ = do_remove_image(conn, image_reference)?;
         }
         ImageAction::SetConfig {
-            image_id,
+            image_reference,
             config_file,
         } => {
-            let (name, tag) = image_id.rsplit_once(':').expect("invalid image id");
-
             let input: Box<dyn std::io::Read> = if config_file == *"-" {
                 Box::new(std::io::stdin())
             } else {
@@ -269,8 +253,7 @@ pub(crate) fn use_image_action(
                 serde_yaml::from_reader(input).context("cannot parse input")?;
 
             let req = SetConfigRequest {
-                name: name.to_string(),
-                tag: tag.to_string(),
+                image_reference,
                 config,
             };
             let manifest = do_replace_meta(conn, req)?;

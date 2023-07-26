@@ -25,14 +25,14 @@ pub mod sqlite;
 
 use crate::models::jail_image::JailImage;
 use oci_util::digest::OciDigest;
+use oci_util::image_reference::ImageReference;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct ImageRecord {
-    pub name: String,
-    pub tag: String,
+    pub image_reference: ImageReference,
     pub digest: String,
     pub manifest: JailImage,
 }
@@ -53,7 +53,7 @@ pub trait ImageStore {
     fn delete_manifest(&self, digest: &OciDigest) -> Result<(), ImageStoreError>;
 
     /// dereference a name:tag from the manifest it is referencing to
-    fn untag(&self, name: &str, tag: &str) -> Result<(), ImageStoreError>;
+    fn untag(&self, image_reference: &ImageReference) -> Result<(), ImageStoreError>;
 
     fn list_all_tagged(&self) -> Result<Vec<ImageRecord>, ImageStoreError>;
 
@@ -68,29 +68,19 @@ pub trait ImageStore {
     fn tag_manifest(
         &self,
         manifest: &OciDigest,
-        name: &str,
-        tag: &str,
+        image_reference: &ImageReference,
     ) -> Result<(), ImageStoreError>;
 
     fn register_and_tag_manifest(
         &self,
-        name: &str,
-        tag: &str,
+        image_reference: &ImageReference,
         manifest: &JailImage,
     ) -> Result<OciDigest, ImageStoreError>;
 
-    fn query_manifest(&self, name: &str, tag: &str) -> Result<ImageRecord, ImageStoreError>;
-
-    fn query_records_using_commit(
+    fn query_manifest(
         &self,
-        commit_id: &str,
-    ) -> Result<Vec<ImageRecord>, ImageStoreError>;
-
-    fn associate_commit_manifest(
-        &self,
-        commit_id: &str,
-        manifest: &JailImage,
-    ) -> Result<(), ImageStoreError>;
+        image_reference: &ImageReference,
+    ) -> Result<ImageRecord, ImageStoreError>;
 
     fn query_diff_id(&self, digest: &OciDigest) -> Result<Option<DiffIdMap>, ImageStoreError>;
 

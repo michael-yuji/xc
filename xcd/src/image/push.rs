@@ -125,7 +125,7 @@ pub async fn push_image(
         let reg = this.context.registries.lock().await;
 
         let record = this
-            .query_manifest(&reference.name, reference.tag.as_ref())
+            .query_manifest(&reference)
             .await
             .map_err(|_| PushImageError::NoSuchLocalReference)?;
 

@@ -311,7 +311,7 @@ async fn instantiate(
             request.image_reference.name.to_string()
         };
         let image_tag = request.image_reference.tag.to_string();
-        dlctx.query_manifest(&image_name, &image_tag).await
+        dlctx.query_manifest(&request.image_reference).await
     };
 
     match row {
@@ -401,14 +401,8 @@ async fn list_all_images(
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct DescribeImageRequest {
-    pub image_name: String,
-    pub tag: String,
-}
-#[derive(Serialize, Deserialize, Debug)]
 pub struct DescribeImageResponse {
-    pub image_name: String,
-    pub tag: String,
+    pub image_reference: ImageReference,
     pub chain_id: String,
     pub digest: String,
     pub jail_image: xc::models::jail_image::JailImage,
@@ -425,12 +419,12 @@ pub enum DescribeImageError {
 async fn describe_image(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
-    request: DescribeImageRequest,
+    request: ImageReference,
 ) -> Result<DescribeImageResponse, ipc::proto::ErrResponse<DescribeImageError>> {
     let image = context
         .read()
         .await
-        .resolve_image(&request.image_name, &request.tag)
+        .resolve_image(&request)
         .await
         .unwrap()
         .ok_or(DescribeImageError::ImageReferenceNotFound)
@@ -439,9 +433,8 @@ async fn describe_image(
     let chain_id = image.manifest.chain_id().unwrap().to_string();
 
     Ok(DescribeImageResponse {
-        image_name: image.name,
+        image_reference: image.image_reference,
         dataset_id: chain_id.clone(),
-        tag: image.tag,
         chain_id,
         digest: image.digest,
         jail_image: image.manifest,
@@ -476,8 +469,7 @@ async fn describe_images(
         let chain_id2 = chain_id.clone().to_string();
 
         rows.push(DescribeImageResponse {
-            image_name: image_row.name,
-            tag: image_row.tag,
+            image_reference: image_row.image_reference,
             chain_id,
             digest: image_row.digest,
             jail_image: image_row.manifest,
@@ -501,7 +493,7 @@ async fn remove_image(
         .image_manager
         .read()
         .await
-        .untag_image(&request.name, &request.tag.to_string())
+        .untag_image(&request)
         .await
         .unwrap();
     Ok(())
@@ -797,8 +789,7 @@ async fn fd_import(
                 &archive_digest,
                 content_type,
                 &request.config,
-                &request.image_reference.name,
-                request.image_reference.tag.as_str(),
+                &request.image_reference,
             )
             .await
     }
@@ -846,8 +837,7 @@ async fn commit_container(
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SetConfigRequest {
-    pub name: String,
-    pub tag: String,
+    pub image_reference: ImageReference,
     pub config: xc::models::jail_image::JailConfig,
 }
 
@@ -860,13 +850,13 @@ async fn replace_meta(
     let ctx = context.read().await;
     let dlctx = ctx.image_manager.read().await;
     let record = dlctx
-        .query_manifest(&request.name, &request.tag)
+        .query_manifest(&request.image_reference)
         .await
         .unwrap();
     let mut manifest = record.manifest;
     manifest.set_config(&request.config);
     dlctx
-        .register_and_tag_manifest(&request.name, &request.tag, &manifest)
+        .register_and_tag_manifest(&request.image_reference, &manifest)
         .await
         .unwrap();
     Ok(manifest)

@@ -32,6 +32,7 @@ use crate::task::*;
 use freebsd::fs::zfs::{ZfsError, ZfsHandle};
 use oci_util::digest::{DigestAlgorithm, Hasher, OciDigest};
 use oci_util::distribution::client::*;
+use oci_util::image_reference::ImageReference;
 use oci_util::layer::ChainId;
 use oci_util::models::Descriptor;
 use oci_util::models::ImageManifest;
@@ -115,28 +116,27 @@ impl ImageManager {
 
     pub async fn register_and_tag_manifest(
         &self,
-        name: &str,
-        tag: &str,
+        image_reference: &ImageReference,
         manifest: &JailImage,
     ) -> Result<OciDigest, ImageStoreError> {
         self.context
             .image_store
             .lock()
             .await
-            .register_and_tag_manifest(name, tag, manifest)
+            .register_and_tag_manifest(image_reference, manifest)
     }
 
     pub async fn query_manifest(
         &self,
-        name: &str,
-        tag: &str,
+        image_reference: &ImageReference,
     ) -> Result<ImageRecord, ImageStoreError> {
-        if name == "xc-predefine" && tag == "empty" {
+        if image_reference.name == "xc-predefine"
+            && image_reference.tag.to_string().as_str() == "empty"
+        {
             let manifest = JailImage::default();
             let digest = manifest.digest().to_string();
             let record = ImageRecord {
-                name: "xc-predefine".to_string(),
-                tag: "empty".to_string(),
+                image_reference: image_reference.clone(),
                 manifest,
                 digest,
             };
@@ -146,7 +146,7 @@ impl ImageManager {
                 .image_store
                 .lock()
                 .await
-                .query_manifest(name, tag)
+                .query_manifest(image_reference)
         }
     }
 
@@ -156,18 +156,6 @@ impl ImageManager {
 
     pub async fn list_all_tagged(&self) -> Result<Vec<ImageRecord>, ImageStoreError> {
         self.context.image_store.lock().await.list_all_tagged()
-    }
-
-    #[allow(dead_code)]
-    pub async fn query_records_using_commit(
-        &self,
-        commit_id: &str,
-    ) -> Result<Vec<ImageRecord>, ImageStoreError> {
-        self.context
-            .image_store
-            .lock()
-            .await
-            .query_records_using_commit(commit_id)
     }
 
     pub async fn map_diff_id(
@@ -195,8 +183,11 @@ impl ImageManager {
             .query_archives(diff_id)
     }
 
-    pub async fn untag_image(&self, name: &str, tag: &str) -> Result<(), ImageStoreError> {
-        self.context.image_store.lock().await.untag(name, tag)
+    pub async fn untag_image(
+        &self,
+        image_reference: &ImageReference,
+    ) -> Result<(), ImageStoreError> {
+        self.context.image_store.lock().await.untag(image_reference)
     }
 
     pub async fn purge(&self) -> Result<(), ImageStoreError> {

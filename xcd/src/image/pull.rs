@@ -128,7 +128,7 @@ pub async fn pull_image(
 ) -> Result<Receiver<Task<String, PullImageStatus>>, PullImageError> {
     let id = reference.to_string();
     let image = reference.name.clone();
-    let tag = reference.tag;
+    let tag = reference.tag.clone();
 
     let (hostname, registry) = {
         let this = this.clone();
@@ -244,39 +244,19 @@ pub async fn pull_image(
                         let arc_image_store = &this.write().await.context.image_store;
                         let image_store = arc_image_store.lock().await;
 
-                        // If tag is a digest (xxx/xxx@sha256:...), we still try to register a tag
-                        // sha256:... Note this image reference can never get by the user as it
-                        // violates the image_reference format.
-                        //
-                        // There are 2 reasons to do this.
-                        // 1. It act as a phantom row such that when a user try to run something
-                        //    like foo/bar@sha256:......., we still can check if foo/bar has ever
-                        //    contains a manifest with the digest. Otherwise, a user who can only
-                        //    run images from a certain repo can run any other images as well my
-                        //    referencing the digest
-                        // 2. We don't have to change our database scheme and potentially introduce
-                        //    a new table that does nothing but telling us what repos are available
-                        //    as we now always have at least one reference in image_manifests_tags
-                        //    table referencing to the repo
                         _ = image_store
-                            .register_and_tag_manifest(&image, tag.as_str(), &jail_image)
+                            .register_and_tag_manifest(&reference, &jail_image)
                             .and_then(|digest| {
-                                if let Some(reference) = rename_reference {
-                                    if let oci_util::image_reference::ImageTag::Tag(tag) =
-                                        reference.tag
-                                    {
-                                        let repo = reference
-                                            .hostname
-                                            .map(|h| format!("{h}/{}", reference.name))
-                                            .unwrap_or_else(|| reference.name);
-                                        image_store.tag_manifest(&digest, &repo, &tag)?;
-                                    }
+                                if let Some(rename) = rename_reference {
+                                    // we checked rename_reference is not a @digest tag already
+                                    image_store.tag_manifest(&digest, &rename)?;
                                 }
-                                image_store.tag_manifest(
-                                    &digest,
-                                    &format!("{hostname}/{image}"),
-                                    tag.as_str(),
-                                )?;
+                                if reference.hostname.is_none() {
+                                    image_store.tag_manifest(
+                                        &digest,
+                                        &reference.with_hostname(hostname),
+                                    )?;
+                                }
                                 Ok(())
                             })
                             .map_err(|err| {

@@ -257,13 +257,7 @@ fn main() -> Result<(), ActionError> {
                 }
             };
 
-            let is_image_existed = do_describe_image(
-                &mut conn,
-                DescribeImageRequest {
-                    image_name: image_reference.name.to_string(),
-                    tag: image_reference.tag.to_string(),
-                },
-            )?;
+            let is_image_existed = do_describe_image(&mut conn, image_reference.clone())?;
 
             if is_image_existed.is_ok() {
                 Err(anyhow::anyhow!("image already exist"))?;

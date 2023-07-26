@@ -53,7 +53,7 @@ reference = { (source ~ "/")? ~ name ~ ((":" ~ tag) | ("@" ~ digest)) }
 "#]
 struct ImageReferenceParser;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum ImageTag {
     Tag(String),
     Digest(OciDigest),
@@ -62,6 +62,14 @@ pub enum ImageTag {
 impl ImageTag {
     pub fn as_str(&self) -> &str {
         self.as_ref()
+    }
+
+    pub fn is_tag(&self) -> bool {
+        if let ImageTag::Tag(_) = self {
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -80,11 +88,20 @@ impl AsRef<str> for ImageTag {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub struct ImageReference {
     pub hostname: Option<String>,
     pub name: String,
     pub tag: ImageTag,
+}
+
+impl ImageReference {
+    pub fn with_hostname(&self, hostname: String) -> ImageReference {
+        ImageReference {
+            hostname: Some(hostname),
+            ..self.clone()
+        }
+    }
 }
 
 impl std::fmt::Display for ImageReference {
