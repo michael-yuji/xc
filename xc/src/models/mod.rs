@@ -28,7 +28,6 @@ pub mod network;
 
 use crate::util::default_on_missing;
 
-use cmd_arg::CmdArg;
 use exec::ResolvedExec;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -152,7 +151,7 @@ impl std::fmt::Display for SystemVPropValue {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct EntryPoint {
     pub exec: String,
-    pub args: Vec<CmdArg>,
+    pub args: Vec<InterpolatedString>,
     #[serde(default)]
     pub default_args: Vec<InterpolatedString>,
     pub required_envs: Vec<Var>,
@@ -177,21 +176,17 @@ impl EntryPoint {
         self.resolve_environ(&mut resolved_envs);
 
         let mut argv = Vec::new();
+        for arg in self.args.iter() {
+            argv.push(arg.apply(&resolved_envs));
+        }
 
         if args.is_empty() {
-            for arg in self.args.iter() {
-                match arg {
-                    CmdArg::All => argv.extend_from_slice(args),
-                    CmdArg::Positional(i) => {
-                        let arg = &args.get(*i as usize).unwrap();
-                        argv.push(arg.to_string())
-                    }
-                    CmdArg::Var(istr) => argv.push(istr.apply(&resolved_envs)),
-                }
+            for arg in self.default_args.iter() {
+                argv.push(arg.apply(&resolved_envs));
             }
         } else {
             for arg in args {
-                argv.push(arg.to_string());
+                argv.push(arg.to_string())
             }
         }
 

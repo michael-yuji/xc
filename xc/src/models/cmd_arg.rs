@@ -21,6 +21,7 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+/*
 use serde::{de::Deserializer, de::Visitor, Serializer};
 use serde::{Deserialize, Serialize};
 use varutil::string_interpolation::InterpolatedString;
@@ -90,3 +91,4 @@ impl Serialize for CmdArg {
         }
     }
 }
+*/

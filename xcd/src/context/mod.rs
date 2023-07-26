@@ -150,7 +150,7 @@ impl ServerContext {
         tag: &str,
     ) {
         let layers = vec![diff_id.clone()];
-        let jail_image = meta.to_image(layers);
+        let jail_image = meta.to_image(layers, None);
 
         _ = self
             .image_manager

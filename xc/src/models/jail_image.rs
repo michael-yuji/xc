@@ -25,7 +25,6 @@
 use crate::format::docker_compat::Expose;
 use crate::util::default_on_missing;
 
-use super::cmd_arg::CmdArg;
 use super::exec::Exec;
 use super::MountSpec;
 use super::{EntryPoint, EnvSpec, SystemVPropValue};
@@ -33,7 +32,7 @@ use super::{EntryPoint, EnvSpec, SystemVPropValue};
 use anyhow::{anyhow, bail, Context, Error};
 use oci_util::digest::{sha256_once, DigestAlgorithm, OciDigest};
 use oci_util::layer::ChainId;
-use oci_util::models::{FreeOciConfig, OciConfig, OciConfigRootFs};
+use oci_util::models::{FreeOciConfig, OciConfig, OciConfigRootFs, OciInnerConfig};
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use varutil::string_interpolation::{InterpolatedString, Var};
@@ -128,6 +127,22 @@ impl<'de> Deserialize<'de> for Version {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct OciJailConfig {
+    #[serde(flatten)]
+    oci_config: OciInnerConfig,
+    xc_extension: Option<JailConfig>,
+}
+
+impl Default for OciJailConfig {
+    fn default() -> OciJailConfig {
+        OciJailConfig {
+            oci_config: OciInnerConfig::default(),
+            xc_extension: Some(JailConfig::default()),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct JailConfig {
     #[serde(default)]
@@ -135,8 +150,7 @@ pub struct JailConfig {
     /// The secure level this jail is required
     pub secure_level: i8,
 
-    pub original_oci_config: Option<OciConfig>,
-
+    //    pub original_oci_config: Option<OciConfig>,
     /// is vnet required
     #[serde(default)]
     pub vnet: bool,
@@ -194,71 +208,105 @@ pub struct JailConfig {
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]
-pub struct JailImage(pub(crate) FreeOciConfig<JailConfig>);
+pub struct JailImage {
+    #[serde(flatten)]
+    oci_config: FreeOciConfig<OciJailConfig>,
+}
 
 impl Default for JailImage {
     fn default() -> JailImage {
-        JailImage(FreeOciConfig {
+        let oci_config = FreeOciConfig {
             architecture: crate::util::get_current_arch().to_string(),
             os: "FreeBSD".to_string(),
-            config: Some(JailConfig::default()),
+            config: Some(OciJailConfig::default()),
             rootfs: OciConfigRootFs {
                 typ: "layers".to_string(),
                 diff_ids: Vec::new(),
             },
             history: Vec::new(),
-        })
+        };
+        JailImage { oci_config }
     }
 }
 
 impl JailImage {
     pub fn os(&self) -> &str {
-        &self.0.os
+        &self.oci_config.os
     }
     pub fn architecture(&self) -> &str {
-        &self.0.architecture
+        &self.oci_config.architecture
     }
     pub fn chain_id(&self) -> Option<ChainId> {
-        if self.0.rootfs.diff_ids.is_empty() {
+        if self.oci_config.rootfs.diff_ids.is_empty() {
             None
         } else {
             Some(ChainId::calculate_chain_id(
                 DigestAlgorithm::Sha256,
-                self.0.rootfs.diff_ids.iter(),
+                self.oci_config.rootfs.diff_ids.iter(),
             ))
         }
     }
+
     pub fn layers(&self) -> Vec<OciDigest> {
-        self.0.rootfs.diff_ids.clone()
+        self.oci_config.rootfs.diff_ids.clone()
     }
+
     pub fn push_layer(&mut self, diff_id: &OciDigest) {
-        self.0.rootfs.diff_ids.push(diff_id.clone())
+        self.oci_config.rootfs.diff_ids.push(diff_id.clone())
     }
+
     pub fn jail_config(&self) -> JailConfig {
-        self.0.config.clone().unwrap()
+        self.oci_config
+            .config
+            .clone()
+            .and_then(|c| c.xc_extension)
+            .unwrap_or_else(|| JailConfig::default())
     }
     pub fn digest(&self) -> OciDigest {
         let json = serde_json::to_string(&self).unwrap();
         sha256_once(json)
     }
     pub fn set_config(&mut self, config: &JailConfig) {
-        self.0.config = Some(config.clone())
+        self.oci_config.config = Some(config.to_oci_jail_config(None));
     }
 }
 
 impl JailConfig {
-    pub fn to_image(&self, diff_ids: Vec<OciDigest>) -> JailImage {
-        JailImage(FreeOciConfig {
-            architecture: crate::util::get_current_arch().to_string(),
-            os: "FreeBSD".to_string(),
-            config: Some(self.clone()),
-            rootfs: OciConfigRootFs {
-                typ: "layers".to_string(),
-                diff_ids,
+    pub fn to_image(
+        &self,
+        diff_ids: Vec<OciDigest>,
+        origin_oci: Option<OciInnerConfig>,
+    ) -> JailImage {
+        JailImage {
+            oci_config: FreeOciConfig {
+                architecture: crate::util::get_current_arch().to_string(),
+                os: "FreeBSD".to_string(),
+                config: Some(OciJailConfig {
+                    oci_config: origin_oci.unwrap_or_else(|| self.to_oci()),
+                    xc_extension: Some(self.clone()),
+                }),
+                rootfs: OciConfigRootFs {
+                    typ: "layers".to_string(),
+                    diff_ids,
+                },
+                history: Vec::new(),
             },
-            history: Vec::new(),
-        })
+        }
     }
+
+    pub fn to_oci_jail_config(&self, oci: Option<OciInnerConfig>) -> OciJailConfig {
+        OciJailConfig {
+            xc_extension: Some(self.clone()),
+            oci_config: oci.unwrap_or_else(|| self.to_oci()),
+        }
+    }
+
+    pub fn to_oci(&self) -> OciInnerConfig {
+        let mut config = OciInnerConfig::default();
+        // TODO: implement the translations
+        config
+    }
+
     pub fn from_json(value: serde_json::Value) -> Option<JailImage> {
         serde_json::from_value::<JailImage>(value.clone())
             .ok()
@@ -316,12 +364,21 @@ impl JailConfig {
             deinit: Vec::new(),
             mounts,
             linux: config.os != "FreeBSD",
-            original_oci_config: Some(config.clone()),
+            //            original_oci_config: Some(config.clone()),
             ports,
             labels,
             ..JailConfig::default()
         };
 
+        // convert entrypoint, per OCI specification, entrypoint is a list of strings representing
+        // a command to run in a container, with Cmd field containing the default arguments to
+        // entrypoint. In the case of entrypoint is NULL, Cmd is the default command with
+        // arguments.
+        //
+        // It is not clear in the spec if Entrypoint[1:] should be replaced when user use the
+        // entrypoint with commands, nor if Entrypoin[1:] should be discard when (Entrypoint.len()
+        // > 1 && Cmd.len() > 1)
+        //
         if let Some(config) = &config.config {
             let entrypoint = config.entrypoint.clone().unwrap_or_default();
             let cmd = config.cmd.clone().unwrap_or_default();
@@ -333,14 +390,14 @@ impl JailConfig {
                     let (arg0, args) = cmd.split_first().unwrap();
                     let args = args
                         .iter()
-                        .map(|arg| CmdArg::Var(InterpolatedString::new(arg).unwrap()))
+                        .map(|arg| InterpolatedString::new(arg).unwrap())
                         .collect::<Vec<_>>();
                     (arg0.to_string(), args, Vec::new())
                 } else {
                     let (arg0, args) = entrypoint.split_first().unwrap();
                     let args = args
                         .iter()
-                        .map(|arg| CmdArg::Var(InterpolatedString::new(arg).unwrap()))
+                        .map(|arg| InterpolatedString::new(arg).unwrap())
                         .collect::<Vec<_>>();
                     let defs = cmd
                         .iter()
@@ -372,9 +429,9 @@ impl JailConfig {
 
         let layers = config.rootfs.diff_ids;
 
-        let mut image = meta.to_image(layers);
+        let mut image = meta.to_image(layers, config.config);
 
-        image.0.os = config.os;
+        image.oci_config.os = config.os;
 
         Some(image)
     }

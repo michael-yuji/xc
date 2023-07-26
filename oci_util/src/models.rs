@@ -169,7 +169,7 @@ pub type OciConfig = FreeOciConfig<OciInnerConfig>;
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]
 pub struct EmptyStruct {}
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct OciInnerConfig {
     pub attach_stderr: Option<bool>,

@@ -34,8 +34,8 @@ use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::os::fd::{AsRawFd, RawFd};
+use varutil::string_interpolation::InterpolatedString;
 use xc::container::request::{CopyFileReq, Mount, NetworkAllocRequest};
-use xc::models::cmd_arg::CmdArg;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
 use xc::models::network::{DnsSetting, IpAssign};
@@ -121,13 +121,18 @@ impl InstantiateBlueprint {
 
         let main = match request.entry_point {
             Some(spec) => {
+                let args = spec
+                    .entry_point_args
+                    .iter()
+                    .map(|a| InterpolatedString::new(a.as_str()).unwrap())
+                    .collect::<Vec<_>>();
                 let entry_point =
                     if let Some(entry_point) = config.entry_points.get(&spec.entry_point) {
                         entry_point.clone()
                     } else {
                         EntryPoint {
                             exec: spec.entry_point.to_string(),
-                            args: vec![CmdArg::All],
+                            args,
                             default_args: Vec::new(),
                             environ: HashMap::new(),
                             work_dir: None,

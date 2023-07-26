@@ -166,7 +166,7 @@ impl ImageStore for SqliteImageStore {
     ) -> Result<(), ImageStoreError> {
         let mut stmt = self.db.prepare_cached(
             "
-            insert into diff_id_map (diff_id, digest, compress_alg, origin)
+            insert into diff_id_map (diff_id, digest, compress_alg)
             values (?, ?, ?), (?, ?, ?)
                 on conflict (diff_id, digest) do nothing
             ",
@@ -400,7 +400,6 @@ mod tests {
     use crate::image_store::{ImageRecord, ImageStore};
     use crate::models::jail_image::{JailConfig, JailImage};
     use oci_util::digest::OciDigest;
-    use oci_util::models::FreeOciConfig;
     use std::str::FromStr;
 
     #[test]
@@ -479,13 +478,14 @@ mod tests {
         let db = SqliteImageStore::open_in_memory();
         db.create_tables().expect("cannot create tables");
         let manifest1 = JailImage::default();
-        let manifest2 = JailImage(FreeOciConfig {
-            config: Some(JailConfig {
-                linux: true,
-                ..JailConfig::default()
-            }),
-            ..manifest1.0.clone()
-        });
+
+        let jail_config = JailConfig {
+            linux: true,
+            ..JailConfig::default()
+        };
+
+        let mut manifest2 = manifest1.clone();
+        manifest2.set_config(&jail_config);
         db.register_and_tag_manifest("test-name", "test-tag", &manifest1)
             .expect("cannot register and tag manifest");
         let digest = db.register_manifest(&manifest2).expect("");
