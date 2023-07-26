@@ -33,16 +33,16 @@ pub(crate) enum NetworkAction {
         subnet: ipcidr::IpCidr,
         start_addr: Option<IpAddr>,
         end_addr: Option<IpAddr>,
-        #[clap(long = "bridge")]
+        #[arg(long = "bridge")]
         bridge_iface: String,
-        #[clap(long = "alias")]
+        #[arg(long = "alias")]
         alias_iface: String,
-        #[clap(long = "default-router")]
+        #[arg(long = "default-router")]
         default_router: Option<IpAddr>,
     },
     List,
     Tag {
-        #[clap(long = "no-commit", action)]
+        #[arg(long = "no-commit", action)]
         no_commit: bool,
         network: String,
         container: String,

@@ -62,7 +62,7 @@ vnet = { iface ~ ("|" ~ cidr ~ ("," ~ cidr)*)? }
 "#]
 struct RuleParser;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct EnvPair {
     pub(crate) key: String,
     pub(crate) value: String,
@@ -126,7 +126,7 @@ impl std::str::FromStr for BindMount {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PublishSpec(PortRedirection);
 
 impl PublishSpec {

@@ -30,13 +30,13 @@ use crate::format::PublishSpec;
 #[derive(Parser, Debug)]
 pub(crate) enum RdrAction {
     Add {
-        #[clap(long = "publish", short = 'p', multiple_occurrences = true)]
+        #[arg(long = "publish", short = 'p', /* multiple_occurrences */)]
         publish: Vec<PublishSpec>,
         name: String,
     },
     List {
         name: String,
-        #[clap(short = 'H', action)]
+        #[arg(short = 'H', action)]
         without_header: bool,
     },
 }

@@ -38,8 +38,10 @@ pub const UMOUNT_CMD: &str = crate::env_or_default!("XC_UMOUNT_CMD", "/sbin/umou
 pub enum MountError {
     #[error("Mount point does not exist: {0}")]
     MountPointNotFound(String),
-    #[error("Mount point is not a directory")]
-    MountPointNotDirectory,
+    #[error("Mount point is not a directory (or file in the case of nullfs)")]
+    InvalidMountPointType,
+    #[error("Mount point and source are not the same type")]
+    MountPointTypeMismatch,
     #[error("{0}")]
     Other(std::io::Error),
 }
@@ -63,8 +65,23 @@ pub fn mount<S: AsRef<str>>(
         ));
     }
 
-    if !mount_point.as_ref().is_dir() {
-        return Err(MountError::MountPointNotDirectory);
+    if tpe.as_ref() == "nullfs" {
+        let source_type = std::fs::metadata(source.as_ref())
+            .map_err(MountError::Other)?
+            .file_type();
+        let mount_type = mount_point
+            .as_ref()
+            .metadata()
+            .map_err(MountError::Other)?
+            .file_type();
+
+        if source_type != mount_type {
+            return Err(MountError::MountPointTypeMismatch);
+        } else if !mount_type.is_dir() && !mount_type.is_file() {
+            return Err(MountError::InvalidMountPointType);
+        }
+    } else if !mount_point.as_ref().is_dir() {
+        return Err(MountError::InvalidMountPointType);
     }
 
     let options = options
@@ -72,6 +89,7 @@ pub fn mount<S: AsRef<str>>(
         .iter()
         .map(|s| s.as_ref().to_string())
         .collect::<Vec<_>>();
+
     let mut command = Command::new(MOUNT_CMD);
     command.arg("-t");
     command.arg(tpe.as_ref());
@@ -96,7 +114,7 @@ pub fn umount(mountpoint: impl AsRef<Path>) -> Result<(), MountError> {
             mp.to_string_lossy().to_string(),
         ))
     } else if !mp.is_dir() {
-        Err(MountError::MountPointNotDirectory)
+        Err(MountError::InvalidMountPointType)
     } else {
         Command::new(UMOUNT_CMD)
             .arg("-f")

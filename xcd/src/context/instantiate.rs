@@ -218,18 +218,20 @@ impl InstantiateBlueprint {
             if !source_path.exists() {
                 precondition_failure!(ENOENT, "source mount point does not exist: {source_path:?}");
             }
-            if !source_path.is_dir() {
+            if !source_path.is_dir() && !source_path.is_file() {
                 precondition_failure!(
                     ENOTDIR,
-                    "mount point source is not a directory: {source_path:?}"
+                    "mount point source is not a file nor directory: {source_path:?}"
                 )
             }
             let Ok(meta) = std::fs::metadata(source_path) else {
                 precondition_failure!(ENOENT, "invalid nullfs mount source")
             };
+
             if !cred.can_mount(&meta, false) {
                 precondition_failure!(EPERM, "permission denied: {source_path:?}")
             }
+
             if let Some(mount_spec) = mount_specs.remove(&req.dest) {
                 // XXX: mount options
                 let mut mount = Mount::nullfs(&req.source, &mount_spec.destination);

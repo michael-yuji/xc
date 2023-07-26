@@ -72,11 +72,11 @@ pub struct PushImageStatus {
 
 #[derive(Parser, Debug)]
 struct Args {
-    #[clap(short = 'd', action)]
+    #[arg(short = 'd', action)]
     print_args: bool,
-    #[clap(short = 's', long = "socket-path")]
+    #[arg(short = 's', long = "socket-path")]
     socket_path: Option<String>,
-    #[clap(subcommand)]
+    #[command(subcommand)]
     action: Action,
 }
 
@@ -88,29 +88,29 @@ enum Action {
         name: String,
     },
     Build {
-        #[clap(long = "network")]
+        #[arg(long = "network")]
         network: Option<String>,
-        #[clap(long = "dns", multiple_occurrences = true)]
+        #[arg(long = "dns" /*, multiple_occurrences = true*/)]
         dns_servers: Vec<String>,
-        #[clap(long = "dns_search", multiple_occurrences = true)]
+        #[arg(long = "dns_search", /* multiple_occurrences = true */)]
         dns_searchs: Vec<String>,
-        #[clap(long = "empty-dns", action)]
+        #[arg(long = "empty-dns", action)]
         empty_dns: bool,
-        #[clap(long = "output-inplace", action)]
+        #[arg(long = "output-inplace", action)]
         output_inplace: bool,
         image_reference: ImageReference,
     },
-    #[clap(subcommand)]
+    #[command(subcommand)]
     Channel(ChannelAction),
     Commit {
-        #[clap(long)]
+        #[arg(long)]
         name: String,
-        #[clap(long)]
+        #[arg(long)]
         tag: String,
         container_name: String,
     },
     Create(CreateArgs),
-    #[clap(subcommand)]
+    #[command(subcommand)]
     Image(ImageAction),
     Info,
     /// Kill a container by either name, jail id, or id
@@ -126,24 +126,24 @@ enum Action {
     /// record the credential for later use
     Login {
         /// Username
-        #[clap(long = "username", short = 'u')]
+        #[arg(long = "username", short = 'u')]
         username: String,
-        #[clap(long = "password", short = 'p')]
+        #[arg(long = "password", short = 'p')]
         /// Password
         password: Option<String>,
         /// Take the password from stdin
-        #[clap(long = "password-stdin", action)]
+        #[arg(long = "password-stdin", action)]
         password_stdin: bool,
         /// The server uses http instead of https
-        #[clap(long = "insecure", action)]
+        #[arg(long = "insecure", action)]
         insecure: bool,
         /// The target server
         server: String,
     },
-    #[clap(subcommand)]
+    #[command(subcommand)]
     Network(NetworkAction),
     Ps {
-        #[clap(short = 'H', action)]
+        #[arg(short = 'H', action)]
         no_print_header: bool,
         format: Option<String>,
     },
@@ -164,11 +164,11 @@ enum Action {
         /// Destination of the upload
         new_image_reference: ImageReference,
     },
-    #[clap(subcommand)]
+    #[command(subcommand)]
     Rdr(RdrAction),
     Run(RunArg),
     RunMain {
-        #[clap(long = "detach", short = 'd', action)]
+        #[arg(long = "detach", short = 'd', action)]
         detach: bool,
         name: String,
     },
@@ -184,7 +184,7 @@ enum Action {
     },
 
     Exec {
-        #[clap(short = 't', action)]
+        #[arg(short = 't', action)]
         terminal: bool,
         name: String,
         arg0: String,

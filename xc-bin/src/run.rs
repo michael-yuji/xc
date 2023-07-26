@@ -31,40 +31,40 @@ use xc::container::request::{MountReq, NetworkAllocRequest};
 
 #[derive(Parser, Debug)]
 pub(crate) struct CreateArgs {
-    #[clap(long, default_value_t, action)]
+    #[arg(long, default_value_t, action)]
     pub(crate) no_clean: bool,
 
-    #[clap(long, default_value_t, action)]
+    #[arg(long, default_value_t, action)]
     pub(crate) persist: bool,
 
-    #[clap(long = "network", multiple_occurrences = true)]
+    #[arg(long = "network", /* multiple_occurrences */)]
     pub(crate) networks: Vec<NetworkAllocRequest>,
 
-    #[clap(short = 'v', multiple_occurrences = true)]
+    #[arg(short = 'v', /* multiple_occurrences */)]
     pub(crate) mounts: Vec<BindMount>,
 
-    #[clap(long = "env", short = 'e', multiple_occurrences = true)]
+    #[arg(long = "env", short = 'e', /* multiple_occurrences */)]
     pub(crate) envs: Vec<EnvPair>,
 
-    #[clap(long = "name")]
+    #[arg(long = "name")]
     pub(crate) name: Option<String>,
 
-    #[clap(long = "hostname")]
+    #[arg(long = "hostname")]
     pub(crate) hostname: Option<String>,
 
-    #[clap(long = "vnet", action)]
+    #[arg(long = "vnet", action)]
     pub(crate) vnet: bool,
 
-    #[clap(long = "ip", action)]
+    #[arg(long = "ip", action)]
     pub(crate) ips: Vec<IpWant>,
 
-    #[clap(long = "copy", multiple_occurrences = true)]
+    #[arg(long = "copy", /* multiple_occurrences */)]
     pub(crate) copy: Vec<BindMount>,
 
-    #[clap(long = "extra-layer", multiple_occurrences = true)]
+    #[arg(long = "extra-layer", /* multiple_occurrences */)]
     pub(crate) extra_layers: Vec<PathBuf>,
 
-    #[clap(long = "publish", short = 'p', multiple_occurrences = true)]
+    #[arg(long = "publish", short = 'p', /* multiple_occurrences */)]
     pub(crate) publish: Vec<PublishSpec>,
 
     pub(crate) image_reference: ImageReference,
@@ -72,63 +72,63 @@ pub(crate) struct CreateArgs {
 
 #[derive(Parser, Debug)]
 pub(crate) struct RunArg {
-    #[clap(long, default_value_t, action)]
+    #[arg(long, default_value_t, action)]
     pub(crate) no_clean: bool,
 
-    #[clap(long, default_value_t, action)]
+    #[arg(long, default_value_t, action)]
     pub(crate) persist: bool,
 
-    #[clap(long = "create-only", action)]
+    #[arg(long = "create-only", action)]
     pub(crate) create_only: bool,
 
-    #[clap(long = "link", action)]
+    #[arg(long = "link", action)]
     pub(crate) link: bool,
 
-    #[clap(long = "publish", short = 'p', multiple_occurrences = true)]
+    #[arg(long = "publish", short = 'p', /* multiple_occurrences */)]
     pub(crate) publish: Vec<PublishSpec>,
 
     /// Use empty resolv.conf
-    #[clap(long = "empty-dns", action)]
+    #[arg(long = "empty-dns", action)]
     pub(crate) empty_dns: bool,
 
     /// Do not attempt to generate resolv.conf
-    #[clap(long = "dns-nop", action)]
+    #[arg(long = "dns-nop", action)]
     pub(crate) dns_nop: bool,
 
-    #[clap(long = "dns", multiple_occurrences = true)]
+    #[arg(long = "dns", /* multiple_occurrences */)]
     pub(crate) dns_servers: Vec<String>,
 
-    #[clap(long = "dns-search", multiple_occurrences = true)]
+    #[arg(long = "dns-search", /* multiple_occurrences */)]
     pub(crate) dns_searchs: Vec<String>,
 
-    #[clap(long = "detach", short = 'd', action)]
+    #[arg(long = "detach", short = 'd', action)]
     pub(crate) detach: bool,
 
-    #[clap(long = "network", multiple_occurrences = true)]
+    #[arg(long = "network", /* multiple_occurrences */)]
     pub(crate) networks: Vec<NetworkAllocRequest>,
 
-    #[clap(short = 'v', multiple_occurrences = true)]
+    #[arg(short = 'v', /* multiple_occurrences */)]
     pub(crate) mounts: Vec<BindMount>,
 
-    #[clap(long = "env", short = 'e', multiple_occurrences = true)]
+    #[arg(long = "env", short = 'e', /* multiple_occurrences */)]
     pub(crate) envs: Vec<EnvPair>,
 
-    #[clap(long = "name")]
+    #[arg(long = "name")]
     pub(crate) name: Option<String>,
 
-    #[clap(long = "hostname")]
+    #[arg(long = "hostname")]
     pub(crate) hostname: Option<String>,
 
-    #[clap(long = "vnet", action)]
+    #[arg(long = "vnet", action)]
     pub(crate) vnet: bool,
 
-    #[clap(long = "ip", action)]
+    #[arg(long = "ip", action)]
     pub(crate) ips: Vec<IpWant>,
 
-    #[clap(long = "copy", multiple_occurrences = true)]
+    #[arg(long = "copy", /* multiple_occurrences */)]
     pub(crate) copy: Vec<BindMount>,
 
-    #[clap(long = "extra-layer", multiple_occurrences = true)]
+    #[arg(long = "extra-layer", /* multiple_occurrences */)]
     pub(crate) extra_layers: Vec<PathBuf>,
 
     pub(crate) image_reference: ImageReference,

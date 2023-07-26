@@ -82,9 +82,13 @@ pub struct CreateContainer {
     /// Do not mount linux procfs
     pub linux_no_mount_proc: bool,
     pub zfs_origin: Option<String>,
+
     pub origin_image: Option<JailImage>,
+
     pub allowing: Vec<String>,
+
     pub image_reference: Option<ImageReference>,
+
     pub default_router: Option<IpAddr>,
 
     pub log_directory: Option<PathBuf>,
