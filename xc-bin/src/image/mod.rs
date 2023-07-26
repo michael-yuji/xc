@@ -113,11 +113,16 @@ pub(crate) fn use_image_action(
         } => {
             let commands = subcommands.split(|s| s == "--");
             let phantom_cmd = "<cmds...>".to_string();
-            let patches = commands.map(|command| {
-                let mut cv = std::collections::VecDeque::from_iter(command);
-                cv.push_front(&phantom_cmd);
-                PatchActions::parse_from(cv)
-            });
+
+            let mut patches = Vec::new();
+
+            for command in commands {
+                if !command.is_empty() {
+                    let mut cv = std::collections::VecDeque::from_iter(command);
+                    cv.push_front(&phantom_cmd);
+                    patches.push(PatchActions::parse_from(cv))
+                }
+            }
 
             let mut config = match config_file {
                 None => JailConfig::default(),

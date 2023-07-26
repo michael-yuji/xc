@@ -153,7 +153,7 @@ impl ImageStore for SqliteImageStore {
 
     fn query_archives(&self, diff_id: &OciDigest) -> Result<Vec<DiffIdMap>, ImageStoreError> {
         let mut stmt = self.db.prepare_cached(
-            "select diff_id, digest, compress_alg from diff_id_map where diff_id=?",
+            "select diff_id, digest, compress_alg, origin from diff_id_map where diff_id=?",
         )?;
         let mut rows = stmt.query([diff_id.as_str()])?;
         let mut records = Vec::new();
