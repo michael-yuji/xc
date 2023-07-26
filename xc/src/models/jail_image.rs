@@ -308,13 +308,20 @@ impl JailConfig {
     }
 
     pub fn from_json(value: serde_json::Value) -> Option<JailImage> {
-        serde_json::from_value::<JailImage>(value.clone())
-            .ok()
-            .or_else(|| {
-                serde_json::from_value::<OciConfig>(value)
-                    .ok()
-                    .and_then(Self::from_oci)
-            })
+        let maybe_converted = serde_json::from_value::<JailImage>(value.clone()).ok()?;
+        //            .expect(&format!("unknown format: {value}"));
+        if maybe_converted
+            .clone()
+            .oci_config
+            .config
+            .and_then(|c| c.xc_extension)
+            .is_none()
+        {
+            let ociconfig = serde_json::from_value::<OciConfig>(value).ok()?;
+            Self::from_oci(ociconfig)
+        } else {
+            Some(maybe_converted)
+        }
     }
 
     pub fn from_oci(config: OciConfig) -> Option<JailImage> {

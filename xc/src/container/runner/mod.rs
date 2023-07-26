@@ -250,7 +250,13 @@ impl ProcessRunner {
             .jail(&jail);
 
         if let Some(work_dir) = &exec.work_dir {
-            cmd.jwork_dir(work_dir);
+            // god damn it Docker
+            if !work_dir.is_empty() {
+                let path = std::path::Path::new(&work_dir);
+                if path.is_absolute() {
+                    cmd.jwork_dir(work_dir);
+                }
+            }
         }
         let devnull = std::path::PathBuf::from("/dev/null");
         let spawn_info_result = match &exec.output_mode {
@@ -569,7 +575,7 @@ impl ProcessRunner {
                             self.container.main_started_notify.notify_waiters();
                         }
                     }
-                    Err(error) => error!("cannot spawn {id}: {error:#?}"),
+                    Err(error) => error!("cannot spawn {id}: {process:#?} {error:#?}"),
                 }
             }
 

@@ -200,6 +200,9 @@ pub async fn pull_image(
         });
 
         let jail_image = JailConfig::from_json(config).ok_or(PullImageError::ConfigConvertFail)?;
+
+        eprintln!("jail_image: {jail_image:#?}");
+
         _ = emitter.use_try(|state| {
             state.jail_image = Some(jail_image.clone());
             Ok(())
