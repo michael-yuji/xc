@@ -23,11 +23,11 @@
 // SUCH DAMAGE.
 
 use super::{ConfigMod, Directive, JailContext};
+use crate::format::MaybeEnvPair;
 use crate::jailfile::parse::Action;
 
 use anyhow::Result;
 use clap::Parser;
-use varutil::string_interpolation::Var;
 use xc::models::EnvSpec;
 
 #[derive(Parser)]
@@ -36,7 +36,7 @@ pub(crate) struct AddEnvDirective {
     require: bool,
     #[clap(short = 'd', long = "description")]
     description: Option<String>,
-    variable: Var,
+    variable: MaybeEnvPair,
 }
 
 impl Directive for AddEnvDirective {
@@ -50,13 +50,15 @@ impl Directive for AddEnvDirective {
         Ok(directive)
     }
     fn run_in_context(&self, context: &mut JailContext) -> Result<()> {
+        let variable = self.variable.clone();
         let mount_spec = EnvSpec {
             description: self.description.clone(),
             required: self.require,
+            default_value: variable.value,
         };
         context
             .config_mods
-            .push(ConfigMod::AddEnv(self.variable.clone(), mount_spec));
+            .push(ConfigMod::AddEnv(variable.key, mount_spec));
         Ok(())
     }
 }

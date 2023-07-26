@@ -63,6 +63,31 @@ vnet = { iface ~ ("|" ~ cidr ~ ("," ~ cidr)*)? }
 struct RuleParser;
 
 #[derive(Debug, Clone)]
+pub(crate) struct MaybeEnvPair {
+    pub(crate) key: varutil::string_interpolation::Var,
+    pub(crate) value: Option<String>,
+}
+
+impl FromStr for MaybeEnvPair {
+    type Err = std::io::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_once('=') {
+            None => {
+                let key = varutil::string_interpolation::Var::from_str(s)?;
+                Ok(MaybeEnvPair { key, value: None })
+            }
+            Some((key, value)) => {
+                let key = varutil::string_interpolation::Var::from_str(key)?;
+                Ok(MaybeEnvPair {
+                    key,
+                    value: Some(value.to_string()),
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct EnvPair {
     pub(crate) key: String,
     pub(crate) value: String,

@@ -92,6 +92,7 @@ impl InstantiateBlueprint {
         let hostname = request.hostname.unwrap_or_else(|| name.to_string());
         let vnet = request.vnet || config.vnet;
         let available_allows = xc::util::jail_allowables();
+        let mut envs = request.envs.clone();
 
         if config.linux && !freebsd::exists_kld("linux64") {
             precondition_failure!(
@@ -105,17 +106,22 @@ impl InstantiateBlueprint {
             ipc::packet::codec::Maybe::Some(x) => Some(EventFdNotify::from_fd(x.as_raw_fd())),
         };
 
-        for (name, env_spec) in config.envs.iter() {
-            if env_spec.required && !request.envs.contains_key(&name.to_string()) {
-                let extra_info = env_spec
-                    .description
-                    .as_ref()
-                    .map(|d| format!(" - {d}"))
-                    .unwrap_or_default();
-                precondition_failure!(
-                    ENOENT,
-                    "missing required environment variable: {name}{extra_info}"
-                );
+        for (key, env_spec) in config.envs.iter() {
+            let key_string = key.to_string();
+            if !request.envs.contains_key(&key_string) {
+                if let Some(value) = &env_spec.default_value {
+                    envs.insert(key_string, value.clone());
+                } else if env_spec.required {
+                    let extra_info = env_spec
+                        .description
+                        .as_ref()
+                        .map(|d| format!(" - {d}"))
+                        .unwrap_or_default();
+                    precondition_failure!(
+                        ENOENT,
+                        "missing required environment variable: {name}{extra_info}"
+                    );
+                }
             }
         }
 
@@ -144,13 +150,13 @@ impl InstantiateBlueprint {
                     entry_point
                         .default_args
                         .iter()
-                        .map(|arg| arg.apply(&request.envs))
+                        .map(|arg| arg.apply(&envs))
                         .collect()
                 } else {
                     spec.entry_point_args.clone()
                 };
 
-                let resolved_env = entry_point.resolve_args(&request.envs, &entry_point_args);
+                let resolved_env = entry_point.resolve_args(&envs, &entry_point_args);
                 let envs = resolved_env.env;
 
                 for env in entry_point.required_envs.iter() {
@@ -318,7 +324,7 @@ impl InstantiateBlueprint {
         let rules = config
             .devfs_rules
             .iter()
-            .map(|s| s.apply(&request.envs))
+            .map(|s| s.apply(&envs))
             .collect::<Vec<_>>();
         devfs_rules.push("include 1".to_string());
         devfs_rules.push("include 2".to_string());
@@ -348,13 +354,13 @@ impl InstantiateBlueprint {
                 .init
                 .clone()
                 .into_iter()
-                .map(|s| s.resolve_args(&request.envs).jexec())
+                .map(|s| s.resolve_args(&envs).jexec())
                 .collect(),
             deinit: config
                 .clone()
                 .deinit
                 .into_iter()
-                .map(|s| s.resolve_args(&request.envs).jexec())
+                .map(|s| s.resolve_args(&envs).jexec())
                 .collect(),
             extra_layers,
             main,
@@ -372,7 +378,7 @@ impl InstantiateBlueprint {
             allowing,
             image_reference: Some(request.image_reference),
             copies,
-            envs: request.envs,
+            envs,
             ip_alloc,
             devfs_ruleset_id,
             default_router,

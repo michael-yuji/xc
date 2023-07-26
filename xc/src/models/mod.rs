@@ -125,6 +125,7 @@ pub struct EnvSpec {
     /// Description about what the environment variable is for
     pub description: Option<String>,
     pub required: bool,
+    pub default_value: Option<String>,
 }
 
 #[derive(PartialEq, Eq, Hash, Deserialize, Serialize, Copy, Clone, Debug, Default)]

@@ -22,7 +22,7 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-use crate::format::EnvPair;
+use crate::format::{EnvPair, MaybeEnvPair};
 
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
@@ -38,7 +38,7 @@ pub(crate) enum PatchActions {
         required: bool,
         #[arg(short = 'd', long = "description")]
         description: Option<String>,
-        env: String,
+        env: MaybeEnvPair,
     },
     /// add a new volume spec to the image
     AddVolume {
@@ -79,12 +79,13 @@ impl PatchActions {
                 description,
                 env,
             } => {
-                let env_var = Var::new(env).expect("invalid environment variable name");
+                let env = env.clone();
                 config.envs.insert(
-                    env_var,
+                    env.key,
                     EnvSpec {
                         description: description.clone(),
                         required: *required,
+                        default_value: env.value,
                     },
                 );
             }
