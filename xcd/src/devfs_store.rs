@@ -27,30 +27,38 @@ use std::collections::HashMap;
 pub struct DevfsRulesetStore {
     pub next_ruleset_id: u16,
     pub rules: HashMap<[u8; 32], u16>,
+    pub force_id: Option<u16>,
 }
 
 impl DevfsRulesetStore {
-    pub fn new(next_ruleset_id: u16) -> DevfsRulesetStore {
+    pub fn new(next_ruleset_id: u16, force_id: Option<u16>) -> DevfsRulesetStore {
         DevfsRulesetStore {
             next_ruleset_id,
             rules: HashMap::new(),
+            force_id,
         }
     }
     pub fn get_ruleset_id(&mut self, rules: &[String]) -> u16 {
-        let mut hasher = sha2::Sha256::new();
-        for rule in rules {
-            hasher.update(rule.as_bytes());
-        }
-        let digest: [u8; 32] = hasher.finalize().into();
-        match self.rules.get(&digest) {
-            Some(rule_id) => *rule_id,
-            None => {
-                _ = freebsd::fs::devfs::devfs_del_ruleset(self.next_ruleset_id);
-                let id =
-                    freebsd::fs::devfs::devfs_add_ruleset(self.next_ruleset_id, rules.join("\n"))
-                        .expect("");
-                self.next_ruleset_id += 1;
-                id
+        if let Some(force_id) = self.force_id {
+            force_id
+        } else {
+            let mut hasher = sha2::Sha256::new();
+            for rule in rules {
+                hasher.update(rule.as_bytes());
+            }
+            let digest: [u8; 32] = hasher.finalize().into();
+            match self.rules.get(&digest) {
+                Some(rule_id) => *rule_id,
+                None => {
+                    _ = freebsd::fs::devfs::devfs_del_ruleset(self.next_ruleset_id);
+                    let id = freebsd::fs::devfs::devfs_add_ruleset(
+                        self.next_ruleset_id,
+                        rules.join("\n"),
+                    )
+                    .expect("");
+                    self.next_ruleset_id += 1;
+                    id
+                }
             }
         }
     }

@@ -103,7 +103,7 @@ impl ServerContext {
         ServerContext {
             network_manager,
             alias_map: TwoWayMap::new(),
-            devfs_store: DevfsRulesetStore::new(config.devfs_id_offset),
+            devfs_store: DevfsRulesetStore::new(config.devfs_id_offset, config.force_devfs_ruleset),
             image_manager: Arc::new(RwLock::new(image_manager)),
             sites: HashMap::new(),
             config_manager,

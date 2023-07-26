@@ -73,4 +73,5 @@ pub struct XcConfig {
     pub networks: HashMap<String, Network>,
     #[serde(default = "default_registries")]
     pub registries: String,
+    pub force_devfs_ruleset: Option<u16>,
 }
