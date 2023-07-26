@@ -777,8 +777,13 @@ async fn fd_import(
     _ = std::fs::rename(tempfile_path, format!("{layers_dir}/{archive_digest}"));
 
     let dataset = format!("{image_dataset}/{diff_id}");
-    zfs.rename(&tempdataset, &dataset).unwrap();
-    zfs.snapshot2(dataset, "xc").unwrap();
+
+    if !zfs.exists(&dataset) {
+        zfs.rename(&tempdataset, &dataset).unwrap();
+        zfs.snapshot2(dataset, "xc").unwrap();
+    } else {
+        zfs.destroy(&tempdataset, false, false, false).unwrap();
+    }
 
     {
         context
