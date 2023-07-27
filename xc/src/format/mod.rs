@@ -22,3 +22,4 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 pub mod docker_compat;
+pub mod devfs_rules;
