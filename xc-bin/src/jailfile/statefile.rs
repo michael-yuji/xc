@@ -22,11 +22,9 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::collections::{BinaryHeap, HashMap};
 use std::io::{Read, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 pub trait Ignorer {
@@ -131,7 +129,7 @@ pub fn create_cache(
 
 /// Check if we have previously walked the `path` under `source`, absolute path not yet supported
 pub fn is_content_changed(
-    cache: &PathBuf,
+    cache: &Path,
     ignorer: &impl Ignorer,
     path: impl AsRef<Path>,
 ) -> Result<bool> {
@@ -142,7 +140,7 @@ pub fn is_content_changed(
     let mut path = path.as_ref().to_path_buf();
 
     if path.is_file() {
-        return is_changed(&cache, &path);
+        return is_changed(cache, &path);
     }
 
     let mut walk_dir = vec![path];
@@ -158,7 +156,7 @@ pub fn is_content_changed(
             continue
         };
 
-        let mut dotdot_xc_dir_cache = cache.clone();
+        let mut dotdot_xc_dir_cache = cache.to_path_buf();
         dotdot_xc_dir_cache.push(&path);
         dotdot_xc_dir_cache.push("..xc.dir.cache");
 
@@ -182,7 +180,7 @@ pub fn is_content_changed(
             if file_type.is_dir() {
                 walk_dir.push(p.clone());
             } else {
-                let Ok(false) = is_changed(&cache, &p) else { return Ok(true) };
+                let Ok(false) = is_changed(cache, &p) else { return Ok(true) };
             }
             expected_entries -= 1;
         }
@@ -195,8 +193,8 @@ pub fn is_content_changed(
     Ok(false)
 }
 
-fn is_changed(cache_dir: &PathBuf, real: &PathBuf) -> Result<bool> {
-    let mut cached = cache_dir.clone();
+fn is_changed(cache_dir: &Path, real: &PathBuf) -> Result<bool> {
+    let mut cached = cache_dir.to_path_buf();
     cached.push(real);
 
     if !cached.exists() {
@@ -204,7 +202,7 @@ fn is_changed(cache_dir: &PathBuf, real: &PathBuf) -> Result<bool> {
     }
 
     let cached_meta = std::fs::symlink_metadata(&cached)?;
-    let real_meta = std::fs::symlink_metadata(&real)?;
+    let real_meta = std::fs::symlink_metadata(real)?;
 
     if cached_meta.uid() != real_meta.uid() || cached_meta.gid() != real_meta.gid() {
         return Ok(true);

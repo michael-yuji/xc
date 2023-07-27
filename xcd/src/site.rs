@@ -128,8 +128,8 @@ impl Site {
         }
     }
 
-    pub fn update_host_file(&mut self, network: &str, hosts: &Vec<(String, IpAddr)>) {
-        self.hosts_cache.insert(network.to_string(), hosts.clone());
+    pub fn update_host_file(&mut self, network: &str, hosts: &[(String, IpAddr)]) {
+        self.hosts_cache.insert(network.to_string(), hosts.to_vec());
 
         let mut host_entries = Vec::new();
 
@@ -169,7 +169,7 @@ impl Site {
                 .iter()
                 .position(|s| s == tag)
                 .context("no such snapshot")?;
-            self.zfs.clone2(&root_dataset, &tag, dst_dataset.as_ref())?;
+            self.zfs.clone2(root_dataset, tag, dst_dataset.as_ref())?;
             self.zfs.promote(dst_dataset.as_ref())?;
             self.zfs_snapshots.drain(..self.zfs_snapshots.len());
         }
@@ -190,7 +190,7 @@ impl Site {
             bail!("duplicate tag");
         }
         if let Some(root_dataset) = &self.root_dataset {
-            self.zfs.snapshot2(&root_dataset.to_string(), tag)?;
+            self.zfs.snapshot2(root_dataset, tag)?;
             self.zfs_snapshots.push(tag.to_string())
         }
         Ok(())
@@ -289,7 +289,7 @@ impl Site {
         };
 
         let response =
-            Response::from_packet(packet, |bytes| serde_json::from_slice(&bytes).unwrap());
+            Response::from_packet(packet, |bytes| serde_json::from_slice(bytes).unwrap());
 
         if response.errno == 0 {
             Ok(serde_json::from_value(response.value).unwrap())

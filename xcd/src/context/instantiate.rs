@@ -24,7 +24,7 @@
 
 use crate::auth::Credential;
 use crate::devfs_store::DevfsRulesetStore;
-use crate::ipc::{EntryPointSpec, InstantiateRequest};
+use crate::ipc::InstantiateRequest;
 use crate::network_manager::NetworkManager;
 
 use anyhow::Context;
@@ -323,8 +323,7 @@ impl InstantiateBlueprint {
         let name = request.base.name.unwrap_or_else(|| id.to_string());
         let hostname = request.base.hostname.unwrap_or_else(|| name.to_string());
         let vnet = request.base.vnet || config.vnet;
-        let available_allows = xc::util::jail_allowables();
-        let mut envs = request.envs.clone();
+        let envs = request.envs.clone();
 
         if config.linux && !freebsd::exists_kld("linux64") {
             precondition_failure!(

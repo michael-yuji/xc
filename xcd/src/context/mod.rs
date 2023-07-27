@@ -190,7 +190,7 @@ impl ServerContext {
                 }
             }
             for jail in jails.iter() {
-                if let Some(site) = self.get_site(&jail) {
+                if let Some(site) = self.get_site(jail) {
                     let mut site = site.write().await;
                     site.update_host_file(network, &hosts);
                 }
@@ -205,9 +205,9 @@ impl ServerContext {
         let config = self.config();
         let layers_dir = &config.layers_dir;
         let im = self.image_manager.read().await;
-        _ = im.purge().await?;
+        im.purge().await?;
 
-        let files = std::fs::read_dir(&layers_dir).and_then(|dir| {
+        let files = std::fs::read_dir(layers_dir).and_then(|dir| {
             let mut files = Vec::new();
             for entry in dir {
                 let entry = entry?;
@@ -247,7 +247,7 @@ impl ServerContext {
             if !file_set.is_empty() {
                 let files = record.manifest.layers();
                 for file in files.iter() {
-                    for repr in im.query_archives(&file).await?.iter() {
+                    for repr in im.query_archives(file).await?.iter() {
                         file_set.remove(&repr.archive_digest);
                         file_set.remove(&repr.diff_id);
                     }

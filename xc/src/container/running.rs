@@ -70,7 +70,7 @@ pub struct RunningContainer {
 
     pub notify: Arc<EventFdNotify>,
 
-    pub destroyed: Option<u64>,
+    pub deleted: Option<u64>,
     pub origin_image: Option<JailImage>,
     pub image_reference: Option<ImageReference>,
 

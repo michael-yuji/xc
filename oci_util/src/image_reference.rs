@@ -65,11 +65,7 @@ impl ImageTag {
     }
 
     pub fn is_tag(&self) -> bool {
-        if let ImageTag::Tag(_) = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, ImageTag::Tag(_))
     }
 }
 

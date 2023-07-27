@@ -26,7 +26,6 @@ use anyhow::Result;
 use clap::Parser;
 use oci_util::distribution::client::{BasicAuth, Registry};
 use oci_util::image_reference::ImageReference;
-use oci_util::models::FreeOciConfig;
 use serde_json::Value;
 
 #[derive(Parser)]

@@ -80,8 +80,6 @@ pub(crate) fn patch_image<F>(
 where
     F: FnOnce(&mut JailConfig),
 {
-    let image_name = &image_reference.name;
-    let tag = &image_reference.tag;
     let res = do_describe_image(conn, image_reference.clone())?;
     match res {
         Err(e) => {

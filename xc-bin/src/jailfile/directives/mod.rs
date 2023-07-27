@@ -160,7 +160,7 @@ impl ConfigMod {
                     .iter()
                     .map(|arg| {
                         let parsed = InterpolatedString::new(arg.as_str())
-                            .expect(&format!("cannot parse interpolate string: {arg}"));
+                            .unwrap_or_else(|| panic!("cannot parse interpolate string: {arg}"));
                         parsed
                     })
                     .collect();

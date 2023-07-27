@@ -35,7 +35,7 @@ use nix::sys::event::{kevent_ts, EventFilter, EventFlag, KEvent};
 use nix::unistd::pipe;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::fd::AsRawFd;
 use tracing::{error, info};
 use xcd::ipc::*;
@@ -49,10 +49,7 @@ enum Input {
 
 impl Input {
     fn is_none(&self) -> bool {
-        match self {
-            Input::None => true,
-            _ => false,
-        }
+        matches!(self, Input::None)
     }
 }
 
@@ -88,10 +85,6 @@ impl InputSource for VecSlice {
 }
 
 pub(crate) struct RunDirective {
-    /*
-    arg0: String,
-    args: Vec<String>,
-    */
     shell: String,
     command: String,
     envs: HashMap<String, String>,
@@ -103,25 +96,7 @@ impl Directive for RunDirective {
         true
     }
     fn from_action(action: &Action) -> Result<RunDirective> {
-        //        let mut envs = HashMap::new();
-
         let command = action.args.join(" ").to_string();
-        /*
-                let mut curr = args_iter.next();
-
-                while let Some((key, value)) = curr.and_then(|c| c.split_once('=')) {
-                    envs.insert(key.to_string(), value.to_string());
-                    curr = args_iter.next();
-                }
-
-                let Some(arg0) = curr else {
-                    bail!("cannot determine arg0");
-                };
-
-                for arg in args_iter {
-                    args.push(arg.to_string());
-                }
-        */
         let input = match &action.heredoc {
             Some(value) => Input::Content(value.to_string()),
             None => Input::None,
@@ -145,12 +120,7 @@ impl Directive for RunDirective {
         let kq = unsafe { nix::libc::kqueue() };
 
         info!("RUN: (shell = {}) {}", self.shell, self.command);
-        /*
-                info!(
-                    "RUN: {} {:?} with stdin: {:?}",
-                    self.arg0, self.args, self.input
-                );
-        */
+
         let request = ExecCommandRequest {
             name: context.container_id.clone().expect("container not set"),
             arg0: self.shell.clone(),
@@ -266,7 +236,7 @@ impl Directive for RunDirective {
                                         }
                                     }
                                 }
-                                let cancel_flags = EventFlag::EV_DISABLE | EventFlag::EV_DELETE;
+                                //                                let cancel_flags = EventFlag::EV_DISABLE | EventFlag::EV_DELETE;
                                 eprintln!("check if empty");
                                 if writer.is_empty() {
                                     eprintln!("registering cancel event");

@@ -27,10 +27,10 @@ use crate::jailfile::parse::Action;
 use crate::jailfile::JailContext;
 
 use anyhow::{bail, Result};
-use ipc::packet::codec::{List, Maybe};
+use ipc::packet::codec::Maybe;
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
-use xc::{models::network::DnsSetting, util::gen_id};
+use xc::util::gen_id;
 use xcd::ipc::*;
 
 pub(crate) struct FromDirective {

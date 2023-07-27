@@ -374,7 +374,7 @@ impl ImageStore for SqliteImageStore {
         manifest: &JailImage,
     ) -> Result<OciDigest, ImageStoreError> {
         let digest = &self.register_manifest(manifest)?;
-        self.tag_manifest(&digest, image_reference)?;
+        self.tag_manifest(digest, image_reference)?;
         Ok(digest.clone())
     }
 

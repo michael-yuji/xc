@@ -24,10 +24,9 @@
 
 use crate::format::{EnvPair, MaybeEnvPair};
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use varutil::string_interpolation::Var;
 use xc::models::jail_image::{JailConfig, SpecialMount};
 use xc::models::{EnvSpec, MountSpec, SystemVPropValue};
 
@@ -101,7 +100,7 @@ impl PatchActions {
                 let description = description.clone().unwrap_or_default();
                 let key = name.clone().unwrap_or_else(|| destination.to_string());
                 let mut volume_hints = HashMap::new();
-                for hint in hints.into_iter() {
+                for hint in hints.iter() {
                     volume_hints.insert(
                         hint.key.clone(),
                         serde_json::Value::String(hint.value.clone()),
@@ -122,14 +121,14 @@ impl PatchActions {
                 config.mounts.insert(key, mountspec);
             }
             PatchActions::ModAllow { allows } => {
-                for allow in allows.into_iter() {
+                for allow in allows.iter() {
                     if let Some(param) = allow.strip_prefix('-') {
                         for i in (0..config.allow.len()).rev() {
                             if config.allow[i] == param {
                                 config.allow.remove(i);
                             }
                         }
-                    } else if !config.allow.contains(&allow) {
+                    } else if !config.allow.contains(allow) {
                         config.allow.push(allow.to_string());
                     }
                 }

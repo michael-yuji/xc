@@ -29,7 +29,7 @@ use super::exec::Exec;
 use super::MountSpec;
 use super::{EntryPoint, EnvSpec, SystemVPropValue};
 
-use anyhow::{anyhow, bail, Context, Error};
+use anyhow::anyhow;
 use oci_util::digest::{sha256_once, DigestAlgorithm, OciDigest};
 use oci_util::layer::ChainId;
 use oci_util::models::{FreeOciConfig, OciConfig, OciConfigRootFs, OciInnerConfig};
@@ -260,7 +260,7 @@ impl JailImage {
             .config
             .clone()
             .and_then(|c| c.xc_extension)
-            .unwrap_or_else(|| JailConfig::default())
+            .unwrap_or_default()
     }
     pub fn digest(&self) -> OciDigest {
         let json = serde_json::to_string(&self).unwrap();

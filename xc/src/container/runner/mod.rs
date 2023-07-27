@@ -37,6 +37,7 @@ use crate::models::exec::{Jexec, StdioMode};
 use crate::models::network::HostEntry;
 use crate::util::exists_exec;
 
+use crate::util::epoch_now_nano;
 use anyhow::Context;
 use freebsd::event::{EventFdNotify, KEventExt};
 use freebsd::FreeBSDCommandExt;
@@ -60,9 +61,13 @@ pub struct ProcessRunner {
 
     pub(super) control_streams: HashMap<i32, ControlStream>,
 
+    pub(super) created: Option<u64>,
+
     /// This field records the epoch seconds when the container is "started", which defined by a
     /// container that has completed its init-routine
     pub(super) started: Option<u64>,
+
+    pub(super) finished_at: Option<u64>,
 
     /// If `auto_start` is true, the container executes its init routine automatically after
     /// creation
@@ -70,7 +75,6 @@ pub struct ProcessRunner {
 
     container: RunningContainer,
 
-    main_started: bool,
     main_exited: bool,
 
     // a queue containing the processes to be spawn by the end of event loop
@@ -272,7 +276,7 @@ impl ProcessRunner {
                         path
                     })
                     .unwrap_or_else(|| devnull.clone());
-                spawn_process_pty(cmd, &log_path, &socket_path)
+                spawn_process_pty(cmd, log_path, socket_path)
             }
             StdioMode::Files { stdout, stderr } => spawn_process_files(&mut cmd, stdout, stderr),
             StdioMode::Inherit => {
@@ -356,13 +360,14 @@ impl ProcessRunner {
             pmap: HashMap::new(),
             rpmap: HashMap::new(),
             control_streams: HashMap::new(),
-            main_started: false,
+            created: None,
+            started: None,
+            finished_at: None,
             spawn_queue: VecDeque::new(),
             inits: SerialExec::new("init", container.init_proto.clone(), !container.init_norun),
             deinits: SerialExec::new("deinit", container.deinit_proto.clone(), false),
             main_exited: false,
             container,
-            started: None,
             auto_start,
         }
     }
@@ -444,12 +449,7 @@ impl ProcessRunner {
 
     fn start(&mut self) {
         if self.started.is_none() {
-            self.started = Some(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            );
+            self.started = Some(epoch_now_nano());
             if self.inits.is_empty() && !self.container.main_norun {
                 self.run_main();
             } else if let Some((id, jexec)) = self.inits.pop_front() {
@@ -515,6 +515,7 @@ impl ProcessRunner {
                             stat.set_tree_exited();
                             if stat.id() == "main" {
                                 self.main_exited = true;
+                                self.finished_at = Some(epoch_now_nano());
                                 if (self.container.deinit_norun || self.deinits.is_empty())
                                     && !self.container.persist
                                 {
@@ -525,7 +526,7 @@ impl ProcessRunner {
                                     self.deinits.try_drain_proc_queue("", &mut self.spawn_queue);
                                 }
                             } else if let Some(last_deinit) = last_deinit.clone() {
-                                if last_deinit == stat.id() {
+                                if last_deinit == stat.id() && !self.container.persist {
                                     return true;
                                 }
                             }
@@ -571,7 +572,7 @@ impl ProcessRunner {
                     Ok(spawn_info) => {
                         debug!("{id} spawn: {spawn_info:#?}");
                         if id == "main" {
-                            self.main_started = true;
+                            self.started = Some(epoch_now_nano());
                             self.container.main_started_notify.notify_waiters();
                         }
                     }
@@ -594,9 +595,26 @@ impl ProcessRunner {
                         }
                     }
                     EventFilter::EVFILT_TIMER => {
-                        // the only timer event is the killer event
-                        warn!("deinit time out reached, proceed to kill jail");
-                        break 'kq;
+                        if !self.container.persist {
+                            // the only timer event is the killer event
+                            warn!("deinit time out reached, proceed to kill jail");
+                            break 'kq;
+                        } else if let Some(id) = last_deinit.as_ref() {
+                            // only kill the last deinit
+                            for process in self.named_process.iter() {
+                                if process.id() == id {
+                                    if let Some(pids) = self.rpmap.get(&process.pid()) {
+                                        for pid in pids.iter() {
+                                            let pid = nix::unistd::Pid::from_raw(*pid as i32);
+                                            _ = nix::sys::signal::kill(
+                                                pid,
+                                                nix::sys::signal::SIGKILL,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     EventFilter::EVFILT_READ => {
                         let fd = event.ident() as i32;
@@ -642,16 +660,6 @@ impl ProcessRunner {
     }
 
     fn cleanup(&mut self, sender: Sender<ContainerManifest>) {
-        let epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap();
-        info!("cleaning up at {epoch:#?}");
-        self.container.destroyed = Some(epoch.as_secs());
-        sender.send_if_modified(|x| {
-            *x = self.container.serialized();
-            true
-        });
-
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
         let kill = jail.kill().context("cannot kill jail").map_err(|e| {
             error!("cannot kill jail: {e}");
@@ -661,6 +669,17 @@ impl ProcessRunner {
         info!("jail kill: {kill:#?}");
         // allow 5 seconds for the jail to be killed
         //            std::thread::sleep(std::time::Duration::from_secs(5));
+        //
+        let epoch = epoch_now_nano();
+
+        info!("cleaning up at {:#?}", epoch / 1_000_000_000);
+        self.container.deleted = Some(epoch);
+
+        sender.send_if_modified(|x| {
+            *x = self.container.serialized();
+            true
+        });
+
         self.container.notify.notify_waiters();
     }
 }
