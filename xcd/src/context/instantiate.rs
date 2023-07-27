@@ -36,76 +36,37 @@ use std::net::IpAddr;
 use std::os::fd::{AsRawFd, RawFd};
 use varutil::string_interpolation::InterpolatedString;
 use xc::container::request::{CopyFileReq, Mount, NetworkAllocRequest};
+use xc::format::devfs_rules::DevfsRule;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
 use xc::models::network::{DnsSetting, IpAssign};
 use xc::models::EntryPoint;
 use xc::precondition_failure;
 
-pub struct InstantiateBlueprint {
-    pub id: String,
-    pub name: String,
-    pub hostname: String,
-    pub image_reference: Option<ImageReference>,
-    pub vnet: bool,
-    pub mount_req: Vec<Mount>,
-    pub copies: Vec<CopyFileReq>,
-    pub main_norun: bool,
-    pub init_norun: bool,
-    pub deinit_norun: bool,
-    pub extra_layers: Vec<RawFd>,
-    pub persist: bool,
-    pub no_clean: bool,
-    pub dns: DnsSetting,
-    pub origin_image: Option<JailImage>,
-    pub allowing: Vec<String>,
-    pub linux: bool,
-    pub init: Vec<Jexec>,
-    pub deinit: Vec<Jexec>,
-    pub main: Option<Jexec>,
-    pub ips: Vec<IpAssign>,
-    pub ipreq: Vec<NetworkAllocRequest>,
-    pub envs: HashMap<String, String>,
-    pub devfs_ruleset_id: u16,
-    pub ip_alloc: Vec<IpAssign>,
-    pub default_router: Option<IpAddr>,
-    pub main_started_notify: Option<EventFdNotify>,
-    pub create_only: bool,
-    pub linux_no_create_sys_dir: bool,
-    pub linux_no_create_proc_dir: bool,
-    pub linux_no_mount_sys: bool,
-    pub linux_no_mount_proc: bool,
+pub struct AppliedInstantiateRequest {
+    base: InstantiateRequest,
+    devfs_rules: Vec<DevfsRule>,
+    init: Vec<Jexec>,
+    deinit: Vec<Jexec>,
+    main: Option<Jexec>,
+    envs: HashMap<String, String>,
+    allowing: Vec<String>,
+    copies: Vec<xc::container::request::CopyFileReq>,
+    mount_req: Vec<Mount>,
 }
 
-impl InstantiateBlueprint {
+impl AppliedInstantiateRequest {
     pub(crate) fn new(
-        id: &str,
+        mut request: InstantiateRequest,
         oci_config: &JailImage,
-        request: InstantiateRequest,
-        devfs_store: &mut DevfsRulesetStore,
         cred: &Credential,
-        network_manager: &mut NetworkManager,
-    ) -> anyhow::Result<InstantiateBlueprint> {
+        network_manager: &NetworkManager,
+    ) -> anyhow::Result<AppliedInstantiateRequest> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
-        let config = oci_config.jail_config();
-        let name = request.name.unwrap_or_else(|| id.to_string());
-        let hostname = request.hostname.unwrap_or_else(|| name.to_string());
-        let vnet = request.vnet || config.vnet;
         let available_allows = xc::util::jail_allowables();
+        let config = oci_config.jail_config();
+
         let mut envs = request.envs.clone();
-
-        if config.linux && !freebsd::exists_kld("linux64") {
-            precondition_failure!(
-                EIO,
-                "Linux image require linux64 kmod but it is missing from the system"
-            );
-        }
-
-        let main_started_notify = match request.main_started_notify {
-            ipc::packet::codec::Maybe::None => None,
-            ipc::packet::codec::Maybe::Some(x) => Some(EventFdNotify::from_fd(x.as_raw_fd())),
-        };
-
         for (key, env_spec) in config.envs.iter() {
             let key_string = key.to_string();
             if !request.envs.contains_key(&key_string) {
@@ -119,13 +80,13 @@ impl InstantiateBlueprint {
                         .unwrap_or_default();
                     precondition_failure!(
                         ENOENT,
-                        "missing required environment variable: {name}{extra_info}"
+                        "missing required environment variable: {key}{extra_info}"
                     );
                 }
             }
         }
 
-        let main = match request.entry_point {
+        let main = match &request.entry_point {
             Some(spec) => {
                 let args = spec
                     .entry_point_args
@@ -203,7 +164,7 @@ impl InstantiateBlueprint {
 
         let copies: Vec<xc::container::request::CopyFileReq> = request
             .copies
-            .to_vec()
+            .move_to_vec()
             .iter()
             .map(|c| xc::container::request::CopyFileReq {
                 source: c.source.as_raw_fd(),
@@ -267,11 +228,121 @@ impl InstantiateBlueprint {
             }
         }
 
-        let mut ip_alloc = request.ips.clone();
+        for req in request.ipreq.iter() {
+            let network = req.network();
+            if !network_manager.has_network(&network) {
+                precondition_failure!(ENOENT, "no such network: {network}");
+            }
+        }
+
+        let init = config
+            .init
+            .clone()
+            .into_iter()
+            .map(|s| s.resolve_args(&envs).jexec())
+            .collect();
+        let deinit = config
+            .clone()
+            .deinit
+            .into_iter()
+            .map(|s| s.resolve_args(&envs).jexec())
+            .collect();
+
+        let mut devfs_rules = Vec::new();
+        for rule in config.devfs_rules.iter() {
+            let applied = rule.apply(&envs);
+            match applied.parse::<xc::format::devfs_rules::DevfsRule>() {
+                Err(error) => {
+                    precondition_failure!(EINVAL, "invaild devfs rule: [{applied}], {error}")
+                }
+                Ok(rule) => devfs_rules.push(rule),
+            }
+        }
+
+        Ok(AppliedInstantiateRequest {
+            base: request,
+            copies,
+            devfs_rules,
+            init,
+            deinit,
+            main,
+            envs,
+            allowing,
+            mount_req,
+        })
+    }
+}
+
+pub struct InstantiateBlueprint {
+    pub id: String,
+    pub name: String,
+    pub hostname: String,
+    pub image_reference: Option<ImageReference>,
+    pub vnet: bool,
+    pub mount_req: Vec<Mount>,
+    pub copies: Vec<CopyFileReq>,
+    pub main_norun: bool,
+    pub init_norun: bool,
+    pub deinit_norun: bool,
+    pub extra_layers: Vec<RawFd>,
+    pub persist: bool,
+    pub no_clean: bool,
+    pub dns: DnsSetting,
+    pub origin_image: Option<JailImage>,
+    pub allowing: Vec<String>,
+    pub linux: bool,
+    pub init: Vec<Jexec>,
+    pub deinit: Vec<Jexec>,
+    pub main: Option<Jexec>,
+    pub ips: Vec<IpAssign>,
+    pub ipreq: Vec<NetworkAllocRequest>,
+    pub envs: HashMap<String, String>,
+    pub devfs_ruleset_id: u16,
+    pub ip_alloc: Vec<IpAssign>,
+    pub default_router: Option<IpAddr>,
+    pub main_started_notify: Option<EventFdNotify>,
+    pub create_only: bool,
+    pub linux_no_create_sys_dir: bool,
+    pub linux_no_create_proc_dir: bool,
+    pub linux_no_mount_sys: bool,
+    pub linux_no_mount_proc: bool,
+}
+
+impl InstantiateBlueprint {
+    pub(crate) fn new(
+        id: &str,
+        oci_config: &JailImage,
+        request: AppliedInstantiateRequest,
+        //request: InstantiateRequest,
+        devfs_store: &mut DevfsRulesetStore,
+        cred: &Credential,
+        network_manager: &mut NetworkManager,
+    ) -> anyhow::Result<InstantiateBlueprint> {
+        let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
+        let config = oci_config.jail_config();
+        let name = request.base.name.unwrap_or_else(|| id.to_string());
+        let hostname = request.base.hostname.unwrap_or_else(|| name.to_string());
+        let vnet = request.base.vnet || config.vnet;
+        let available_allows = xc::util::jail_allowables();
+        let mut envs = request.envs.clone();
+
+        if config.linux && !freebsd::exists_kld("linux64") {
+            precondition_failure!(
+                EIO,
+                "Linux image require linux64 kmod but it is missing from the system"
+            );
+        }
+
+        let main_started_notify = match request.base.main_started_notify {
+            ipc::packet::codec::Maybe::None => None,
+            ipc::packet::codec::Maybe::Some(x) => Some(EventFdNotify::from_fd(x.as_raw_fd())),
+        };
+
+        let mut ip_alloc = request.base.ips.clone();
 
         let mut default_router = None;
 
-        for req in request.ipreq.iter() {
+        for req in request.base.ipreq.iter() {
             match network_manager.allocate(vnet, req, id) {
                 Ok((alloc, router)) => {
                     if !existing_ifaces.contains(&alloc.interface) {
@@ -320,25 +391,25 @@ impl InstantiateBlueprint {
             };
         }
 
-        let mut devfs_rules = Vec::new();
-        let rules = config
-            .devfs_rules
-            .iter()
-            .map(|s| s.apply(&envs))
-            .collect::<Vec<_>>();
-        devfs_rules.push("include 1".to_string());
-        devfs_rules.push("include 2".to_string());
-        devfs_rules.push("include 3".to_string());
-        devfs_rules.push("include 4".to_string());
-        devfs_rules.push("include 5".to_string());
-        devfs_rules.push("path dtrace unhide".to_string());
-        // allow USDT to be registered
-        devfs_rules.push("path dtrace/helper unhide".to_string());
-        devfs_rules.extend(rules);
+        let mut devfs_rules = vec![
+            "include 1".to_string(),
+            "include 2".to_string(),
+            "include 3".to_string(),
+            "include 4".to_string(),
+            "include 5".to_string(),
+            "path dtrace unhide".to_string(),
+            // allow USDT to be registered
+            "path dtrace/helper unhide".to_string(),
+        ];
+
+        for rule in request.devfs_rules.iter() {
+            devfs_rules.push(rule.to_string());
+        }
 
         let devfs_ruleset_id = devfs_store.get_ruleset_id(&devfs_rules);
 
         let extra_layers = request
+            .base
             .extra_layers
             .to_vec()
             .into_iter()
@@ -350,44 +421,34 @@ impl InstantiateBlueprint {
             hostname,
             id: id.to_string(),
             vnet,
-            init: config
-                .init
-                .clone()
-                .into_iter()
-                .map(|s| s.resolve_args(&envs).jexec())
-                .collect(),
-            deinit: config
-                .clone()
-                .deinit
-                .into_iter()
-                .map(|s| s.resolve_args(&envs).jexec())
-                .collect(),
+            init: request.init,
+            deinit: request.deinit,
             extra_layers,
-            main,
-            ips: request.ips,
-            ipreq: request.ipreq,
-            mount_req,
+            main: request.main,
+            ips: request.base.ips,
+            ipreq: request.base.ipreq,
+            mount_req: request.mount_req,
             linux: config.linux,
-            deinit_norun: request.deinit_norun,
-            init_norun: request.init_norun,
-            main_norun: request.main_norun,
-            persist: request.persist,
-            no_clean: request.no_clean,
-            dns: request.dns,
+            deinit_norun: request.base.deinit_norun,
+            init_norun: request.base.init_norun,
+            main_norun: request.base.main_norun,
+            persist: request.base.persist,
+            no_clean: request.base.no_clean,
+            dns: request.base.dns,
             origin_image: Some(oci_config.clone()),
-            allowing,
-            image_reference: Some(request.image_reference),
-            copies,
+            allowing: request.allowing,
+            image_reference: Some(request.base.image_reference),
+            copies: request.copies,
             envs,
             ip_alloc,
             devfs_ruleset_id,
             default_router,
             main_started_notify,
-            create_only: request.create_only,
-            linux_no_create_sys_dir: request.linux_no_create_sys_dir,
-            linux_no_create_proc_dir: request.linux_no_create_proc_dir,
-            linux_no_mount_sys: request.linux_no_mount_sys,
-            linux_no_mount_proc: request.linux_no_mount_proc,
+            create_only: request.base.create_only,
+            linux_no_create_sys_dir: request.base.linux_no_create_sys_dir,
+            linux_no_create_proc_dir: request.base.linux_no_create_proc_dir,
+            linux_no_mount_sys: request.base.linux_no_mount_sys,
+            linux_no_mount_proc: request.base.linux_no_mount_proc,
         })
     }
 }

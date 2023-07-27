@@ -112,6 +112,16 @@ impl<T: FromPacket> List<T> {
     pub fn to_vec(self) -> Vec<T> {
         self.0
     }
+
+    pub fn move_to_vec(&mut self) -> Vec<T> {
+        let mut v = Vec::new();
+        while let Some(element) = self.0.pop() {
+            v.push(element);
+        }
+        v.reverse();
+        v
+    }
+
     pub fn push(&mut self, item: T) {
         self.0.push(item)
     }

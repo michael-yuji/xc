@@ -23,7 +23,7 @@
 // SUCH DAMAGE.
 use pest::Parser;
 use pest_derive::Parser;
-use serde::{de::Visitor, Deserializer, Deserialize, Serialize, Serializer};
+use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
 #[derive(Parser)]
@@ -44,7 +44,6 @@ rule = _{ WHITE_SPACE* ~ ((condition+ ~ action*) | (action+ ~ condition*)) ~ WHI
 "#]
 struct RuleParser;
 
-
 /// A "safer" condition that does not support glob
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Condition {
@@ -53,10 +52,10 @@ pub enum Condition {
 }
 
 impl std::fmt::Display for Condition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) ->  std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Condition::Type(t) => write!(f, "type {t}"),
-            Condition::Path(p) => write!(f, "path {}", p.to_string_lossy())
+            Condition::Path(p) => write!(f, "path {}", p.to_string_lossy()),
         }
     }
 }
@@ -71,7 +70,7 @@ pub enum DevfsAction {
     Mode(u32),
 }
 impl std::fmt::Display for DevfsAction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) ->  std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Hide => write!(f, "hide"),
             Self::Unhide => write!(f, "unhide"),
@@ -84,13 +83,23 @@ impl std::fmt::Display for DevfsAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DevfsRule {
     conditions: Vec<Condition>,
-    actions: Vec<DevfsAction>
+    actions: Vec<DevfsAction>,
 }
 impl std::fmt::Display for DevfsRule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let space = " ".to_string();
-        let c = self.conditions.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(&space);
-        let a = self.actions.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(&space);
+        let c = self
+            .conditions
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(&space);
+        let a = self
+            .actions
+            .iter()
+            .map(|a| a.to_string())
+            .collect::<Vec<_>>()
+            .join(&space);
 
         if c.is_empty() {
             write!(f, "{a}")
@@ -151,36 +160,35 @@ impl FromStr for DevfsRule {
                     let part = component.into_inner().next().unwrap();
                     match part.as_rule() {
                         Rule::path => {
-                            conditions.push(Condition::Path(std::path::PathBuf::from(part.as_str())));
-                        },
+                            conditions
+                                .push(Condition::Path(std::path::PathBuf::from(part.as_str())));
+                        }
                         Rule::devtype => {
                             conditions.push(Condition::Type(part.as_str().to_string()));
-                        },
-                        _ => unreachable!()
+                        }
+                        _ => unreachable!(),
                     }
-                },
-                Rule::action => {
-                    match component.as_str() {
-                        "hide" => actions.push(DevfsAction::Hide),
-                        "unhide" => actions.push(DevfsAction::Unhide),
-                        _ => {
-                            let n = component.into_inner().next().unwrap();
-                            match n.as_rule() {
-                                Rule::Gid => actions.push(DevfsAction::Group(n.as_str().parse()?)),
-                                Rule::Uid => actions.push(DevfsAction::User(n.as_str().parse()?)),
-                                Rule::Mode => actions.push(DevfsAction::Mode(n.as_str().parse()?)),
-                                _ => unreachable!()
-                            }
+                }
+                Rule::action => match component.as_str() {
+                    "hide" => actions.push(DevfsAction::Hide),
+                    "unhide" => actions.push(DevfsAction::Unhide),
+                    _ => {
+                        let n = component.into_inner().next().unwrap();
+                        match n.as_rule() {
+                            Rule::Gid => actions.push(DevfsAction::Group(n.as_str().parse()?)),
+                            Rule::Uid => actions.push(DevfsAction::User(n.as_str().parse()?)),
+                            Rule::Mode => actions.push(DevfsAction::Mode(n.as_str().parse()?)),
+                            _ => unreachable!(),
                         }
                     }
                 },
-                _ => continue
+                _ => continue,
             }
         }
 
         Ok(DevfsRule {
             conditions,
-            actions
+            actions,
         })
     }
 }
@@ -197,7 +205,10 @@ mod tests {
         println!("rule: {rule:#?}");
 
         assert_eq!(rule.conditions[0], Condition::Type("disk".to_string()));
-        assert_eq!(rule.conditions[1], Condition::Path(std::path::PathBuf::from("hello")));
+        assert_eq!(
+            rule.conditions[1],
+            Condition::Path(std::path::PathBuf::from("hello"))
+        );
         assert_eq!(rule.actions[0], DevfsAction::Group(100));
         assert_eq!(rule.actions[1], DevfsAction::User(501));
 

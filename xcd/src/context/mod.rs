@@ -55,6 +55,8 @@ use xc::image_store::ImageRecord;
 use xc::models::jail_image::{JailConfig, JailImage};
 use xc::models::network::*;
 
+use self::instantiate::AppliedInstantiateRequest;
+
 pub struct ServerContext {
     pub(crate) network_manager: Arc<Mutex<NetworkManager>>,
     pub(crate) sites: HashMap<String, Arc<RwLock<Site>>>,
@@ -483,13 +485,20 @@ impl ServerContext {
             let mut site = Site::new(id, this.config_manager.subscribe());
             site.stage(image)?;
             let name = request.name.clone();
+
+            let applied = {
+                let network_manager = this.network_manager.clone();
+                let network_manager = network_manager.lock().await;
+                AppliedInstantiateRequest::new(request, image, &cred, &network_manager)?
+            };
+
             let blueprint = {
                 let network_manager = this.network_manager.clone();
                 let mut network_manager = network_manager.lock().await;
                 InstantiateBlueprint::new(
                     id,
                     image,
-                    request,
+                    applied,
                     &mut this.devfs_store,
                     &cred,
                     &mut network_manager,

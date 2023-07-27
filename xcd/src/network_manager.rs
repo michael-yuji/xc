@@ -105,6 +105,10 @@ impl NetworkManager {
         }
     }
 
+    pub(crate) fn has_network(&self, name: &str) -> bool {
+        self.recv.borrow().networks.contains_key(name)
+    }
+
     pub(crate) fn get_network_info(&self) -> Result<Vec<NetworkInfo>, anyhow::Error> {
         let config = self.recv.borrow().clone();
         let mut info = Vec::new();
