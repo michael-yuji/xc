@@ -87,6 +87,7 @@ impl_elf_brands!(
     Standalone -> 255
 );
 
+/// Attempt to read the ELF brand of the target binary
 pub fn which_elf(path: impl AsRef<Path>) -> Result<Option<ElfBrand>, std::io::Error> {
     let mut file = File::open(path)?;
     if file.metadata()?.len() < E_IDENT_LEN as u64 {
@@ -102,6 +103,7 @@ pub fn which_elf(path: impl AsRef<Path>) -> Result<Option<ElfBrand>, std::io::Er
     }
 }
 
+/// Rebrand ELF binary
 pub fn brand_elf_if_unsupported(
     path: impl AsRef<Path>,
     brand: ElfBrand,
@@ -143,13 +145,13 @@ mod tests {
         ];
         let temp_path = "test_brand_elf";
 
-        std::fs::write(&temp_path, &file_content)?;
-        let res = brand_elf_if_unsupported(&temp_path, ElfBrand::FreeBSD)?;
+        std::fs::write(temp_path, file_content)?;
+        let res = brand_elf_if_unsupported(temp_path, ElfBrand::FreeBSD)?;
         assert_eq!(res, Some(ElfBrand::FreeBSD));
-        let bytes = std::fs::read(&temp_path)?;
+        let bytes = std::fs::read(temp_path)?;
         assert_eq!(&bytes, &branded);
 
-        std::fs::remove_file(&temp_path)?;
+        std::fs::remove_file(temp_path)?;
 
         Ok(())
     }

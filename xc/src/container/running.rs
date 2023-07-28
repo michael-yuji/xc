@@ -109,7 +109,6 @@ impl RunningContainer {
         };
 
         Ok(())
-        //        eprintln!("copied: {size}");
     }
 
     pub fn setup_resolv_conf(&self, dns: &DnsSetting) -> anyhow::Result<()> {

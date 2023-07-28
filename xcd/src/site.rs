@@ -21,6 +21,7 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use crate::config::XcConfig;
 use crate::context::instantiate::InstantiateBlueprint;
 
 use anyhow::{anyhow, bail, Context};
@@ -42,7 +43,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 use tracing::{error, info};
-use xc::config::XcConfig;
 use xc::container::effect::UndoStack;
 use xc::container::{ContainerManifest, CreateContainer};
 use xc::models::exec::Jexec;
@@ -60,7 +60,7 @@ enum SiteState {
 pub struct Site {
     id: String,
     undo: UndoStack,
-    config: Receiver<XcConfig>,
+    config: XcConfig,
     pub(crate) zfs: ZfsHandle,
     root: Option<OsString>,
     /// The dataset contains the root of the container
@@ -96,7 +96,7 @@ macro_rules! guard {
 }
 
 impl Site {
-    pub fn new(id: &str, config: Receiver<XcConfig>) -> Site {
+    pub fn new(id: &str, config: XcConfig) -> Site {
         Site {
             id: id.to_string(),
             undo: UndoStack::new(),
@@ -400,7 +400,7 @@ impl Site {
                     allowing: blueprint.allowing,
                     image_reference: blueprint.image_reference,
                     default_router: blueprint.default_router,
-                    log_directory: Some(std::path::PathBuf::from(&self.config.borrow().logs_dir)),
+                    log_directory: Some(std::path::PathBuf::from(&self.config.logs_dir)),
                 };
 
                 let running_container = container
@@ -450,9 +450,9 @@ impl Site {
     }
 
     fn create_rootfs(&mut self, image: &JailImage) -> anyhow::Result<()> {
-        let config = self.config.borrow().clone();
-        let image_dataset = config.image_dataset;
-        let container_dataset = config.container_dataset;
+        let config = &self.config;
+        let image_dataset = &config.image_dataset;
+        let container_dataset = &config.container_dataset;
         let dest_dataset = format!("{container_dataset}/{}", self.id);
         let source_dataset = image.chain_id().map(|id| format!("{image_dataset}/{id}"));
         let zfs_origin;

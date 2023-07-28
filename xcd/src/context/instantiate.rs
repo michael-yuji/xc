@@ -88,11 +88,14 @@ impl AppliedInstantiateRequest {
 
         let main = match &request.entry_point {
             Some(spec) => {
-                let args = spec
-                    .entry_point_args
-                    .iter()
-                    .map(|a| InterpolatedString::new(a.as_str()).unwrap())
-                    .collect::<Vec<_>>();
+                let args = {
+                    let mut args = Vec::new();
+                    for arg in spec.entry_point_args.iter() {
+                        args.push(arg.parse::<InterpolatedString>().context("invalid arg")?);
+                    }
+                    args
+                };
+
                 let entry_point =
                     if let Some(entry_point) = config.entry_points.get(&spec.entry_point) {
                         entry_point.clone()

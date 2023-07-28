@@ -24,7 +24,9 @@
 pub mod instantiate;
 
 use crate::auth::Credential;
-use crate::config_manager::ConfigManager;
+use crate::config::config_manager::{ConfigManager, InventoryManager};
+use crate::config::inventory::Inventory;
+use crate::config::XcConfig;
 use crate::context::instantiate::InstantiateBlueprint;
 use crate::devfs_store::DevfsRulesetStore;
 use crate::image::pull::PullImageError;
@@ -48,7 +50,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
-use xc::config::XcConfig;
 use xc::container::ContainerManifest;
 use xc::image_store::sqlite::SqliteImageStore;
 use xc::image_store::ImageRecord;
@@ -66,17 +67,18 @@ pub struct ServerContext {
 
     pub(crate) devfs_store: DevfsRulesetStore,
     pub(crate) image_manager: Arc<RwLock<ImageManager>>,
-    pub(crate) config_manager: ConfigManager,
+    pub(crate) config: XcConfig,
     pub(crate) port_forward_table: PortForwardTable,
 
     // map from id to netgroups
     pub(crate) ng2jails: HashMap<String, Vec<String>>,
     pub(crate) jail2ngs: HashMap<String, Vec<String>>,
+
+    pub(crate) inventory: InventoryManager,
 }
 
 impl ServerContext {
-    pub(crate) fn new(config_manager: ConfigManager) -> ServerContext {
-        let config = config_manager.config();
+    pub(crate) fn new(config: XcConfig) -> ServerContext {
         let image_store_db = SqliteImageStore::open_file(&config.image_database_store);
         image_store_db
             .create_tables()
@@ -88,10 +90,11 @@ impl ServerContext {
 
         xc::res::create_tables(&db).expect("cannot create tables");
 
-        let network_manager = Arc::new(Mutex::new(NetworkManager::new(
-            db,
-            config_manager.subscribe(),
-        )));
+        let inventory =
+            InventoryManager::load_from_path(&config.inventory).expect("cannot write inventory");
+
+        let network_manager = Arc::new(Mutex::new(NetworkManager::new(db, inventory.subscribe())));
+
         let is = Arc::new(Mutex::new(image_store));
         let provider = JsonRegistryProvider::from_path(&config.registries).unwrap();
 
@@ -105,18 +108,26 @@ impl ServerContext {
         ServerContext {
             network_manager,
             alias_map: TwoWayMap::new(),
-            devfs_store: DevfsRulesetStore::new(config.devfs_id_offset, config.force_devfs_ruleset),
+            devfs_store: DevfsRulesetStore::new(
+                config.devfs_id_offset.clone(),
+                config.force_devfs_ruleset.clone(),
+            ),
             image_manager: Arc::new(RwLock::new(image_manager)),
             sites: HashMap::new(),
-            config_manager,
+            config,
             port_forward_table: PortForwardTable::new(),
             ng2jails: HashMap::new(),
             jail2ngs: HashMap::new(),
+            inventory,
         }
     }
 
     pub(crate) fn config(&self) -> XcConfig {
-        self.config_manager.config()
+        self.config.clone()
+    }
+
+    pub(crate) fn inventory(&self) -> Inventory {
+        self.inventory.config()
     }
 
     pub(crate) fn create_channel(
@@ -279,7 +290,9 @@ impl ServerContext {
 
         for garbage in file_set.iter() {
             info!("removing orphaned layer: {garbage}");
-            std::fs::remove_file(format!("{layers_dir}/{garbage}"))?;
+            let mut layers_dir = layers_dir.clone();
+            layers_dir.push(garbage.as_str());
+            std::fs::remove_file(layers_dir)?;
         }
 
         for chain_id in chain_id_set.iter() {
@@ -421,7 +434,11 @@ impl ServerContext {
         let site = self.get_site(container_name).context("no such site")?;
         let mut site = site.write().await;
         let snapshot = site.snapshot_with_generated_tag()?;
-        let temp_file_path = format!("{layers_dir}/{commit_id}");
+        let temp_file_path = {
+            let mut path = layers_dir.clone();
+            path.push(commit_id);
+            path
+        };
         let temp_file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -448,7 +465,13 @@ impl ServerContext {
             .await;
         context.map_diff_id(&diff_id, &digest, "zstd", None).await?;
 
-        std::fs::rename(&temp_file_path, format!("{layers_dir}/{digest}"))?;
+        let dest = {
+            let mut path = layers_dir.clone();
+            path.push(digest.as_str());
+            path
+        };
+
+        std::fs::rename(&temp_file_path, dest)?;
         Ok(diff_id)
     }
 
@@ -459,7 +482,7 @@ impl ServerContext {
     ) -> Result<(), anyhow::Error> {
         if let Some(container) = self.resolve_container_by_name(name).await {
             if let Some(main_ip) = container.ip_alloc.first() {
-                let default_ext_ifs = self.config_manager.config().ext_ifs;
+                let default_ext_ifs = &self.config.ext_ifs;
                 let mut rdr = rdr.clone();
                 rdr.with_host_info(&default_ext_ifs, main_ip.addresses.first().unwrap().clone());
                 self.port_forward_table.append_rule(&container.id, rdr);
@@ -482,7 +505,7 @@ impl ServerContext {
         let (site, notify) = {
             let this = this.clone();
             let mut this = this.write().await;
-            let mut site = Site::new(id, this.config_manager.subscribe());
+            let mut site = Site::new(id, this.config());
             site.stage(image)?;
             let name = request.name.clone();
 
@@ -576,7 +599,7 @@ impl ServerContext {
     ) -> Result<(), crate::image::push::PushImageError> {
         _ = crate::image::push::push_image(
             self.image_manager.clone(),
-            &self.config_manager.config().layers_dir,
+            &self.config.layers_dir,
             reference,
             remote_reference,
         )

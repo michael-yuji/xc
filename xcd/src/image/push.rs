@@ -110,7 +110,7 @@ impl PushImageStatus {
 }
 pub async fn push_image(
     this: Arc<RwLock<ImageManager>>,
-    layers_dir: &str,
+    layers_dir: impl AsRef<std::path::Path>,
     reference: ImageReference,
     remote_reference: ImageReference,
 ) -> Result<Receiver<Task<String, PushImageStatus>>, PushImageError> {
@@ -147,7 +147,7 @@ pub async fn push_image(
     let (mut emitter, rx) = { this.clone().write().await.push_image.register(&id) };
     let name = name.to_string();
     let tag = tag.to_string();
-    let layers_dir = layers_dir.to_string();
+    let layers_dir = layers_dir.as_ref().to_path_buf();
 
     tokio::spawn(async move {
         let this = this.clone();
@@ -164,8 +164,15 @@ pub async fn push_image(
             };
 
             for map in maps.iter() {
+                /*
                 let layer_file = format!("{}/{}", layers_dir, map.archive_digest);
                 let layer_file_path = std::path::Path::new(&layer_file);
+                */
+                let layer_file_path = {
+                    let mut path = layers_dir.to_path_buf();
+                    path.push(map.archive_digest.as_str());
+                    path
+                };
                 if layer_file_path.exists() {
                     selections.push(map.clone());
                     continue 'layer_loop;
@@ -199,10 +206,13 @@ pub async fn push_image(
                 "plain" => "application/vnd.oci.image.layer.v1.tar",
                 _ => unreachable!(),
             };
-
-            let path = format!("{layers_dir}/{}", map.archive_digest);
-            let path = std::path::Path::new(&path);
-            let file = std::fs::OpenOptions::new().read(true).open(path)?;
+            /*
+                        let path = format!("{layers_dir}/{}", map.archive_digest);
+                        let path = std::path::Path::new(&path);
+            */
+            let mut path = layers_dir.to_path_buf();
+            path.push(map.archive_digest.as_str());
+            let file = std::fs::OpenOptions::new().read(true).open(&path)?;
             let metadata = file.metadata().unwrap();
             let layer_size = metadata.len() as usize;
 

@@ -131,7 +131,7 @@ pub struct InfoRequest {}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InfoResponse {
-    pub config: xc::config::XcConfig,
+    pub config: crate::config::XcConfig,
 }
 
 #[ipc_method(method = "info")]
@@ -305,12 +305,6 @@ async fn instantiate(
     let row = {
         let ctx = context.read().await;
         let dlctx = ctx.image_manager.read().await;
-        let image_name = if let Some(hostname) = &request.image_reference.hostname {
-            format!("{hostname}/{}", request.image_reference.name)
-        } else {
-            request.image_reference.name.to_string()
-        };
-        let image_tag = request.image_reference.tag.to_string();
         dlctx.query_manifest(&request.image_reference).await
     };
 
@@ -552,7 +546,7 @@ async fn create_network(
     request: CreateNetworkRequest,
 ) -> GenericResult<()> {
     let context = context.write().await;
-    let config = context.config();
+    let config = context.inventory();
     let existing_ifaces = freebsd::net::ifconfig::interfaces().unwrap();
     if config.networks.contains_key(&request.name) {
         ipc_err(EINVAL, "Network with such name already exists")
@@ -579,7 +573,7 @@ async fn create_network(
         match nm.create_network(&request.name, &network) {
             Ok(_) => {
                 info!("created new network: {}", request.name);
-                context.config_manager.modify_config(|config| {
+                context.inventory.modify_config(|config| {
                     config.networks.insert(request.name.to_string(), network);
                 });
                 Ok(())
@@ -711,11 +705,14 @@ async fn fd_import(
 ) -> GenericResult<oci_util::digest::OciDigest> {
     let config = { context.read().await.config() };
     let image_dataset = config.image_dataset.to_string();
-    let layers_dir = config.layers_dir.to_string();
     let zfs = freebsd::fs::zfs::ZfsHandle::default();
     let temp = gen_id();
     let tempdataset = format!("{image_dataset}/{temp}");
-    let tempfile_path = format!("{layers_dir}/{temp}");
+    let tempfile_path = {
+        let mut path = config.layers_dir.to_path_buf();
+        path.push(temp);
+        path
+    };
     let tempfile = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -774,7 +771,13 @@ async fn fd_import(
     info!("diff_id: {diff_id}");
     info!("archive_digest: {archive_digest}");
 
-    _ = std::fs::rename(tempfile_path, format!("{layers_dir}/{archive_digest}"));
+    let path = {
+        let mut path = config.layers_dir.to_path_buf();
+        path.push(archive_digest.as_str());
+        path
+    };
+
+    _ = std::fs::rename(tempfile_path, path);
 
     let dataset = format!("{image_dataset}/{diff_id}");
 
