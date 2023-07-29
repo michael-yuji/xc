@@ -147,7 +147,7 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
                     continue;
                 }
 
-                if let Some(mut client) = self
+                if let Some(client) = self
                     .clients
                     .iter_mut()
                     .find(|client| client.fd as usize == event.ident())

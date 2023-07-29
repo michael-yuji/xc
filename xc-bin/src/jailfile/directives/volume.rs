@@ -75,11 +75,7 @@ impl Directive for VolumeDirective {
             description: self.description.to_string(),
         };
 
-        let name = self
-            .name
-            .as_ref()
-            .unwrap_or_else(|| &self.destination)
-            .to_string();
+        let name = self.name.as_ref().unwrap_or(&self.destination).to_string();
 
         context
             .config_mods

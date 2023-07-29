@@ -22,11 +22,11 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 mod auth;
-mod config_manager;
+mod config;
 mod context;
 mod devfs_store;
+//mod event_collector;
 mod image;
-//mod layer_manager;
 mod network_manager;
 mod port;
 mod registry;
@@ -36,8 +36,10 @@ mod util;
 
 pub mod ipc;
 
+use crate::config::{config_manager::ConfigManager, XcConfig};
+
 use anyhow::{bail, Context};
-use config_manager::ConfigManager;
+use clap::Parser;
 use context::ServerContext;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -45,8 +47,26 @@ use tracing::{error, info};
 
 pub async fn xmain() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
-    let config_path = "/usr/local/etc/xc.conf";
-    info!("loading configuration from {config_path}");
+    let args = crate::config::XcConfigArg::parse();
+
+    let config_path = &args.config_dir;
+    info!("loading configuration from {config_path:?}");
+
+    let config_file = std::fs::OpenOptions::new().read(true).open(&config_path)?;
+
+    let mut config: XcConfig = serde_yaml::from_reader(config_file)?;
+    config.merge(args);
+
+    let path = config.socket_path.to_path_buf();
+    info!("config: {config:#?}");
+
+    config.prepare()?;
+
+    let context = Arc::new(RwLock::new(ServerContext::new(config)));
+    let join_handle = ServerContext::create_channel(context, &path)?;
+    join_handle.await?;
+
+    /*
     match ConfigManager::load_from_path(config_path) {
         Err(error) => {
             error!("{error:#?}");
@@ -73,13 +93,14 @@ pub async fn xmain() -> Result<(), anyhow::Error> {
                 }
             }
 
-            let path = xc_config.socket_path.to_string();
+            let path = &xc_config.socket_path;
             info!("config: {xc_config:#?}");
             let context = Arc::new(RwLock::new(ServerContext::new(config_manager)));
             let join_handle = ServerContext::create_channel(context, &path)?;
             join_handle.await?;
         }
     }
+    */
     Ok(())
 }
 

@@ -35,7 +35,6 @@ use oci_util::distribution::client::*;
 use oci_util::image_reference::ImageReference;
 use oci_util::layer::ChainId;
 use oci_util::models::Descriptor;
-use oci_util::models::ImageManifest;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

@@ -21,6 +21,7 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use crate::config::XcConfig;
 use crate::context::instantiate::InstantiateBlueprint;
 
 use anyhow::{anyhow, bail, Context};
@@ -42,7 +43,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 use tracing::{error, info};
-use xc::config::XcConfig;
 use xc::container::effect::UndoStack;
 use xc::container::{ContainerManifest, CreateContainer};
 use xc::models::exec::Jexec;
@@ -60,7 +60,7 @@ enum SiteState {
 pub struct Site {
     id: String,
     undo: UndoStack,
-    config: Receiver<XcConfig>,
+    config: XcConfig,
     pub(crate) zfs: ZfsHandle,
     root: Option<OsString>,
     /// The dataset contains the root of the container
@@ -96,7 +96,7 @@ macro_rules! guard {
 }
 
 impl Site {
-    pub fn new(id: &str, config: Receiver<XcConfig>) -> Site {
+    pub fn new(id: &str, config: XcConfig) -> Site {
         Site {
             id: id.to_string(),
             undo: UndoStack::new(),
@@ -128,8 +128,8 @@ impl Site {
         }
     }
 
-    pub fn update_host_file(&mut self, network: &str, hosts: &Vec<(String, IpAddr)>) {
-        self.hosts_cache.insert(network.to_string(), hosts.clone());
+    pub fn update_host_file(&mut self, network: &str, hosts: &[(String, IpAddr)]) {
+        self.hosts_cache.insert(network.to_string(), hosts.to_vec());
 
         let mut host_entries = Vec::new();
 
@@ -169,7 +169,7 @@ impl Site {
                 .iter()
                 .position(|s| s == tag)
                 .context("no such snapshot")?;
-            self.zfs.clone2(&root_dataset, &tag, dst_dataset.as_ref())?;
+            self.zfs.clone2(root_dataset, tag, dst_dataset.as_ref())?;
             self.zfs.promote(dst_dataset.as_ref())?;
             self.zfs_snapshots.drain(..self.zfs_snapshots.len());
         }
@@ -190,7 +190,7 @@ impl Site {
             bail!("duplicate tag");
         }
         if let Some(root_dataset) = &self.root_dataset {
-            self.zfs.snapshot2(&root_dataset.to_string(), tag)?;
+            self.zfs.snapshot2(root_dataset, tag)?;
             self.zfs_snapshots.push(tag.to_string())
         }
         Ok(())
@@ -289,7 +289,7 @@ impl Site {
         };
 
         let response =
-            Response::from_packet(packet, |bytes| serde_json::from_slice(&bytes).unwrap());
+            Response::from_packet(packet, |bytes| serde_json::from_slice(bytes).unwrap());
 
         if response.errno == 0 {
             Ok(serde_json::from_value(response.value).unwrap())
@@ -400,7 +400,7 @@ impl Site {
                     allowing: blueprint.allowing,
                     image_reference: blueprint.image_reference,
                     default_router: blueprint.default_router,
-                    log_directory: Some(std::path::PathBuf::from(&self.config.borrow().logs_dir)),
+                    log_directory: Some(std::path::PathBuf::from(&self.config.logs_dir)),
                 };
 
                 let running_container = container
@@ -450,9 +450,9 @@ impl Site {
     }
 
     fn create_rootfs(&mut self, image: &JailImage) -> anyhow::Result<()> {
-        let config = self.config.borrow().clone();
-        let image_dataset = config.image_dataset;
-        let container_dataset = config.container_dataset;
+        let config = &self.config;
+        let image_dataset = &config.image_dataset;
+        let container_dataset = &config.container_dataset;
         let dest_dataset = format!("{container_dataset}/{}", self.id);
         let source_dataset = image.chain_id().map(|id| format!("{image_dataset}/{id}"));
         let zfs_origin;

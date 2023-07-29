@@ -21,57 +21,11 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-use crate::res::network::Network;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use xc::res::network::Network;
 
-fn default_socket_path() -> String {
-    "/var/run/xc.sock".to_string()
-}
-
-fn default_database_store() -> String {
-    "/var/db/xc.sqlite".to_string()
-}
-
-fn default_registries() -> String {
-    "/var/db/xc.registries.json".to_string()
-}
-
-fn default_layers_dir() -> String {
-    "/var/cache".to_string()
-}
-
-fn default_logs_dir() -> String {
-    "/var/log/xc".to_string()
-}
-
-fn default_devfs_offset() -> u16 {
-    1000
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct XcConfig {
-    /// Network interfaces should "xc" consider external
-    pub ext_ifs: Vec<String>,
-    /// Dataset for images
-    pub image_dataset: String,
-    /// Dataset for running containers
-    pub container_dataset: String,
-    #[serde(default = "default_database_store")]
-    pub image_database_store: String,
-    #[serde(default = "default_layers_dir")]
-    pub layers_dir: String,
-    #[serde(default = "default_logs_dir")]
-    pub logs_dir: String,
-    #[serde(default = "default_devfs_offset")]
-    pub devfs_id_offset: u16,
-    #[serde(default = "default_database_store")]
-    pub database_store: String,
-    #[serde(default = "default_socket_path")]
-    pub socket_path: String,
-    #[serde(default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct Inventory {
     pub networks: HashMap<String, Network>,
-    #[serde(default = "default_registries")]
-    pub registries: String,
-    pub force_devfs_ruleset: Option<u16>,
 }

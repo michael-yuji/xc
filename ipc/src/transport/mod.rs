@@ -97,7 +97,7 @@ impl PacketTransport for RawFd {
 
         while sptr != header.len() {
             let size = nix::sys::socket::send(*self, &header[sptr..], MsgFlags::empty())
-                .map_err(|e| std::io::Error::from(e))?;
+                .map_err(std::io::Error::from)?;
             sptr += size;
         }
 
@@ -108,7 +108,7 @@ impl PacketTransport for RawFd {
         let mut count = send_once(self.as_raw_fd(), data, &packet.fds)?;
         while count != bytes_count as usize {
             let len = nix::sys::socket::send(*self, &data[count..], MsgFlags::empty())
-                .map_err(|e| std::io::Error::from(e))?;
+                .map_err(std::io::Error::from)?;
             //            let len = self.write(&data[count..])?;
             count += len;
         }
@@ -118,7 +118,7 @@ impl PacketTransport for RawFd {
     fn recv_packet(&mut self) -> Result<Packet, ChannelError<Self::Err>> {
         let mut header_bytes = [0u8; 16];
         _ = nix::sys::socket::recv(*self, &mut header_bytes, MsgFlags::empty())
-            .map_err(|e| std::io::Error::from(e))?;
+            .map_err(std::io::Error::from)?;
         //        _ = self.read(&mut header_bytes)?;
 
         let bytes_count = u64::from_be_bytes(header_bytes[0..8].try_into().unwrap()) as usize;
@@ -134,7 +134,7 @@ impl PacketTransport for RawFd {
 
         while received != bytes_count {
             let len = nix::sys::socket::recv(*self, &mut data[received..], MsgFlags::empty())
-                .map_err(|e| std::io::Error::from(e))?;
+                .map_err(std::io::Error::from)?;
             //            let len = self.read(&mut data[received..])?;
             received += len;
         }

@@ -29,10 +29,11 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use thiserror::Error;
 use tokio::sync::watch::Receiver;
-use xc::config::XcConfig;
 use xc::container::request::NetworkAllocRequest;
 use xc::models::network::IpAssign;
 use xc::res::network::{Netpool, Network};
+
+use crate::config::inventory::Inventory;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetworkInfo {
@@ -61,7 +62,7 @@ impl NetworkInfo {
 
 pub(crate) struct NetworkManager {
     db: Connection,
-    recv: Receiver<XcConfig>,
+    recv: Receiver<Inventory>,
     // { "conatiner_id": { "network_name": [ "ip_address", ...] }
     table_cache: HashMap<String, HashMap<String, Vec<IpAddr>>>,
 }
@@ -97,7 +98,7 @@ impl From<anyhow::Error> for Error {
 }
 
 impl NetworkManager {
-    pub(crate) fn new(db: Connection, recv: Receiver<XcConfig>) -> NetworkManager {
+    pub(crate) fn new(db: Connection, recv: Receiver<Inventory>) -> NetworkManager {
         NetworkManager {
             db,
             recv,

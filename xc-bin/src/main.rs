@@ -33,7 +33,7 @@ mod run;
 
 use crate::channel::{use_channel_action, ChannelAction};
 use crate::error::ActionError;
-use crate::format::{format_bandwidth, format_capacity, BindMount, EnvPair, IpWant, PublishSpec};
+use crate::format::{format_bandwidth, format_capacity};
 use crate::image::{use_image_action, ImageAction};
 use crate::jailfile::directives::volume::VolumeDirective;
 use crate::network::{use_network_action, NetworkAction};
@@ -50,7 +50,6 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
 use term_table::homogeneous::{TableLayout, TableSource, Title};
 use term_table::{ColumnLayout, Pos};
 use tracing::{debug, error, info};
@@ -596,7 +595,7 @@ fn main() -> Result<(), ActionError> {
                 List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
 
             let res = {
-                let mut reqt = InstantiateRequest {
+                let reqt = InstantiateRequest {
                     create_only: true,
                     name,
                     hostname,

@@ -27,7 +27,7 @@ use crate::format::{BindMount, EnvPair, IpWant, PublishSpec};
 use clap::Parser;
 use oci_util::image_reference::ImageReference;
 use std::path::PathBuf;
-use xc::container::request::{MountReq, NetworkAllocRequest};
+use xc::container::request::NetworkAllocRequest;
 
 #[derive(Parser, Debug)]
 pub(crate) struct CreateArgs {

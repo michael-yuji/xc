@@ -38,6 +38,21 @@ where
     Ok(opt.unwrap_or_default())
 }
 
+pub fn epoch_now() -> std::time::Duration {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+}
+
+/// Get the current epoch as nanoseconds
+pub fn epoch_now_nano() -> u64 {
+    epoch_now().as_nanos() as u64
+}
+
+pub fn epoch_now_secs() -> u64 {
+    epoch_now().as_secs()
+}
+
 pub fn sha256_hex_file_r_bytes(path: impl AsRef<Path>) -> Result<[u8; 32], anyhow::Error> {
     use sha2::{Digest, Sha256};
     use std::io::Read;

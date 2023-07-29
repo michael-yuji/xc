@@ -199,7 +199,7 @@ impl CreateContainer {
         if let Some(osrelease) = config.as_ref().and_then(|s| s.osrelease.clone()) {
             proto = proto.param("osrelease", Value::String(osrelease));
         }
-        if let Some(osreldate) = config.as_ref().and_then(|s| s.osreldate.clone()) {
+        if let Some(osreldate) = config.as_ref().and_then(|s| s.osreldate) {
             proto = proto.param("osreldate", Value::Int(osreldate));
         }
 
@@ -343,7 +343,7 @@ impl CreateContainer {
             zfs_origin: self.zfs_origin.clone(),
             notify,
             main_started_notify: Arc::new(EventFdNotify::new()),
-            destroyed: None,
+            deleted: None,
             origin_image: self.origin_image.clone(),
             allowing: self.allowing.clone(),
             image_reference: self.image_reference.clone(),
