@@ -171,7 +171,7 @@ impl ProcessRunner {
         pid: u32,
         stat: Sender<ProcessStat>,
         exit_notify: Option<Arc<EventFdNotify>>,
-        notify: Option<Arc<EventFdNotify>>,
+        tree_exit_notify: Option<Arc<EventFdNotify>>,
     ) {
         debug!("trace process id: {id}, pid: {pid}");
         let rstat = ProcessRunnerStat {
@@ -179,7 +179,7 @@ impl ProcessRunner {
             id: id.to_string(),
             process_stat: stat,
             exit_notify,
-            notify,
+            tree_exit_notify,
         };
         self.named_process.push(rstat);
         self.rpmap.insert(pid, vec![pid]);
@@ -349,7 +349,7 @@ impl ProcessRunner {
             id: id.to_string(),
             process_stat: tx,
             exit_notify,
-            notify,
+            tree_exit_notify: notify,
         };
 
         self.container.processes.insert(id.to_string(), rx);
@@ -431,7 +431,8 @@ impl ProcessRunner {
         } else if method == "run_main" {
             if let Some(main) = self.container.main_proto.clone() {
                 self.spawn_queue.push_back(("main".to_string(), main));
-                todo!()
+                // XXX: implement me
+                write_response(0, ()).unwrap()
             } else {
                 write_response(0, ()).unwrap()
             }
@@ -612,11 +613,29 @@ impl ProcessRunner {
                         if id == "main" {
                             self.started = Some(epoch_now_nano());
                             self.send_update(&mut sender);
-                            eprintln!("notifing!!");
                             self.container.main_started_notify.notify_waiters();
                         }
                     }
-                    Err(error) => error!("cannot spawn {id}: {process:#?} {error:#?}"),
+                    Err(error) => {
+                        if id == "main" {
+                            self.container.fault = Some(format!("{error:#?}"));
+                            self.send_update(&mut sender);
+                            self.container.main_started_notify.notify_waiters_with_value(2);
+
+                            self.main_exited = true;
+                            self.finished_at = Some(epoch_now_nano());
+                            if (self.container.deinit_norun || self.deinits.is_empty())
+                                && !self.container.persist
+                            {
+                                self.should_kill = true;
+                            } else {
+                                debug!("activating deinit queue");
+                                self.deinits.activate();
+                                self.deinits.try_drain_proc_queue("", &mut self.spawn_queue);
+                            }
+                        }
+                        error!("cannot spawn {id}: {process:#?} {error:#?}")
+                    }
                 }
             }
             if should_update {
@@ -630,7 +649,8 @@ impl ProcessRunner {
                 match event.filter().unwrap() {
                     EventFilter::EVFILT_PROC => {
                         if self.handle_pid_event(*event, &mut last_deinit) {
-                            break 'kq;
+                            self.should_kill = true;
+//                            break 'kq;
                         }
                     }
                     EventFilter::EVFILT_TIMER => {
@@ -741,9 +761,10 @@ pub fn run(
     container: RunningContainer,
     control_stream: UnixStream,
     auto_start: bool,
-) -> (i32, Receiver<ContainerManifest>) {
+) -> (i32, Receiver<ContainerManifest>, Receiver<bool>) {
 
     let (tx, rx) = channel(container.serialized());
+    let (ltx, lrx) = channel(true);
     let (parent, sender) = std::os::unix::net::UnixStream::pair().unwrap();
 
     if let Ok(fork_result) = unsafe { nix::unistd::fork() } {
@@ -755,10 +776,14 @@ pub fn run(
                     pr.run(sender);
                     std::process::exit(0);
             },
-            nix::unistd::ForkResult::Parent { child: _ } => {
+            nix::unistd::ForkResult::Parent { child } => {
                 let kq = nix::sys::event::kqueue().unwrap();
-                let mut recv_events = [KEvent::from_read(parent.as_raw_fd())];
+                let mut recv_events = [
+                    KEvent::from_read(parent.as_raw_fd()),
+                    KEvent::from_wait_pid(child.as_raw() as u32)
+                ];
                 kevent_ts(kq, &recv_events, &mut [], None).unwrap();
+
                 let mut control_stream = ControlStream::new(parent);
                 std::thread::spawn(move || {
                     'kq: loop {
@@ -766,33 +791,38 @@ pub fn run(
                         let events = &recv_events[..nenv];
 
                         for event in events {
-                            let bytes = event.data() as usize;
-                            if bytes == 0 {
-                                break 'kq
-                            } else {
-                                match control_stream.try_get_request(event.data() as usize) {
-                                    Err(err) => {
-                                        error!("main loop error: {err:?}");
-                                    }
-                                    Ok(Readiness::Pending) => {}
-                                    Ok(Readiness::Ready((method, request))) => {
+                            if event.filter().unwrap() == EventFilter::EVFILT_READ {
+                                let bytes = event.data() as usize;
+                                if bytes == 0 {
+                                    break 'kq
+                                } else {
+                                    match control_stream.try_get_request(event.data() as usize) {
+                                        Err(err) => {
+                                            error!("main loop error: {err:?}");
+                                        }
+                                        Ok(Readiness::Pending) => {}
+                                        Ok(Readiness::Ready((method, request))) => {
 
-                                        if method == "update" {
-                                            let manifest: ContainerManifest =
-                                                serde_json::from_value(request.data).unwrap();
-                                            tx.send_if_modified(|x| {
-                                                *x = manifest;
-                                                true
-                                            });
-                                        } else if method == "event" {
+                                            if method == "update" {
+                                                let manifest: ContainerManifest =
+                                                    serde_json::from_value(request.data).unwrap();
+                                                tx.send_if_modified(|x| {
+                                                    *x = manifest;
+                                                    true
+                                                });
+                                            } else if method == "event" {
+                                            }
                                         }
                                     }
                                 }
+                            } else if event.filter().unwrap() == EventFilter::EVFILT_PROC {
+                                break 'kq
                             }
                         }
                     }
+                    ltx.send_if_modified(|x| { *x = true ; true});
                 });
-                (kq, rx)
+                (kq, rx, lrx)
             }
         }
     } else {

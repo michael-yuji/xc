@@ -196,7 +196,6 @@ impl ServerContext {
         let mut site = site.write().await;
         let result = site.query_manifest();
         Some(result)
-//        site.read().await.container_dump()
     }
 
     pub async fn find_corpse(&self, id: &str) -> Option<ContainerManifest> {

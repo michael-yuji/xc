@@ -191,6 +191,7 @@ enum Action {
         group: Option<String>,
         name: String,
         arg0: String,
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
         args: Vec<String>,
     },
 }
@@ -794,17 +795,21 @@ fn main() -> Result<(), ActionError> {
                     if let Ok(container) =
                         do_show_container_nocache(&mut conn, ShowContainerRequest { id })?
                     {
-                        let spawn_info = container
-                            .running_container
-                            .processes
-                            .get("main")
-                            .as_ref()
-                            .and_then(|proc| proc.spawn_info.as_ref())
-                            .expect("process not started yet or not found");
-                        if let Some(socket) = &spawn_info.terminal_socket {
-                            _ = attach::run(socket);
+                        if let Some(reason) = container.running_container.fault {
+                            error!("Container faulted {reason}");
                         } else {
-                            info!("main process is not running with tty");
+                            let spawn_info = container
+                                .running_container
+                                .processes
+                                .get("main")
+                                .as_ref()
+                                .and_then(|proc| proc.spawn_info.as_ref())
+                                .expect("process not started yet or not found");
+                            if let Some(socket) = &spawn_info.terminal_socket {
+                                _ = attach::run(socket);
+                            } else {
+                                info!("main process is not running with tty");
+                            }
                         }
                     } else {
                         panic!("cannot find container");
@@ -935,8 +940,10 @@ fn main() -> Result<(), ActionError> {
                 if let Some(socket) = response.terminal_socket {
                     _ = attach::run(socket);
                 }
+                /*
                 let exit = n.notified_sync_take_value();
-                std::process::exit(exit.unwrap_or(2) as i32 - 1)
+                std::process::exit((exit.unwrap_or(2) - 1) as i32)
+                */
             }
         }
     };

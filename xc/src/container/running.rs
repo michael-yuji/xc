@@ -81,6 +81,8 @@ pub struct RunningContainer {
     pub main_started_notify: Arc<EventFdNotify>,
 
     pub log_directory: Option<PathBuf>,
+
+    pub fault: Option<String>,
 }
 
 impl RunningContainer {
@@ -178,6 +180,7 @@ impl RunningContainer {
             origin_image: self.origin_image.clone(),
             allowing: self.allowing.clone(),
             image_reference: self.image_reference.clone(),
+            fault: self.fault.clone(),
         }
     }
 }

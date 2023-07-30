@@ -319,6 +319,8 @@ impl ZfsHandle {
         Command::new(&self.executable)
             .arg("list")
             .arg(dataset.as_ref().to_string_lossy().to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .status()
             .map(|status| status.success())
             .unwrap_or_else(|_| false)

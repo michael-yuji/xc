@@ -43,6 +43,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 use tracing::{error, info};
+use xc::precondition_failure;
 use xc::container::effect::UndoStack;
 use xc::container::{ContainerManifest, CreateContainer};
 use xc::models::exec::Jexec;
@@ -81,6 +82,8 @@ pub struct Site {
     main_started_interests: Vec<EventFdNotify>,
 
     hosts_cache: HashMap<String, Vec<(String, IpAddr)>>,
+
+    aliveness: Option<Receiver<bool>>,
 }
 
 macro_rules! guard {
@@ -115,6 +118,7 @@ impl Site {
             main_started_interests: Vec::new(),
             control_stream: None,
             hosts_cache: HashMap::new(),
+            aliveness: None
         }
     }
 
@@ -304,23 +308,35 @@ impl Site {
         use ipc::packet::codec::FromPacket;
         use ipc::proto::{ipc_err, write_request};
 
-        let packet = write_request("query_manifest", ()).unwrap();
-        let Some(stream) = self.control_stream.as_mut() else {
-            return ipc_err(freebsd::libc::ENOENT, "no such control stream")
-        };
-        let _result = stream.send_packet(&packet);
-
-        let Ok(packet) = stream.recv_packet() else {
-            return ipc_err(freebsd::libc::EIO, "no response from container")
+        let Some(alive) = &self.aliveness else {
+            return ipc_err(freebsd::libc::ENOENT, "container has not started")
         };
 
-        let response =
-            Response::from_packet(packet, |bytes| serde_json::from_slice(bytes).unwrap());
-
-        if response.errno == 0 {
-            Ok(serde_json::from_value(response.value).unwrap())
+        if !*alive.borrow() {
+            if let Some(manifest) = self.container.clone().map(|c| c.borrow().clone()) {
+                Ok(manifest)
+            } else {
+                ipc_err(freebsd::libc::ENOENT, "container has not started")
+            }
         } else {
-            ipc_err(freebsd::libc::EIO, "something went wrong")
+            let packet = write_request("query_manifest", ()).unwrap();
+            let Some(stream) = self.control_stream.as_mut() else {
+                return ipc_err(freebsd::libc::ENOENT, "no such control stream")
+            };
+            let _result = stream.send_packet(&packet);
+
+            let Ok(packet) = stream.recv_packet() else {
+                return ipc_err(freebsd::libc::EIO, "no response from container")
+            };
+
+            let response =
+                Response::from_packet(packet, |bytes| serde_json::from_slice(bytes).unwrap());
+
+            if response.errno == 0 {
+                Ok(serde_json::from_value(response.value).unwrap())
+            } else {
+                ipc_err(freebsd::libc::EIO, "something went wrong")
+            }
         }
     }
 
@@ -436,12 +452,13 @@ impl Site {
                 let container_notify = running_container.notify.clone();
                 let main_started_notify = running_container.main_started_notify.clone();
 
-                let (kq, recv) =
+                let (kq, recv, aliveness) =
                     xc::container::runner::run(running_container, sock_b, !blueprint.create_only);
 
                 self.container = Some(recv);
                 self.container_notify = Some(container_notify);
                 self.main_notify = Some(main_started_notify);
+                self.aliveness = Some(aliveness);
                 self.state = SiteState::Started;
                 if let Some(interest) = blueprint.main_started_notify {
                     self.main_started_interests.push(interest);

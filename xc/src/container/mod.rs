@@ -349,6 +349,7 @@ impl CreateContainer {
             image_reference: self.image_reference.clone(),
             default_router: self.default_router,
             log_directory: self.log_directory.clone(),
+            fault: None,
         })
     }
 }
@@ -379,6 +380,7 @@ pub struct ContainerManifest {
     pub origin_image: Option<JailImage>,
     pub allowing: Vec<String>,
     pub image_reference: Option<ImageReference>,
+    pub fault: Option<String>,
 }
 
 impl ContainerManifest {

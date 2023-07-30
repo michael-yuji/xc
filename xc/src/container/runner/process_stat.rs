@@ -35,7 +35,7 @@ pub struct ProcessRunnerStat {
     pub(super) pid: u32,
     pub(super) process_stat: Sender<ProcessStat>,
     pub(super) exit_notify: Option<Arc<EventFdNotify>>,
-    pub(super) notify: Option<Arc<EventFdNotify>>,
+    pub(super) tree_exit_notify: Option<Arc<EventFdNotify>>,
 }
 
 impl ProcessRunnerStat {
@@ -44,14 +44,6 @@ impl ProcessRunnerStat {
     }
     pub(super) fn id(&self) -> &str {
         self.id.as_str()
-    }
-
-    pub(super) fn set_error(&mut self, error: ExecError) {
-        let err = format!("{error:#?}");
-        self.process_stat.send_if_modified(|status| {
-            status.exec_error = Some(err);
-            true
-        });
     }
 
     pub(super) fn set_exited(&mut self, exit_code: i32) {
@@ -71,7 +63,7 @@ impl ProcessRunnerStat {
             status.set_tree_exited();
             true
         });
-        if let Some(notify) = &self.notify {
+        if let Some(notify) = &self.tree_exit_notify {
             let exit_code = self
                 .process_stat
                 .borrow()
