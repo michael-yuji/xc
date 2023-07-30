@@ -32,8 +32,8 @@ use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use tracing::error;
 use xc::container::request::NetworkAllocRequest;
-use xc::models::network::DnsSetting;
 use xc::models::jail_image::JailConfig;
+use xc::models::network::DnsSetting;
 use xcd::ipc::*;
 
 pub(crate) fn patch_image<F>(

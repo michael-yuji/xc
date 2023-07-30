@@ -27,7 +27,7 @@ use crate::util::default_on_missing;
 
 use super::exec::Exec;
 use super::MountSpec;
-use super::{EntryPoint, EnvSpec, SystemVPropValue};
+use super::{EnvSpec, SystemVPropValue};
 
 use anyhow::anyhow;
 use oci_util::digest::{sha256_once, DigestAlgorithm, OciDigest};
@@ -175,7 +175,9 @@ pub struct JailConfig {
     #[serde(default)]
     pub envs: HashMap<Var, EnvSpec>,
 
-    pub entry_points: HashMap<String, EntryPoint>,
+    pub entry_points: HashMap<String, Exec>,
+
+    pub default_entry_point: Option<String>,
 
     pub special_mounts: Vec<SpecialMount>,
 
@@ -389,7 +391,7 @@ impl JailConfig {
         if let Some(config) = &config.config {
             let entrypoint = config.entrypoint.clone().unwrap_or_default();
             let cmd = config.cmd.clone().unwrap_or_default();
-            let work_dir = config.working_dir.clone();
+            let work_dir = config.working_dir.clone();//.map(|path| std::path::PathBuf::from(&path));
 
             if !entrypoint.is_empty() || !cmd.is_empty() {
                 let (exec, args, default_args) = if entrypoint.is_empty() {
@@ -422,15 +424,19 @@ impl JailConfig {
                         );
                     }
                 }
-                let entry_point = EntryPoint {
+                let entry_point = Exec {
                     exec,
                     args,
                     default_args,
                     environ,
                     required_envs: Vec::new(),
                     work_dir,
+                    clear_env: false,
+                    user: None,
+                    group: None,
                 };
-                meta.entry_points.insert("main".to_string(), entry_point);
+                meta.entry_points.insert("oci_entry_point".to_string(), entry_point);
+                meta.default_entry_point = Some("oci_entry_point".to_string());
             }
         }
 

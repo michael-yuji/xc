@@ -35,9 +35,8 @@ use crate::container::{ContainerManifest, ProcessStat};
 use crate::elf::{brand_elf_if_unsupported, ElfBrand};
 use crate::models::exec::{Jexec, StdioMode};
 use crate::models::network::HostEntry;
-use crate::util::exists_exec;
+use crate::util::{exists_exec, epoch_now_nano};
 
-use crate::util::epoch_now_nano;
 use anyhow::Context;
 use freebsd::event::{EventFdNotify, KEventExt};
 use freebsd::FreeBSDCommandExt;
@@ -46,6 +45,8 @@ use jail::process::Jailed;
 use nix::libc::intptr_t;
 use nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
 use std::collections::{HashMap, VecDeque};
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -83,6 +84,9 @@ pub struct ProcessRunner {
     inits: SerialExec,
 
     deinits: SerialExec,
+
+
+    should_kill: bool,
 }
 
 /// Processes that should start synchronously; that the next process should start if and only if
@@ -226,7 +230,7 @@ impl ProcessRunner {
         exit_notify: Option<Arc<EventFdNotify>>,
         notify: Option<Arc<EventFdNotify>>,
     ) -> Result<SpawnInfo, ExecError> {
-        debug!("spawn: {exec:#?}");
+        info!("spawn: {exec:#?}");
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
         let paths = exec
             .envs
@@ -246,22 +250,47 @@ impl ProcessRunner {
             brand_elf_if_unsupported(path, ElfBrand::Linux).map_err(ExecError::BrandELFFailed)?;
         }
 
+        let uid = match exec.uid {
+            Some(uid) => uid,
+            None => {
+                match &exec.user {
+                    Some(user) => unsafe {
+                        if let Some(user) = freebsd::get_uid_in_jail(self.container.jid, user).ok().flatten() {
+                            user
+                        } else {
+                            return Err(ExecError::NotSuchUser(user.to_string()))
+                        }
+                    }
+                    None => 0
+                }
+            }
+        };
+
+        let gid = match exec.gid {
+            Some(gid) => gid,
+            None => {
+                match &exec.group {
+                    Some(group) => unsafe {
+                        if let Some(group) = freebsd::get_gid_in_jail(self.container.jid, group).ok().flatten() {
+                            group
+                        } else {
+                            return Err(ExecError::NotSuchGroup(group.to_string()))
+                        }
+                    }
+                    None => 0
+                }
+            }
+        };
+
         let mut cmd = std::process::Command::new(&exec.arg0);
 
         cmd.env_clear()
             .args(&exec.args)
             .envs(&exec.envs)
-            .jail(&jail);
+            .jail(&jail)
+            .juid(uid)
+            .jgid(gid);
 
-        if let Some(work_dir) = &exec.work_dir {
-            // god damn it Docker
-            if !work_dir.is_empty() {
-                let path = std::path::Path::new(&work_dir);
-                if path.is_absolute() {
-                    cmd.jwork_dir(work_dir);
-                }
-            }
-        }
         let devnull = std::path::PathBuf::from("/dev/null");
         let spawn_info_result = match &exec.output_mode {
             StdioMode::Terminal => {
@@ -341,18 +370,6 @@ impl ProcessRunner {
         pid
     }
 
-    pub fn kill(&self) {
-        let event = KEvent::new(
-            2,
-            EventFilter::EVFILT_USER,
-            EventFlag::EV_ONESHOT,
-            FilterFlag::NOTE_TRIGGER | FilterFlag::NOTE_FFNOP,
-            0 as intptr_t,
-            0 as intptr_t,
-        );
-        _ = kevent_ts(self.kq, &[event], &mut [], None);
-    }
-
     pub fn new(kq: i32, container: RunningContainer, auto_start: bool) -> ProcessRunner {
         ProcessRunner {
             kq,
@@ -369,6 +386,7 @@ impl ProcessRunner {
             main_exited: false,
             container,
             auto_start,
+            should_kill: false
         }
     }
 
@@ -420,6 +438,9 @@ impl ProcessRunner {
         } else if method == "start" {
             self.start();
             write_response(0, ()).unwrap()
+        } else if method == "kill" {
+            self.should_kill = true;
+            write_response(0, ()).unwrap()
         } else if method == "write_hosts" {
             let recv: Vec<HostEntry> = serde_json::from_value(request.data).unwrap();
             if let Ok(host_path) = crate::util::realpath(&self.container.root, "/etc/hosts") {
@@ -437,6 +458,16 @@ impl ProcessRunner {
                 }
             }
             write_response(0, ()).unwrap()
+        } else if method == "query_manifest" {
+/*
+        use ipc::proto::{write_request, write_response};
+        use ipc::transport::PacketTransport;
+        let manifest = self.container.serialized();
+        let packet = write_request("update", manifest).unwrap();
+        stream.send_packet(&packet);
+*/
+            let manifest = self.container.serialized();
+            write_response(0, manifest).unwrap()
         } else {
             todo!()
         };
@@ -461,7 +492,8 @@ impl ProcessRunner {
         }
     }
 
-    fn handle_pid_event(&mut self, event: KEvent, last_deinit: &mut Option<String>) -> bool {
+    fn handle_pid_event(&mut self, event: KEvent, last_deinit: &mut Option<String>) -> bool
+    {
         let fflag = event.fflags();
         let pid = event.ident() as u32;
         if fflag.contains(FilterFlag::NOTE_EXIT) {
@@ -488,6 +520,7 @@ impl ProcessRunner {
                     if stat.pid() == ancestor {
                         if ancestor == pid {
                             stat.set_exited(event.data() as i32);
+                            info!("exited: {}", event.data());
                             unsafe { nix::libc::waitpid(pid as i32, std::ptr::null_mut(), 0) };
 
                             if self
@@ -546,7 +579,10 @@ impl ProcessRunner {
         false
     }
 
-    pub fn run(mut self, sender: Sender<ContainerManifest>) {
+    pub fn run(
+        mut self,
+        mut sender: std::os::unix::net::UnixStream /*, sender: Sender<ContainerManifest> */)
+    {
         let mut events = vec![KEvent::zero(); 64];
         let kq = self.kq;
         let kill_event = KEvent::new(
@@ -567,23 +603,26 @@ impl ProcessRunner {
         }
 
         'kq: loop {
+            let mut should_update = false;
             while let Some((id, process)) = self.spawn_queue.pop_front() {
+                should_update = true;
                 match self.spawn_process(&id, &process, None, None) {
                     Ok(spawn_info) => {
                         debug!("{id} spawn: {spawn_info:#?}");
                         if id == "main" {
                             self.started = Some(epoch_now_nano());
+                            self.send_update(&mut sender);
+                            eprintln!("notifing!!");
                             self.container.main_started_notify.notify_waiters();
                         }
                     }
                     Err(error) => error!("cannot spawn {id}: {process:#?} {error:#?}"),
                 }
             }
+            if should_update {
+                self.send_update(&mut sender);
+            }
 
-            sender.send_if_modified(|x| {
-                *x = self.container.serialized();
-                true
-            });
             let nevx = kevent_ts(kq, &[], &mut events, None);
             let nev = nevx.unwrap();
 
@@ -637,6 +676,9 @@ impl ProcessRunner {
                                     }
                                 }
                             }
+                            if self.should_kill {
+                                break 'kq;
+                            }
                         }
                     }
                     EventFilter::EVFILT_USER => {
@@ -654,12 +696,17 @@ impl ProcessRunner {
                     }
                 }
             }
+
+            if self.should_kill {
+                break 'kq;
+            }
         }
 
-        self.cleanup(sender);
+        self.cleanup(&mut sender);
+//        self.cleanup(sender);
     }
 
-    fn cleanup(&mut self, sender: Sender<ContainerManifest>) {
+    fn cleanup(&mut self, stream: &mut UnixStream) {
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
         let kill = jail.kill().context("cannot kill jail").map_err(|e| {
             error!("cannot kill jail: {e}");
@@ -675,27 +722,82 @@ impl ProcessRunner {
         info!("cleaning up at {:#?}", epoch / 1_000_000_000);
         self.container.deleted = Some(epoch);
 
-        sender.send_if_modified(|x| {
-            *x = self.container.serialized();
-            true
-        });
-
+        self.send_update(stream);
         self.container.notify.notify_waiters();
+    }
+
+    fn send_update(&self, stream: &mut UnixStream) {
+        use ipc::proto::{write_request, write_response};
+        use ipc::transport::PacketTransport;
+        let manifest = self.container.serialized();
+        let packet = write_request("update", manifest).unwrap();
+        stream.send_packet(&packet);
     }
 }
 
+// Fork the current process, run the container supervisor in the child process, and the receiving
+// loop in the current process to receive events and update from the container supervisor
 pub fn run(
     container: RunningContainer,
     control_stream: UnixStream,
     auto_start: bool,
 ) -> (i32, Receiver<ContainerManifest>) {
-    let kq = nix::sys::event::kqueue().unwrap();
+
     let (tx, rx) = channel(container.serialized());
-    let mut pr = ProcessRunner::new(kq, container, auto_start);
-    pr.add_control_stream(ControlStream::new(control_stream));
-    let kq = pr.kq;
-    std::thread::spawn(move || {
-        pr.run(tx);
-    });
-    (kq, rx)
+    let (parent, sender) = std::os::unix::net::UnixStream::pair().unwrap();
+
+    if let Ok(fork_result) = unsafe { nix::unistd::fork() } {
+        match fork_result {
+            nix::unistd::ForkResult::Child => {
+                    let kq = nix::sys::event::kqueue().unwrap();
+                    let mut pr = ProcessRunner::new(kq, container, auto_start);
+                    pr.add_control_stream(ControlStream::new(control_stream));
+                    pr.run(sender);
+                    std::process::exit(0);
+            },
+            nix::unistd::ForkResult::Parent { child: _ } => {
+                let kq = nix::sys::event::kqueue().unwrap();
+                let mut recv_events = [KEvent::from_read(parent.as_raw_fd())];
+                kevent_ts(kq, &recv_events, &mut [], None).unwrap();
+                let mut control_stream = ControlStream::new(parent);
+                std::thread::spawn(move || {
+                    'kq: loop {
+                        let nenv = kevent_ts(kq, &[], &mut recv_events, None).unwrap();
+                        let events = &recv_events[..nenv];
+
+                        for event in events {
+                            let bytes = event.data() as usize;
+                            if bytes == 0 {
+                                break 'kq
+                            } else {
+                                match control_stream.try_get_request(event.data() as usize) {
+                                    Err(err) => {
+                                        error!("main loop error: {err:?}");
+                                    }
+                                    Ok(Readiness::Pending) => {}
+                                    Ok(Readiness::Ready((method, request))) => {
+
+                                        if method == "update" {
+                                            let manifest: ContainerManifest =
+                                                serde_json::from_value(request.data).unwrap();
+                                            tx.send_if_modified(|x| {
+                                                *x = manifest;
+                                                true
+                                            });
+                                        } else if method == "event" {
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                (kq, rx)
+            }
+        }
+    } else {
+        panic!()
+    }
 }
+
+

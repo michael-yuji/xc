@@ -37,7 +37,7 @@ use nix::fcntl::{open, OFlag};
 use nix::libc::{ioctl, TIOCNOTTY, TIOCSCTTY};
 use nix::pty::OpenptyResult;
 use nix::sys::stat::Mode;
-use nix::unistd::{chdir, close, dup2, setsid, setuid};
+use nix::unistd::{chdir, close, dup2, setsid, setuid, setgid};
 use serde::Deserialize;
 use std::os::raw::{c_int, c_uint};
 use std::os::unix::process::CommandExt;
@@ -105,6 +105,160 @@ pub fn tag_io_err<S: AsRef<str>>(tag: S, err: std::io::Error) -> std::io::Error 
     )
 }
 
+pub unsafe fn get_gid_in_chroot(root: impl AsRef<Path>, groupname: &str) -> Result<Option<u32>, std::io::Error> {
+    let eventfd = crate::event::EventFdNotify::new();
+    let name = std::ffi::CString::new(groupname)?;
+
+    match nix::unistd::fork()? {
+        nix::unistd::ForkResult::Parent { child } => {
+            let mut exit_code = 255;
+            nix::libc::waitpid(child.as_raw(), &mut exit_code, 0);
+            if exit_code == 0 {
+                let gid = eventfd.notified_sync_take_value()?;
+                Ok(Some(gid as u32 - 1))
+            } else if exit_code == 2 {
+                Ok(None)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "chroot failed",
+                ))
+            }
+        }
+        nix::unistd::ForkResult::Child => {
+            if nix::unistd::chroot(root.as_ref()).is_err() {
+                std::process::exit(1);
+            }
+            let group = nix::libc::getgrnam(name.as_ptr());
+            if group.is_null() {
+                std::process::exit(2);
+            }
+            let gid = (*group).gr_gid;
+            eventfd.notify_waiters_with_value(gid as u64 + 1);
+            eprintln!("after notify");
+            std::process::exit(0)
+        }
+    }
+}
+
+pub unsafe fn get_uid_in_chroot(root: impl AsRef<Path>, username: &str) -> Result<Option<u32>, std::io::Error> {
+    let eventfd = crate::event::EventFdNotify::new();
+    let name = std::ffi::CString::new(username)?;
+
+    match nix::unistd::fork()? {
+        nix::unistd::ForkResult::Parent { child } => {
+            let mut exit_code = 255;
+            nix::libc::waitpid(child.as_raw(), &mut exit_code, 0);
+            if exit_code == 0 {
+                let uid = eventfd.notified_sync_take_value()?;
+                Ok(Some(uid as u32 - 1))
+            } else if exit_code == 2 {
+                Ok(None)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "jail_attach failed",
+                ))
+            }
+        }
+        nix::unistd::ForkResult::Child => {
+            if nix::unistd::chroot(root.as_ref()).is_err() {
+                std::process::exit(1);
+            }
+            let passwd = nix::libc::getpwnam(name.as_ptr());
+            if passwd.is_null() {
+                std::process::exit(2);
+            }
+            let uid = (*passwd).pw_uid;
+            eventfd.notify_waiters_with_value((uid + 1) as u64);
+            eprintln!("after notify");
+            std::process::exit(0)
+        }
+    }
+}
+
+
+pub unsafe fn get_gid_in_jail(jid: i32, groupname: &str) -> Result<Option<u32>, std::io::Error> {
+    let eventfd = crate::event::EventFdNotify::new();
+    let name = std::ffi::CString::new(groupname)?;
+
+    match nix::unistd::fork()? {
+        nix::unistd::ForkResult::Parent { child } => {
+            let mut exit_code = 255;
+            nix::libc::waitpid(child.as_raw(), &mut exit_code, 0);
+            if exit_code == 0 {
+                let gid = eventfd.notified_sync_take_value()?;
+                Ok(Some((gid - 1) as u32))
+            } else if exit_code == 2 {
+                Ok(None)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "jail_attach failed",
+                ))
+            }
+        }
+        nix::unistd::ForkResult::Child => {
+            eprintln!("before jail attache");
+            if jid != 0 {
+                let ret = nix::libc::jail_attach(jid);
+                if ret != 0 {
+                    std::process::exit(1);
+                }
+            }
+            let group = nix::libc::getgrnam(name.as_ptr());
+            if group.is_null() {
+                std::process::exit(2);
+            }
+            let gid = (*group).gr_gid;
+            eventfd.notify_waiters_with_value((gid + 1) as u64);
+            eprintln!("after notify");
+            std::process::exit(0)
+        }
+    }
+}
+
+pub unsafe fn get_uid_in_jail(jid: i32, username: &str) -> Result<Option<u32>, std::io::Error>
+{
+    let eventfd = crate::event::EventFdNotify::new();
+    let name = std::ffi::CString::new(username)?;
+
+    match nix::unistd::fork()? {
+        nix::unistd::ForkResult::Parent { child } => {
+            let mut exit_code = 255;
+            nix::libc::waitpid(child.as_raw(), &mut exit_code, 0);
+            if exit_code == 0 {
+                let uid = eventfd.notified_sync_take_value()?;
+                Ok(Some((uid - 1) as u32))
+            } else if exit_code == 2 {
+                Ok(None)
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "jail_attach failed",
+                ))
+            }
+        }
+        nix::unistd::ForkResult::Child => {
+            eprintln!("before jail attache");
+            if jid != 0 {
+                let ret = nix::libc::jail_attach(jid);
+                if ret != 0 {
+                    std::process::exit(1);
+                }
+            }
+            let passwd = nix::libc::getpwnam(name.as_ptr());
+            if passwd.is_null() {
+                std::process::exit(2);
+            }
+            let uid = (*passwd).pw_uid;
+            eventfd.notify_waiters_with_value(uid as u64 + 1);
+            eprintln!("after notify");
+            std::process::exit(0)
+        }
+    }
+}
+
 extern "C" {
     /// Close all file descriptors >= lowfd
     pub fn closefrom(lowfd: c_int);
@@ -116,11 +270,15 @@ pub trait FreeBSDCommandExt {
     /// std::process:Command, this works for jail as well.
     fn juid(&mut self, uid: u32) -> &mut Command;
 
+    fn jgid(&mut self, gid: u32) -> &mut Command;
+
     /// Detach the child process from controlling terminal, attach to the replica side of the pty
     /// and use it as controlling terminal
     fn pty(&mut self, pty: &OpenptyResult) -> &mut Command;
 
     fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut Command;
+
+    fn delay_exec(&mut self, duration: std::time::Duration) -> &mut Command;
 }
 
 #[cfg(feature = "tokio")]
@@ -128,6 +286,8 @@ pub trait FreeBSDTokioCommandExt {
     /// Set the uid from the process before exec, after clone. Unilke the uid() implementation in
     /// std::process:Command, this works for jail as well.
     fn juid(&mut self, uid: u32) -> &mut tokio::process::Command;
+
+    fn jgid(&mut self, gid: u32) -> &mut tokio::process::Command;
 
     /// Detach the child process from controlling terminal, attach to the replica side of the pty
     /// and use it as controlling terminal
@@ -149,6 +309,17 @@ impl FreeBSDTokioCommandExt for tokio::process::Command {
         }
         self
     }
+
+    fn jgid(&mut self, gid: u32) -> &mut tokio::process::Command {
+        unsafe {
+            self.pre_exec(move || {
+                setgid(nix::unistd::Gid::from_raw(gid))?;
+                Ok(())
+            });
+        }
+        self
+    }
+
 
     fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut tokio::process::Command {
         let os_str = wd.as_ref().to_path_buf().as_os_str().to_os_string();
@@ -205,6 +376,16 @@ impl FreeBSDCommandExt for std::process::Command {
         self
     }
 
+    fn jgid(&mut self, gid: u32) -> &mut Command {
+        unsafe {
+            self.pre_exec(move || {
+                setgid(nix::unistd::Gid::from_raw(gid))?;
+                Ok(())
+            });
+        }
+        self
+    }
+
     fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut Command {
         let os_str = wd.as_ref().to_path_buf().as_os_str().to_os_string();
         unsafe {
@@ -234,6 +415,16 @@ impl FreeBSDCommandExt for std::process::Command {
                 dup2(replica, 1)?;
                 dup2(replica, 2)?;
                 close(replica)?;
+                Ok(())
+            });
+        }
+        self
+    }
+
+    fn delay_exec(&mut self, duration: std::time::Duration) -> &mut Command {
+        unsafe {
+            self.pre_exec(move || {
+                std::thread::sleep(duration);
                 Ok(())
             });
         }

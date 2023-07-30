@@ -25,7 +25,6 @@ mod auth;
 mod config;
 mod context;
 mod devfs_store;
-//mod event_collector;
 mod image;
 mod network_manager;
 mod port;
@@ -66,41 +65,6 @@ pub async fn xmain() -> Result<(), anyhow::Error> {
     let join_handle = ServerContext::create_channel(context, &path)?;
     join_handle.await?;
 
-    /*
-    match ConfigManager::load_from_path(config_path) {
-        Err(error) => {
-            error!("{error:#?}");
-        }
-        Ok(config_manager) => {
-            let xc_config = config_manager.config();
-
-            let log_path = std::path::Path::new(&xc_config.logs_dir);
-            let layers_path = std::path::Path::new(&xc_config.layers_dir);
-
-            if !log_path.exists() || !log_path.is_dir() {
-                if !log_path.is_dir() {
-                    bail!("logs_dir is not a directory!")
-                } else {
-                    std::fs::create_dir_all(log_path).context("cannot create log directory")?;
-                }
-            }
-
-            if !layers_path.exists() || !layers_path.is_dir() {
-                if !layers_path.is_dir() {
-                    anyhow::bail!("layers_dir is not a directory!")
-                } else {
-                    std::fs::create_dir_all(log_path).context("cannot create layer directory")?;
-                }
-            }
-
-            let path = &xc_config.socket_path;
-            info!("config: {xc_config:#?}");
-            let context = Arc::new(RwLock::new(ServerContext::new(config_manager)));
-            let join_handle = ServerContext::create_channel(context, &path)?;
-            join_handle.await?;
-        }
-    }
-    */
     Ok(())
 }
 

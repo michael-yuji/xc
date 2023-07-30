@@ -25,6 +25,7 @@ use super::resolve_environ_order;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::os::fd::RawFd;
+use std::path::PathBuf;
 use varutil::string_interpolation::{InterpolatedString, Var};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -36,8 +37,9 @@ pub enum StdioMode {
     Inherit,
     #[serde(rename = "files")]
     Files {
-        stdout: Option<String>,
-        stderr: Option<String>,
+        // we can't really use /dev/null here because it is possible devfs is not mounted
+        stdout: Option<PathBuf>,
+        stderr: Option<PathBuf>,
     },
     Forward {
         stdin: Option<RawFd>,
@@ -52,34 +54,13 @@ pub struct Jexec {
     pub arg0: String,
     pub args: Vec<String>,
     pub envs: std::collections::HashMap<String, String>,
-    pub uid: u32,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub user: Option<String>,
+    pub group: Option<String>,
     pub output_mode: StdioMode,
     pub notify: Option<RawFd>,
     pub work_dir: Option<String>,
-}
-
-pub struct ResolvedExec {
-    pub exec: String,
-    pub args: Vec<String>,
-    pub env: HashMap<String, String>,
-}
-
-// XXX: unify Jexec and resolve exec
-impl ResolvedExec {
-    pub fn jexec(self) -> Jexec {
-        Jexec {
-            arg0: self.exec,
-            args: self.args,
-            envs: self.env,
-            uid: 0,
-            output_mode: StdioMode::Files {
-                stdout: None,
-                stderr: None,
-            },
-            notify: None,
-            work_dir: None,
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -89,6 +70,11 @@ pub struct Exec {
     pub environ: HashMap<Var, InterpolatedString>,
     #[serde(default)]
     pub clear_env: bool,
+    pub default_args: Vec<InterpolatedString>,
+    pub required_envs: Vec<Var>,
+    pub work_dir: Option<String>,
+    pub user: Option<String>,
+    pub group: Option<String>,
 }
 
 impl Exec {
@@ -115,22 +101,60 @@ impl Exec {
     /// # Arguments
     ///
     /// * `envs` - The parameters
-    pub fn resolve_args(&self, envs: &HashMap<String, String>) -> ResolvedExec {
+    pub fn resolve_args(
+        &self,
+        envs: &HashMap<String, String>,
+        args: &[String],
+    ) -> Result<Jexec, crate::container::error::PreconditionFailure> {
+        let mut argv = Vec::new();
         let mut resolved_envs = if self.clear_env {
             HashMap::new()
         } else {
             envs.clone()
         };
+
         self.resolve_environ(&mut resolved_envs);
 
-        let mut argv = Vec::new();
+        for env in self.required_envs.iter() {
+            if !resolved_envs.contains_key(env.as_str()) {
+                return Err(crate::container::error::PreconditionFailure::new(
+                    freebsd::libc::ENOENT,
+                    anyhow::anyhow!("missing required environment variable {env}"),
+                ));
+            }
+        }
+
         for arg in self.args.iter() {
             argv.push(arg.apply(&resolved_envs));
         }
-        ResolvedExec {
-            exec: self.exec.to_string(),
-            args: argv,
-            env: resolved_envs,
+
+        if args.is_empty() {
+            for arg in self.default_args.iter() {
+                argv.push(arg.apply(&resolved_envs));
+            }
+        } else {
+            for arg in args {
+                argv.push(arg.to_string());
+            }
         }
+
+        let uid = self.user.as_ref().and_then(|user| user.parse::<u32>().ok());
+        let gid = self.user.as_ref().and_then(|group| group.parse::<u32>().ok());
+
+        Ok(Jexec {
+            arg0: self.exec.to_string(),
+            args: argv,
+            envs: resolved_envs,
+            uid,
+            gid,
+            user: self.user.clone(),
+            group: self.group.clone(),
+            output_mode: StdioMode::Files {
+                stdout: None,
+                stderr: None,
+            },
+            notify: None,
+            work_dir: self.work_dir.clone(),
+        })
     }
 }

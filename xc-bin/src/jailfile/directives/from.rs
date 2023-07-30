@@ -85,7 +85,7 @@ impl Directive for FromDirective {
             persist: true,
             main_started_notify: Maybe::None,
             entry_point: Some(EntryPointSpec {
-                entry_point: "main".to_string(),
+                entry_point: None,
                 entry_point_args: Vec::new(),
             }),
             envs: HashMap::new(),

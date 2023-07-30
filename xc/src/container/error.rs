@@ -43,6 +43,10 @@ pub enum ExecError {
     CannotSpawn(std::io::Error),
     #[error("Linux ABI kernel module not loaded")]
     MissingLinuxKmod,
+    #[error("User {0} not found")]
+    NotSuchUser(String),
+    #[error("Group {0} not found")]
+    NotSuchGroup(String),
 }
 
 #[derive(Error, Debug)]

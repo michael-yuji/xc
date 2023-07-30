@@ -28,7 +28,6 @@ pub mod network;
 
 use crate::util::default_on_missing;
 
-use exec::ResolvedExec;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -145,56 +144,6 @@ impl std::fmt::Display for SystemVPropValue {
             SystemVPropValue::Disable => write!(f, "disable"),
             SystemVPropValue::New => write!(f, "new"),
             SystemVPropValue::Inherit => write!(f, "inherit"),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct EntryPoint {
-    pub exec: String,
-    pub args: Vec<InterpolatedString>,
-    #[serde(default)]
-    pub default_args: Vec<InterpolatedString>,
-    pub required_envs: Vec<Var>,
-    pub environ: HashMap<Var, InterpolatedString>,
-    pub work_dir: Option<String>,
-}
-
-impl EntryPoint {
-    pub fn resolve_environ(&self, supplied: &mut HashMap<String, String>) {
-        let order = resolve_environ_order(&self.environ);
-        for key in order.iter() {
-            if !supplied.contains_key(key) {
-                let format = self.environ.get(&Var::new(key.as_str()).unwrap()).unwrap();
-                let value = format.apply(supplied);
-                supplied.insert(key.to_string(), value);
-            }
-        }
-    }
-
-    pub fn resolve_args(&self, envs: &HashMap<String, String>, args: &[String]) -> ResolvedExec {
-        let mut resolved_envs = envs.clone();
-        self.resolve_environ(&mut resolved_envs);
-
-        let mut argv = Vec::new();
-        for arg in self.args.iter() {
-            argv.push(arg.apply(&resolved_envs));
-        }
-
-        if args.is_empty() {
-            for arg in self.default_args.iter() {
-                argv.push(arg.apply(&resolved_envs));
-            }
-        } else {
-            for arg in args {
-                argv.push(arg.to_string())
-            }
-        }
-
-        ResolvedExec {
-            exec: self.exec.to_string(),
-            args: argv,
-            env: resolved_envs,
         }
     }
 }

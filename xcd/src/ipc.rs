@@ -186,9 +186,9 @@ pub struct CopyFile {
     pub destination: String,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct EntryPointSpec {
-    pub entry_point: String,
+    pub entry_point: Option<String>,
     pub entry_point_args: Vec<String>,
 }
 
@@ -218,6 +218,8 @@ pub struct InstantiateRequest {
     pub linux_no_mount_sys: bool,
     pub linux_no_create_proc_dir: bool,
     pub linux_no_mount_proc: bool,
+    pub user: Option<String>,
+    pub group: Option<String>,
 }
 
 impl InstantiateRequest {
@@ -275,6 +277,8 @@ impl Default for InstantiateRequest {
             linux_no_mount_sys: false,
             linux_no_create_proc_dir: false,
             linux_no_mount_proc: false,
+            user: None,
+            group: None
         }
     }
 }
@@ -608,6 +612,27 @@ pub struct ShowContainerRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ShowContainerResponse {
     pub running_container: xc::container::ContainerManifest,
+    pub container_dead: bool,
+}
+
+#[ipc_method(method = "show_container_nocache")]
+async fn show_container_nocache(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: ShowContainerRequest,
+) -> GenericResult<ShowContainerResponse> {
+    let context = context.read().await;
+    if let Some(container) = context
+        .resolve_container_by_name_nocache(&request.id)
+        .await
+    {
+        container.map(|manifest| ShowContainerResponse {
+            running_container: manifest,
+            container_dead: false
+        })
+    } else {
+        enoent("container with such identifier not found")
+    }
 }
 
 #[ipc_method(method = "show_container")]
@@ -616,14 +641,19 @@ async fn show_container(
     local_context: &mut ConnectionContext<Variables>,
     request: ShowContainerRequest,
 ) -> GenericResult<ShowContainerResponse> {
+    let context = context.read().await;
     if let Some(container) = context
-        .read()
-        .await
         .resolve_container_by_name(&request.id)
         .await
     {
         Ok(ShowContainerResponse {
             running_container: container,
+            container_dead: false
+        })
+    } else if let Some(container) = context.find_corpse(&request.id).await {
+        Ok(ShowContainerResponse {
+            running_container: container,
+            container_dead: true
         })
     } else {
         enoent("container with such identifier not found")
@@ -937,7 +967,8 @@ pub struct ExecCommandRequest {
     pub stdin: Maybe<Fd>,
     pub stdout: Maybe<Fd>,
     pub stderr: Maybe<Fd>,
-    pub uid: u32,
+    pub user: Option<String>,
+    pub group: Option<String>,
     pub notify: Maybe<Fd>,
     pub use_tty: bool,
 }
@@ -948,11 +979,18 @@ async fn exec(
     local_context: &mut ConnectionContext<Variables>,
     request: ExecCommandRequest,
 ) -> GenericResult<xc::container::process::SpawnInfo> {
+
+    let uid = request.user.clone().and_then(|user| user.parse::<u32>().ok());
+    let gid = request.group.clone().and_then(|group| group.parse::<u32>().ok());
+
     let jexec = Jexec {
         arg0: request.arg0,
         args: request.args,
         envs: request.envs,
-        uid: request.uid,
+        uid,
+        gid,
+        user: request.user.clone(),
+        group: request.group.clone(),
         output_mode: if request.use_tty {
             StdioMode::Terminal
         } else {
@@ -1141,6 +1179,7 @@ pub(crate) async fn register_to_service(
     service.register(create_network).await;
     service.register(list_networks).await;
     service.register(show_container).await;
+    service.register(show_container_nocache).await;
     service.register(kill_container).await;
     service.register(list_containers).await;
     service.register(login_registry).await;

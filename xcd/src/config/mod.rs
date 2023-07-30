@@ -28,7 +28,7 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::warn;
+use tracing::{info, warn};
 
 fn default_socket_path() -> PathBuf {
     PathBuf::from("/var/run/xc.sock")
@@ -158,15 +158,6 @@ pub struct XcConfig {
 
 impl XcConfig {
     pub fn prepare(&self) -> anyhow::Result<()> {
-        macro_rules! parent_path {
-            ($e:expr) => {
-                {
-                    let mut path = $e.canonicalize()?;
-                    path.pop();
-                    path
-                }
-            }
-        }
 
         macro_rules! wb {
             ($($t:tt)*) => {
@@ -208,16 +199,10 @@ impl XcConfig {
 
         mkdir!(self.layers_dir);
         mkdir!(self.logs_dir);
-
-        let socket_path_parent = parent_path!(self.socket_path);
-        let registries_parent = parent_path!(self.registries);
-        let image_database_parent = parent_path!(self.image_database_store);
-        let database_parent = parent_path!(self.database_store);
-
-        mkdir!(socket_path_parent);
-        mkdir!(registries_parent);
-        mkdir!(image_database_parent);
-        mkdir!(database_parent);
+        mkdir!(self.socket_path.parent().unwrap());
+        mkdir!(self.registries.parent().unwrap());
+        mkdir!(self.image_database_store.parent().unwrap());
+        mkdir!(self.database_store.parent().unwrap());
 
         Ok(())
     }

@@ -125,6 +125,12 @@ pub(crate) struct RunArg {
     #[arg(long = "ip", action)]
     pub(crate) ips: Vec<IpWant>,
 
+    #[arg(long = "user", short = 'u', action)]
+    pub(crate) user: Option<String>,
+
+    #[arg(long = "group", short = 'u', action)]
+    pub(crate) group: Option<String>,
+
     #[arg(long = "copy", /* multiple_occurrences */)]
     pub(crate) copy: Vec<BindMount>,
 

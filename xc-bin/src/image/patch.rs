@@ -25,8 +25,10 @@
 use crate::format::{EnvPair, MaybeEnvPair};
 
 use clap::Parser;
+use xc::models::exec::Exec;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use varutil::string_interpolation::{Var, InterpolatedString};
 use xc::models::jail_image::{JailConfig, SpecialMount};
 use xc::models::{EnvSpec, MountSpec, SystemVPropValue};
 
@@ -38,6 +40,22 @@ pub(crate) enum PatchActions {
         #[arg(short = 'd', long = "description")]
         description: Option<String>,
         env: MaybeEnvPair,
+    },
+    AddExec {
+        #[arg(short = 'e', long = "env")]
+        environ: Vec<MaybeEnvPair>,
+        #[arg(long = "require-env")]
+        require_envs: Vec<Var>,
+        #[arg(short = 'u', long = "user")]
+        user: Option<String>,
+        #[arg(short = 'g', long = "group")]
+        group: Option<String>,
+        #[arg(short = 'w', long = "work-dir")]
+        work_dir: Option<PathBuf>,
+        #[arg(short = 'n', long = "name")]
+        name: String,
+        arg0: String,
+        args: Vec<String>
     },
     /// add a new volume spec to the image
     AddVolume {
@@ -65,7 +83,7 @@ pub(crate) enum PatchActions {
         allows: Vec<String>,
     },
     SysvIpc {
-        #[arg(long = "enable", /*multiple_occurrences = true*/)]
+        #[arg(long = "enable")]
         enable: Vec<String>,
     },
 }
@@ -88,6 +106,48 @@ impl PatchActions {
                     },
                 );
             }
+            PatchActions::AddExec {
+                environ,
+                require_envs,
+                user,
+                group,
+                work_dir,
+                name,
+                arg0,
+                args,
+            } => {
+
+                let exec = arg0.to_string();
+                let default_args = args.iter()
+                    .map(|s| InterpolatedString::new(s).unwrap())
+                    .collect::<Vec<_>>();
+                let mut env = HashMap::new();
+                let mut required_envs = require_envs.clone();
+
+                for envpair in environ.iter() {
+                    if let Some(value) = &envpair.value {
+                        env.insert(envpair.key.clone(), InterpolatedString::new(value).unwrap());
+                    } else {
+                        required_envs.push(envpair.key.clone());
+                    }
+                }
+
+                let work_dir = work_dir.clone().map(|path| path.to_string_lossy().to_string());
+
+                let exec = Exec {
+                    exec,
+                    args: Vec::new(),
+                    environ: env,
+                    clear_env: false,
+                    required_envs,
+                    user: user.clone(),
+                    group: group.clone(),
+                    work_dir,
+                    default_args
+                };
+
+                config.entry_points.insert(name.to_string(), exec);
+            },
             PatchActions::AddVolume {
                 description,
                 hints,

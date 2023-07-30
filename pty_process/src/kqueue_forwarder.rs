@@ -97,15 +97,12 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
         change_list.push(KEvent::from_wait_pid(self.child.id()));
 
         'kqloop: loop {
-            //                        eprintln!("kqueue enter");
             let n_events = kevent_ts(kq, &change_list, &mut event_list, None)?;
-            //                        eprintln!("kqueue get events: {n_events}");
             let event_list = &event_list[..n_events];
 
             change_list.clear();
 
             for event in event_list {
-                //                                eprintln!("processing: {event:?}");
 
                 let evfilt = event.filter().expect("unknown filter flag");
 

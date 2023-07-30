@@ -159,7 +159,8 @@ impl Directive for RunDirective {
             stdin: Maybe::Some(Fd(stdin_b)),
             stdout: Maybe::Some(Fd(stdout_b)),
             stderr: Maybe::Some(Fd(stderr_b)),
-            uid: 0,
+            user: None,
+            group: None,
             notify: Maybe::Some(Fd(notify.as_raw_fd())),
             use_tty: false,
         };

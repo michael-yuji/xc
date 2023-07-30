@@ -33,8 +33,9 @@ use crate::jailfile::parse::Action;
 use anyhow::Context;
 use std::collections::HashMap;
 use varutil::string_interpolation::{InterpolatedString, Var};
+use xc::models::exec::Exec;
 use xc::models::jail_image::{JailConfig, SpecialMount};
-use xc::models::{EntryPoint, EnvSpec, MountSpec, SystemVPropValue};
+use xc::models::{EnvSpec, MountSpec, SystemVPropValue};
 
 pub(crate) trait Directive: Sized {
     fn from_action(action: &Action) -> Result<Self, anyhow::Error>;
@@ -117,13 +118,16 @@ impl ConfigMod {
                 let work_dir = dir.to_string();
                 match config.entry_points.get_mut(entry_point) {
                     None => {
-                        let entrypoint = EntryPoint {
+                        let entrypoint = Exec {
                             exec: String::new(),
                             args: Vec::new(),
                             default_args: Vec::new(),
                             required_envs: Vec::new(),
                             environ: HashMap::new(),
                             work_dir: Some(work_dir),
+                            clear_env: false,
+                            user: None,
+                            group: None,
                         };
                         config
                             .entry_points
@@ -138,13 +142,16 @@ impl ConfigMod {
                 let exec = cmd.to_string();
                 match config.entry_points.get_mut(entry_point) {
                     None => {
-                        let entrypoint = EntryPoint {
+                        let entrypoint = Exec {
                             exec,
                             args: Vec::new(),
                             default_args: Vec::new(),
                             required_envs: Vec::new(),
                             environ: environ.clone(),
                             work_dir: None,
+                            clear_env: false,
+                            user: None,
+                            group: None,
                         };
                         config
                             .entry_points
@@ -167,13 +174,16 @@ impl ConfigMod {
 
                 match config.entry_points.get_mut(entry_point) {
                     None => {
-                        let entrypoint = EntryPoint {
+                        let entrypoint = Exec {
                             exec: String::new(),
                             args: Vec::new(),
                             default_args,
                             required_envs: Vec::new(),
                             environ: HashMap::new(),
                             work_dir: None,
+                            clear_env: false,
+                            user: None,
+                            group: None,
                         };
                         config
                             .entry_points

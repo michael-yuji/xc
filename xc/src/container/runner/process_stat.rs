@@ -23,6 +23,7 @@
 // SUCH DAMAGE.
 
 use crate::container::ProcessStat;
+use crate::container::error::ExecError;
 
 use freebsd::event::EventFdNotify;
 use std::sync::Arc;
@@ -43,6 +44,14 @@ impl ProcessRunnerStat {
     }
     pub(super) fn id(&self) -> &str {
         self.id.as_str()
+    }
+
+    pub(super) fn set_error(&mut self, error: ExecError) {
+        let err = format!("{error:#?}");
+        self.process_stat.send_if_modified(|status| {
+            status.exec_error = Some(err);
+            true
+        });
     }
 
     pub(super) fn set_exited(&mut self, exit_code: i32) {

@@ -24,7 +24,7 @@
 pub mod instantiate;
 
 use crate::auth::Credential;
-use crate::config::config_manager::{ConfigManager, InventoryManager};
+use crate::config::config_manager::InventoryManager;
 use crate::config::inventory::Inventory;
 use crate::config::XcConfig;
 use crate::context::instantiate::InstantiateBlueprint;
@@ -61,6 +61,7 @@ use self::instantiate::AppliedInstantiateRequest;
 pub struct ServerContext {
     pub(crate) network_manager: Arc<Mutex<NetworkManager>>,
     pub(crate) sites: HashMap<String, Arc<RwLock<Site>>>,
+    pub(crate) terminated_sites: Vec<(String, Arc<RwLock<Site>>)>,
 
     // map from alias to container id
     pub(crate) alias_map: TwoWayMap<String, String>,
@@ -109,11 +110,12 @@ impl ServerContext {
             network_manager,
             alias_map: TwoWayMap::new(),
             devfs_store: DevfsRulesetStore::new(
-                config.devfs_id_offset.clone(),
-                config.force_devfs_ruleset.clone(),
+                config.devfs_id_offset,
+                config.force_devfs_ruleset,
             ),
             image_manager: Arc::new(RwLock::new(image_manager)),
             sites: HashMap::new(),
+            terminated_sites: Vec::new(),
             config,
             port_forward_table: PortForwardTable::new(),
             ng2jails: HashMap::new(),
@@ -183,6 +185,27 @@ impl ServerContext {
         let id = self.alias_map.get(name)?;
         let site = self.sites.get(id)?;
         site.read().await.container_dump()
+    }
+
+    pub async fn resolve_container_by_name_nocache(
+        &self,
+        name: &str) -> Option<ipc::proto::GenericResult<ContainerManifest>>
+    {
+        let id = self.alias_map.get(name)?;
+        let site = self.sites.get(id)?;
+        let mut site = site.write().await;
+        let result = site.query_manifest();
+        Some(result)
+//        site.read().await.container_dump()
+    }
+
+    pub async fn find_corpse(&self, id: &str) -> Option<ContainerManifest> {
+        for (cid, container) in self.terminated_sites.iter().rev() {
+            if cid == id {
+                return container.read().await.container_dump()
+            }
+        }
+        None
     }
 
     pub(super) fn get_site(&self, name: &str) -> Option<Arc<RwLock<Site>>> {
@@ -368,10 +391,13 @@ impl ServerContext {
                 error!("error on unwind: {err:#?}");
                 return Err(err);
             }
+
             let mut nm = self.network_manager.lock().await;
+
             let addresses = nm
                 .release_addresses(id)
                 .context("sqlite failure on ip address release")?;
+
             for (key, addresses) in addresses.iter() {
                 let table = format!("xc:network:{key}");
                 info!("pf table: {table}");
@@ -382,6 +408,7 @@ impl ServerContext {
                     }
                 }
             }
+
             self.port_forward_table.remove_rules(id);
             self.reload_pf_rdr_anchor()?;
             self.alias_map.remove_all_referenced(id);
@@ -397,6 +424,8 @@ impl ServerContext {
 
                 self.jail2ngs.remove(id);
             }
+
+            self.terminated_sites.push((id.to_string(), site));
         }
         Ok(())
     }
@@ -484,7 +513,7 @@ impl ServerContext {
             if let Some(main_ip) = container.ip_alloc.first() {
                 let default_ext_ifs = &self.config.ext_ifs;
                 let mut rdr = rdr.clone();
-                rdr.with_host_info(&default_ext_ifs, main_ip.addresses.first().unwrap().clone());
+                rdr.with_host_info(default_ext_ifs, main_ip.addresses.first().unwrap().clone());
                 self.port_forward_table.append_rule(&container.id, rdr);
                 self.reload_pf_rdr_anchor()?;
             }

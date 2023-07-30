@@ -185,6 +185,10 @@ enum Action {
     Exec {
         #[arg(short = 't', action)]
         terminal: bool,
+        #[arg(long = "user", short = 'u')]
+        user: Option<String>,
+        #[arg(long = "group", short = 'g')]
+        group: Option<String>,
         name: String,
         arg0: String,
         args: Vec<String>,
@@ -298,7 +302,6 @@ fn main() -> Result<(), ActionError> {
                 if action.directive_name == "FROM" {
                     let directive = FromDirective::from_action(action)?;
                     directive.run_in_context(&mut context)?;
-                    std::thread::sleep(std::time::Duration::from_millis(500));
                 } else if ConfigMod::implemented_directives()
                     .contains(&action.directive_name.as_str())
                 {
@@ -655,6 +658,8 @@ fn main() -> Result<(), ActionError> {
             publish,
             link,
             ips,
+            user,
+            group,
         }) => {
             if detach && link {
                 panic!("detach and link flags are mutually exclusive");
@@ -664,7 +669,6 @@ fn main() -> Result<(), ActionError> {
                 panic!("--dns-nop and --empty-dns are mutually exclusive");
             }
 
-            let entry_point = entry_point.unwrap_or_else(|| "main".to_string());
             let envs = {
                 let mut map = std::collections::HashMap::new();
                 for env in envs.into_iter() {
@@ -745,7 +749,7 @@ fn main() -> Result<(), ActionError> {
                     ipreq: networks,
                     mount_req,
                     entry_point: Some(EntryPointSpec {
-                        entry_point: entry_point.to_string(),
+                        entry_point,
                         entry_point_args,
                     }),
                     extra_layers,
@@ -753,6 +757,8 @@ fn main() -> Result<(), ActionError> {
                     persist,
                     dns,
                     image_reference,
+                    user,
+                    group,
                     ips: ips.into_iter().map(|v| v.0).collect(),
                     main_started_notify: main_started_notify.clone(),
                     ..InstantiateRequest::default()
@@ -783,11 +789,10 @@ fn main() -> Result<(), ActionError> {
                     if let Maybe::Some(notify) = notify {
                         EventFdNotify::from_fd(notify.as_raw_fd()).notified_sync();
                     }
-
                     let id = res.id;
 
                     if let Ok(container) =
-                        do_show_container(&mut conn, ShowContainerRequest { id })?
+                        do_show_container_nocache(&mut conn, ShowContainerRequest { id })?
                     {
                         let spawn_info = container
                             .running_container
@@ -888,6 +893,8 @@ fn main() -> Result<(), ActionError> {
             name,
             arg0,
             args,
+            user,
+            group
         } => {
             let n = EventFdNotify::new();
             let mut envs = std::collections::HashMap::new();
@@ -918,7 +925,8 @@ fn main() -> Result<(), ActionError> {
                 } else {
                     Maybe::Some(ipc::packet::codec::Fd(2))
                 },
-                uid: 0,
+                user,
+                group,
                 notify: Maybe::Some(ipc::packet::codec::Fd(n.as_raw_fd())),
                 use_tty: terminal,
             };

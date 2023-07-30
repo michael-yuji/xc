@@ -72,7 +72,7 @@ pub struct Site {
     notify: Arc<Notify>,
     pub main_notify: Option<Arc<EventFdNotify>>,
     pub container_notify: Option<Arc<EventFdNotify>>,
-    ctl_channel: Option<i32>,
+//    ctl_channel: Option<i32>,
     state: SiteState,
 
     control_stream: Option<UnixStream>,
@@ -110,7 +110,7 @@ impl Site {
             notify: Arc::new(Notify::new()),
             main_notify: None,
             container_notify: None,
-            ctl_channel: None,
+//            ctl_channel: None,
             state: SiteState::Empty,
             main_started_interests: Vec::new(),
             control_stream: None,
@@ -298,6 +298,32 @@ impl Site {
         }
     }
 
+    pub fn query_manifest(&mut self)
+        -> ipc::proto::GenericResult<xc::container::ContainerManifest>
+    {
+        use ipc::packet::codec::FromPacket;
+        use ipc::proto::{ipc_err, write_request};
+
+        let packet = write_request("query_manifest", ()).unwrap();
+        let Some(stream) = self.control_stream.as_mut() else {
+            return ipc_err(freebsd::libc::ENOENT, "no such control stream")
+        };
+        let _result = stream.send_packet(&packet);
+
+        let Ok(packet) = stream.recv_packet() else {
+            return ipc_err(freebsd::libc::EIO, "no response from container")
+        };
+
+        let response =
+            Response::from_packet(packet, |bytes| serde_json::from_slice(bytes).unwrap());
+
+        if response.errno == 0 {
+            Ok(serde_json::from_value(response.value).unwrap())
+        } else {
+            ipc_err(freebsd::libc::EIO, "something went wrong")
+        }
+    }
+
     /// XXX: CHANGE ME
     pub fn run_main(&mut self, main_notify: Option<EventFdNotify>) {
         let request = Request {
@@ -322,17 +348,11 @@ impl Site {
     }
 
     pub fn kill_conatiner(&mut self) -> anyhow::Result<()> {
-        use freebsd::nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
-        let event = KEvent::new(
-            2,
-            EventFilter::EVFILT_USER,
-            EventFlag::EV_ONESHOT,
-            FilterFlag::NOTE_TRIGGER | FilterFlag::NOTE_FFNOP,
-            0 as freebsd::libc::intptr_t,
-            0 as freebsd::libc::intptr_t,
-        );
         info!(id = self.id, "killing container");
-        _ = kevent_ts(self.ctl_channel.unwrap(), &[event], &mut [], None);
+        let stream = self.control_stream.as_mut().unwrap();
+        let packet = ipc::proto::write_request("kill", ()).unwrap();
+        let Ok(_) = stream.send_packet(&packet) else { return Ok(()) };
+        _ = stream.recv_packet();
         Ok(())
     }
 
@@ -420,7 +440,6 @@ impl Site {
                     xc::container::runner::run(running_container, sock_b, !blueprint.create_only);
 
                 self.container = Some(recv);
-                self.ctl_channel = Some(kq);
                 self.container_notify = Some(container_notify);
                 self.main_notify = Some(main_started_notify);
                 self.state = SiteState::Started;

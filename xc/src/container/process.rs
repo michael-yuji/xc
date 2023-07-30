@@ -41,6 +41,7 @@ pub struct ProcessStat {
     pub exit_code: Option<i32>,
     pub spawn_info: Option<SpawnInfo>,
     pub description: Option<String>,
+    pub exec_error: Option<String>,
 }
 
 impl ProcessStat {
@@ -53,6 +54,7 @@ impl ProcessStat {
             description: None,
             tree_exited: None,
             spawn_info: None,
+            exec_error: None,
         }
     }
 
@@ -65,6 +67,7 @@ impl ProcessStat {
             tree_exited: None,
             description: Some(desc.as_ref().to_string()),
             spawn_info: None,
+            exec_error: None,
         }
     }
 

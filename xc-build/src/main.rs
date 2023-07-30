@@ -23,7 +23,7 @@ struct Args {
     workdir: PathBuf,
 }
 
-struct  BuildContext {
+struct BuildContext {
     stages: Vec<BuildStage>,
 }
 
@@ -40,11 +40,10 @@ fn main() {
         empty_dns,
         output_inplace,
         image_reference,
-        mut workdir
+        mut workdir,
     } = Args::parse();
 
     workdir.push("Jailfile");
 
     let jailfile = std::fs::read_to_string(workdir).expect("cannot open Jailfile");
-
 }

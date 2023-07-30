@@ -40,7 +40,6 @@ use xc::format::devfs_rules::DevfsRule;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
 use xc::models::network::{DnsSetting, IpAssign};
-use xc::models::EntryPoint;
 use xc::precondition_failure;
 
 pub struct AppliedInstantiateRequest {
@@ -96,52 +95,39 @@ impl AppliedInstantiateRequest {
                     args
                 };
 
-                let entry_point =
-                    if let Some(entry_point) = config.entry_points.get(&spec.entry_point) {
+                let selected_entry = match &spec.entry_point {
+                    Some(name) => name.to_string(),
+                    None => config.default_entry_point.unwrap_or_else(|| "main".to_string())
+                };
+
+                let mut entry_point =
+                    if let Some(entry_point) = config.entry_points.get(&selected_entry) {
                         entry_point.clone()
                     } else {
-                        EntryPoint {
-                            exec: spec.entry_point.to_string(),
+                        xc::models::exec::Exec {
+                            exec: selected_entry,
                             args,
                             default_args: Vec::new(),
                             environ: HashMap::new(),
                             work_dir: None,
                             required_envs: Vec::new(),
+                            clear_env: false,
+                            user: request.user.clone(),
+                            group: request.group.clone(),
                         }
                     };
 
-                let entry_point_args = if spec.entry_point_args.is_empty() {
-                    entry_point
-                        .default_args
-                        .iter()
-                        .map(|arg| arg.apply(&envs))
-                        .collect()
-                } else {
-                    spec.entry_point_args.clone()
-                };
-
-                let resolved_env = entry_point.resolve_args(&envs, &entry_point_args);
-                let envs = resolved_env.env;
-
-                for env in entry_point.required_envs.iter() {
-                    let name = env.as_str();
-                    if !envs.contains_key(name) {
-                        precondition_failure!(
-                            ENOENT,
-                            "missing required environment variable {name}"
-                        );
-                    }
+                if request.user.is_some() {
+                    entry_point.user = request.user.clone();
                 }
 
-                Some(Jexec {
-                    arg0: resolved_env.exec,
-                    args: resolved_env.args,
-                    envs,
-                    uid: 0,
-                    output_mode: StdioMode::Terminal,
-                    notify: None,
-                    work_dir: entry_point.work_dir.clone(),
-                })
+                if request.group.is_some() {
+                    entry_point.group = request.group.clone();
+                }
+
+                let mut jexec = entry_point.resolve_args(&envs, &spec.entry_point_args)?;
+                jexec.output_mode = StdioMode::Terminal;
+                Some(jexec)
             }
             None => None,
         };
@@ -242,14 +228,15 @@ impl AppliedInstantiateRequest {
             .init
             .clone()
             .into_iter()
-            .map(|s| s.resolve_args(&envs).jexec())
-            .collect();
+            .map(|s| s.resolve_args(&envs, &[]))
+            .collect::<Result<Vec<_>, _>>()?;
+
         let deinit = config
-            .clone()
             .deinit
+            .clone()
             .into_iter()
-            .map(|s| s.resolve_args(&envs).jexec())
-            .collect();
+            .map(|s| s.resolve_args(&envs, &[]))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut devfs_rules = Vec::new();
         for rule in config.devfs_rules.iter() {
@@ -323,7 +310,16 @@ impl InstantiateBlueprint {
     ) -> anyhow::Result<InstantiateBlueprint> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let config = oci_config.jail_config();
-        let name = request.base.name.unwrap_or_else(|| id.to_string());
+        let name = match request.base.name {
+            None => format!("xc-{id}"),
+            Some(name) => {
+                if name.parse::<isize>().is_ok() {
+                    precondition_failure!(EINVAL, "Jail name cannot be numeric")
+                } else {
+                    name
+                }
+            }
+        };
         let hostname = request.base.hostname.unwrap_or_else(|| name.to_string());
         let vnet = request.base.vnet || config.vnet;
         let envs = request.envs.clone();
