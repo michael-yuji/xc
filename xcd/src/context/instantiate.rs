@@ -317,6 +317,8 @@ impl InstantiateBlueprint {
             Some(name) => {
                 if name.parse::<isize>().is_ok() {
                     precondition_failure!(EINVAL, "Jail name cannot be numeric")
+                } else if name.contains('.') {
+                    precondition_failure!(EINVAL, "Jail name cannot contain dot (.)")
                 } else {
                     name
                 }

@@ -26,6 +26,7 @@ use crate::digest::OciDigest;
 
 use pest::Parser;
 use pest_derive::Parser;
+use serde::de::{Deserializer, Unexpected};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -84,11 +85,32 @@ impl AsRef<str> for ImageTag {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ImageReference {
     pub hostname: Option<String>,
     pub name: String,
     pub tag: ImageTag,
+}
+
+impl Serialize for ImageReference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ImageReference {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let string = String::deserialize(deserializer)?;
+        string.parse::<Self>().map_err(|error| {
+            serde::de::Error::invalid_value(Unexpected::Str(&string), &error.to_string().as_str())
+        })
+    }
 }
 
 impl ImageReference {
