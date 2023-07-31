@@ -84,12 +84,16 @@ pub fn create_cache(
             path = walk_dir.pop().unwrap();
         }
 
-        let Ok(read_dir) = std::fs::read_dir(&path) else { continue };
+        let Ok(read_dir) = std::fs::read_dir(&path) else {
+            continue;
+        };
         let mut known_entries = 0i64;
 
         for entry in read_dir {
             let Ok(entry) = entry else { continue };
-            let Ok(file_type) = entry.file_type() else { continue };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
             let mut p = path.clone();
             p.push(entry.file_name());
             let mut cache_path = cache_dir.clone();
@@ -155,7 +159,7 @@ pub fn is_content_changed(
         }
 
         let Ok(read_dir) = std::fs::read_dir(&path) else {
-            continue
+            continue;
         };
 
         let mut dotdot_xc_dir_cache = cache.clone();
@@ -171,7 +175,9 @@ pub fn is_content_changed(
 
         for entry in read_dir {
             let Ok(entry) = entry else { continue };
-            let Ok(file_type) = entry.file_type() else { continue };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
             let mut p = path.clone();
             p.push(entry.file_name());
 
@@ -182,7 +188,9 @@ pub fn is_content_changed(
             if file_type.is_dir() {
                 walk_dir.push(p.clone());
             } else {
-                let Ok(false) = is_changed(&cache, &p) else { return Ok(true) };
+                let Ok(false) = is_changed(&cache, &p) else {
+                    return Ok(true);
+                };
             }
             expected_entries -= 1;
         }

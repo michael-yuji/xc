@@ -97,7 +97,9 @@ impl AppliedInstantiateRequest {
 
                 let selected_entry = match &spec.entry_point {
                     Some(name) => name.to_string(),
-                    None => config.default_entry_point.unwrap_or_else(|| "main".to_string())
+                    None => config
+                        .default_entry_point
+                        .unwrap_or_else(|| "main".to_string()),
                 };
 
                 let mut entry_point =

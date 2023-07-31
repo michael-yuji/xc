@@ -25,10 +25,10 @@
 use crate::format::{EnvPair, MaybeEnvPair};
 
 use clap::Parser;
-use xc::models::exec::Exec;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use varutil::string_interpolation::{Var, InterpolatedString};
+use varutil::string_interpolation::{InterpolatedString, Var};
+use xc::models::exec::Exec;
 use xc::models::jail_image::{JailConfig, SpecialMount};
 use xc::models::{EnvSpec, MountSpec, SystemVPropValue};
 
@@ -55,7 +55,11 @@ pub(crate) enum PatchActions {
         #[arg(short = 'n', long = "name")]
         name: String,
         arg0: String,
-        args: Vec<String>
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    DefaultEntryPoint {
+        name: String,
     },
     /// add a new volume spec to the image
     AddVolume {
@@ -116,9 +120,9 @@ impl PatchActions {
                 arg0,
                 args,
             } => {
-
                 let exec = arg0.to_string();
-                let default_args = args.iter()
+                let default_args = args
+                    .iter()
                     .map(|s| InterpolatedString::new(s).unwrap())
                     .collect::<Vec<_>>();
                 let mut env = HashMap::new();
@@ -132,7 +136,9 @@ impl PatchActions {
                     }
                 }
 
-                let work_dir = work_dir.clone().map(|path| path.to_string_lossy().to_string());
+                let work_dir = work_dir
+                    .clone()
+                    .map(|path| path.to_string_lossy().to_string());
 
                 let exec = Exec {
                     exec,
@@ -143,11 +149,16 @@ impl PatchActions {
                     user: user.clone(),
                     group: group.clone(),
                     work_dir,
-                    default_args
+                    default_args,
                 };
 
                 config.entry_points.insert(name.to_string(), exec);
-            },
+            }
+            PatchActions::DefaultEntryPoint { name } => {
+                if config.entry_points.contains_key(name) {
+                    config.default_entry_point = Some(name.to_string());
+                }
+            }
             PatchActions::AddVolume {
                 description,
                 hints,

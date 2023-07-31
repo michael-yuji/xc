@@ -37,7 +37,7 @@ use nix::fcntl::{open, OFlag};
 use nix::libc::{ioctl, TIOCNOTTY, TIOCSCTTY};
 use nix::pty::OpenptyResult;
 use nix::sys::stat::Mode;
-use nix::unistd::{chdir, close, dup2, setsid, setuid, setgid};
+use nix::unistd::{chdir, close, dup2, setgid, setsid, setuid};
 use serde::Deserialize;
 use std::os::raw::{c_int, c_uint};
 use std::os::unix::process::CommandExt;
@@ -105,7 +105,10 @@ pub fn tag_io_err<S: AsRef<str>>(tag: S, err: std::io::Error) -> std::io::Error 
     )
 }
 
-pub unsafe fn get_gid_in_chroot(root: impl AsRef<Path>, groupname: &str) -> Result<Option<u32>, std::io::Error> {
+pub unsafe fn get_gid_in_chroot(
+    root: impl AsRef<Path>,
+    groupname: &str,
+) -> Result<Option<u32>, std::io::Error> {
     let eventfd = crate::event::EventFdNotify::new();
     let name = std::ffi::CString::new(groupname)?;
 
@@ -141,7 +144,10 @@ pub unsafe fn get_gid_in_chroot(root: impl AsRef<Path>, groupname: &str) -> Resu
     }
 }
 
-pub unsafe fn get_uid_in_chroot(root: impl AsRef<Path>, username: &str) -> Result<Option<u32>, std::io::Error> {
+pub unsafe fn get_uid_in_chroot(
+    root: impl AsRef<Path>,
+    username: &str,
+) -> Result<Option<u32>, std::io::Error> {
     let eventfd = crate::event::EventFdNotify::new();
     let name = std::ffi::CString::new(username)?;
 
@@ -176,7 +182,6 @@ pub unsafe fn get_uid_in_chroot(root: impl AsRef<Path>, username: &str) -> Resul
         }
     }
 }
-
 
 pub unsafe fn get_gid_in_jail(jid: i32, groupname: &str) -> Result<Option<u32>, std::io::Error> {
     let eventfd = crate::event::EventFdNotify::new();
@@ -218,8 +223,7 @@ pub unsafe fn get_gid_in_jail(jid: i32, groupname: &str) -> Result<Option<u32>, 
     }
 }
 
-pub unsafe fn get_uid_in_jail(jid: i32, username: &str) -> Result<Option<u32>, std::io::Error>
-{
+pub unsafe fn get_uid_in_jail(jid: i32, username: &str) -> Result<Option<u32>, std::io::Error> {
     let eventfd = crate::event::EventFdNotify::new();
     let name = std::ffi::CString::new(username)?;
 
@@ -319,7 +323,6 @@ impl FreeBSDTokioCommandExt for tokio::process::Command {
         }
         self
     }
-
 
     fn jwork_dir(&mut self, wd: impl AsRef<Path>) -> &mut tokio::process::Command {
         let os_str = wd.as_ref().to_path_buf().as_os_str().to_os_string();

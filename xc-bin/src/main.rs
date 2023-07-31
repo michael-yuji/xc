@@ -899,7 +899,7 @@ fn main() -> Result<(), ActionError> {
             arg0,
             args,
             user,
-            group
+            group,
         } => {
             let n = EventFdNotify::new();
             let mut envs = std::collections::HashMap::new();

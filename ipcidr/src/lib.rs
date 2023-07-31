@@ -307,7 +307,9 @@ impl Cidr {
         panic!("")
     }
     pub fn addr_u128(&self) -> u128 {
-        let IpAddr::V6(addr) = self.net else { panic!("") };
+        let IpAddr::V6(addr) = self.net else {
+            panic!("")
+        };
         u128::from(addr)
     }
     pub fn netmask_u32(&self) -> u32 {
@@ -317,11 +319,15 @@ impl Cidr {
         u128::MAX << (128 - self.mask)
     }
     pub fn network_addr_u32(&self) -> u32 {
-        let IpAddr::V4(addr) = self.net else { panic!("") };
+        let IpAddr::V4(addr) = self.net else {
+            panic!("")
+        };
         u32::from(addr) & self.netmask_u32()
     }
     pub fn network_addr_u128(&self) -> u128 {
-        let IpAddr::V6(addr) = self.net else { panic!("") };
+        let IpAddr::V6(addr) = self.net else {
+            panic!("")
+        };
         u128::from(addr) & self.netmask_u128()
     }
     pub fn broadcast_addr_u32(&self) -> u32 {

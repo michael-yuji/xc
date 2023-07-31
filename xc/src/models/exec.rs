@@ -139,7 +139,10 @@ impl Exec {
         }
 
         let uid = self.user.as_ref().and_then(|user| user.parse::<u32>().ok());
-        let gid = self.user.as_ref().and_then(|group| group.parse::<u32>().ok());
+        let gid = self
+            .user
+            .as_ref()
+            .and_then(|group| group.parse::<u32>().ok());
 
         Ok(Jexec {
             arg0: self.exec.to_string(),

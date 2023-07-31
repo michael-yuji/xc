@@ -128,7 +128,9 @@ impl ControlStream {
             let reading_packet = ReadingPacket::new(&mut self.socket).unwrap();
             self.processing = Some(reading_packet);
         }
-        let Some(processing) = self.processing.take() else { panic!() };
+        let Some(processing) = self.processing.take() else {
+            panic!()
+        };
         if processing.ready() {
             Ok(Readiness::Ready(Packet {
                 data: processing.buffer,

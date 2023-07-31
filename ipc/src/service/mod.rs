@@ -31,11 +31,19 @@ use async_trait::async_trait;
 use freebsd::libc::ENOENT;
 use freebsd::net::UnixCredential;
 use std::collections::HashMap;
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+
+#[usdt::provider]
+mod ipc_server_provider {
+    fn received_request(method: &str, data: &serde_json::Value, fds: &[i32]) {}
+    fn send_response(method: &str, errno: i32, data: &serde_json::Value, fds: &[i32]) {}
+    fn accepted_stream(fd: i32) {}
+}
 
 pub struct ConnectionContext<V: Send + Sync> {
     req_count: usize,
@@ -119,10 +127,12 @@ impl<T: Send + Sync + 'static, V: Send + Sync> Stream<T, V> {
         }
 
         while let Ok((method, packet)) = ipc_recv_request(&mut self.stream).await {
+            ipc_server_provider::received_request!(|| (&method, &packet.data, &packet.fds));
+
             tracing::debug!(">>>>> method {method}");
             local.req_count += 1;
             let context = self.context.clone();
-            let response_packet = {
+            let response = {
                 let methods = self.methods.read().await;
                 match methods.get(&method) {
                     None => {
@@ -133,18 +143,24 @@ impl<T: Send + Sync + 'static, V: Send + Sync> Stream<T, V> {
                             errno: ENOENT,
                             value,
                         };
-                        Packet {
+                        TypedPacket {
+                            data: response,
                             fds: Vec::new(),
-                            data: serde_json::to_vec(&response).unwrap(),
                         }
                     }
-                    Some(method) => {
-                        let res = method.apply(context, local, packet).await;
-                        res.map(|data| serde_json::to_vec(&data).unwrap())
-                    }
+                    Some(method) => method.apply(context, local, packet).await,
                 }
             };
-            self.stream.send_packet(&response_packet).await.unwrap();
+
+            ipc_server_provider::send_response!(|| (
+                &method,
+                response.data.errno,
+                &response.data.value,
+                &response.fds
+            ));
+
+            let packet = response.map(|data| serde_json::to_vec(&data).unwrap());
+            self.stream.send_packet(&packet).await.unwrap();
             tracing::debug!("<<<<< method {method}");
         }
         Ok(())
@@ -189,6 +205,7 @@ impl<T: Send + Sync + 'static, V: 'static + Send + Sync> Service<T, V> {
     }
     pub async fn accept(&mut self) -> Result<JoinHandle<()>, std::io::Error> {
         let (stream, _) = self.listener.accept().await?;
+        ipc_server_provider::accepted_stream!(|| (stream.as_raw_fd()));
         let methods = self.methods.clone();
         let context = self.context.clone();
         let delegates = self.delegates.clone();

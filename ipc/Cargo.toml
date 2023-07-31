@@ -15,3 +15,5 @@ thiserror = "1"
 tracing = "0.1"
 nix = { version = "0.25.0", features = ["event"] }
 tokio = { version = "^1.21", features = ["full"] }
+usdt = { git = "https://github.com/michael-yuji/usdt.git" }
+

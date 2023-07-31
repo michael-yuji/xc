@@ -51,7 +51,9 @@ impl Directive for FromDirective {
         let image = action.args.first().expect("no image specified");
         let image_reference: ImageReference = image.parse().expect("invalid image reference");
         if action.args.len() > 1 {
-            let Some("as") = action.args.get(1).map(|s| s.as_str()) else { bail!("unexpected ariable") };
+            let Some("as") = action.args.get(1).map(|s| s.as_str()) else {
+                bail!("unexpected ariable")
+            };
             let alias = action.args.get(2).expect("expected alias");
             Ok(FromDirective {
                 image_reference,

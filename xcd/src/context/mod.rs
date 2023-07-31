@@ -58,6 +58,12 @@ use xc::models::network::*;
 
 use self::instantiate::AppliedInstantiateRequest;
 
+#[usdt::provider]
+mod context_provider {
+    use crate::ipc::InstantiateRequest;
+    fn enter_instantiate(request: &InstantiateRequest) {}
+}
+
 pub struct ServerContext {
     pub(crate) network_manager: Arc<Mutex<NetworkManager>>,
     pub(crate) sites: HashMap<String, Arc<RwLock<Site>>>,
@@ -109,10 +115,7 @@ impl ServerContext {
         ServerContext {
             network_manager,
             alias_map: TwoWayMap::new(),
-            devfs_store: DevfsRulesetStore::new(
-                config.devfs_id_offset,
-                config.force_devfs_ruleset,
-            ),
+            devfs_store: DevfsRulesetStore::new(config.devfs_id_offset, config.force_devfs_ruleset),
             image_manager: Arc::new(RwLock::new(image_manager)),
             sites: HashMap::new(),
             terminated_sites: Vec::new(),
@@ -189,8 +192,8 @@ impl ServerContext {
 
     pub async fn resolve_container_by_name_nocache(
         &self,
-        name: &str) -> Option<ipc::proto::GenericResult<ContainerManifest>>
-    {
+        name: &str,
+    ) -> Option<ipc::proto::GenericResult<ContainerManifest>> {
         let id = self.alias_map.get(name)?;
         let site = self.sites.get(id)?;
         let mut site = site.write().await;
@@ -201,7 +204,7 @@ impl ServerContext {
     pub async fn find_corpse(&self, id: &str) -> Option<ContainerManifest> {
         for (cid, container) in self.terminated_sites.iter().rev() {
             if cid == id {
-                return container.read().await.container_dump()
+                return container.read().await.container_dump();
             }
         }
         None
@@ -270,7 +273,7 @@ impl ServerContext {
         //        eprintln!("chain_ids: {chain_ids:#?}");
 
         let mut file_set: std::collections::HashSet<OciDigest> =
-            std::collections::HashSet::from_iter(files.into_iter());
+            std::collections::HashSet::from_iter(files);
         let mut chain_id_set: std::collections::HashSet<ChainId> =
             std::collections::HashSet::from_iter(chain_ids);
 
@@ -529,6 +532,8 @@ impl ServerContext {
         cred: Credential,
     ) -> anyhow::Result<()> {
         let no_clean = request.no_clean;
+
+        context_provider::enter_instantiate!(|| &request);
 
         let (site, notify) = {
             let this = this.clone();

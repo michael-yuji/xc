@@ -43,12 +43,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::watch::Receiver;
 use tracing::{error, info};
-use xc::precondition_failure;
 use xc::container::effect::UndoStack;
 use xc::container::{ContainerManifest, CreateContainer};
 use xc::models::exec::Jexec;
 use xc::models::jail_image::JailImage;
 use xc::models::network::HostEntry;
+use xc::precondition_failure;
 
 enum SiteState {
     Empty,
@@ -73,7 +73,7 @@ pub struct Site {
     notify: Arc<Notify>,
     pub main_notify: Option<Arc<EventFdNotify>>,
     pub container_notify: Option<Arc<EventFdNotify>>,
-//    ctl_channel: Option<i32>,
+    //    ctl_channel: Option<i32>,
     state: SiteState,
 
     control_stream: Option<UnixStream>,
@@ -113,12 +113,12 @@ impl Site {
             notify: Arc::new(Notify::new()),
             main_notify: None,
             container_notify: None,
-//            ctl_channel: None,
+            //            ctl_channel: None,
             state: SiteState::Empty,
             main_started_interests: Vec::new(),
             control_stream: None,
             hosts_cache: HashMap::new(),
-            aliveness: None
+            aliveness: None,
         }
     }
 
@@ -147,11 +147,13 @@ impl Site {
         }
 
         let Some(stream) = self.control_stream.as_mut() else {
-            return
+            return;
         };
 
         let packet = ipc::proto::write_request("write_hosts", host_entries).unwrap();
-        let Ok(_) = stream.send_packet(&packet) else { return };
+        let Ok(_) = stream.send_packet(&packet) else {
+            return;
+        };
         _ = stream.recv_packet();
     }
 
@@ -283,13 +285,13 @@ impl Site {
         };
 
         let Some(stream) = self.control_stream.as_mut() else {
-            return ipc_err(freebsd::libc::ENOENT, "no much control stream")
+            return ipc_err(freebsd::libc::ENOENT, "no much control stream");
         };
 
         let _result = stream.send_packet(&packet);
 
         let Ok(packet) = stream.recv_packet() else {
-            return ipc_err(freebsd::libc::EIO, "no response from container")
+            return ipc_err(freebsd::libc::EIO, "no response from container");
         };
 
         let response =
@@ -302,14 +304,14 @@ impl Site {
         }
     }
 
-    pub fn query_manifest(&mut self)
-        -> ipc::proto::GenericResult<xc::container::ContainerManifest>
-    {
+    pub fn query_manifest(
+        &mut self,
+    ) -> ipc::proto::GenericResult<xc::container::ContainerManifest> {
         use ipc::packet::codec::FromPacket;
         use ipc::proto::{ipc_err, write_request};
 
         let Some(alive) = &self.aliveness else {
-            return ipc_err(freebsd::libc::ENOENT, "container has not started")
+            return ipc_err(freebsd::libc::ENOENT, "container has not started");
         };
 
         if !*alive.borrow() {
@@ -321,12 +323,12 @@ impl Site {
         } else {
             let packet = write_request("query_manifest", ()).unwrap();
             let Some(stream) = self.control_stream.as_mut() else {
-                return ipc_err(freebsd::libc::ENOENT, "no such control stream")
+                return ipc_err(freebsd::libc::ENOENT, "no such control stream");
             };
             let _result = stream.send_packet(&packet);
 
             let Ok(packet) = stream.recv_packet() else {
-                return ipc_err(freebsd::libc::EIO, "no response from container")
+                return ipc_err(freebsd::libc::EIO, "no response from container");
             };
 
             let response =
@@ -367,7 +369,9 @@ impl Site {
         info!(id = self.id, "killing container");
         let stream = self.control_stream.as_mut().unwrap();
         let packet = ipc::proto::write_request("kill", ()).unwrap();
-        let Ok(_) = stream.send_packet(&packet) else { return Ok(()) };
+        let Ok(_) = stream.send_packet(&packet) else {
+            return Ok(());
+        };
         _ = stream.recv_packet();
         Ok(())
     }

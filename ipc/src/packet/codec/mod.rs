@@ -32,7 +32,7 @@ use std::os::fd::{AsRawFd, RawFd};
 #[derive(Deserialize, Serialize)]
 pub struct FdRef(usize);
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 pub struct Fd(pub RawFd);
 
 impl FromPacket for Fd {
@@ -102,7 +102,7 @@ pub trait FromPacket {
 }
 
 /// Use in-place Vec<T> but without Serialize/Deserialize trait
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct List<T: FromPacket>(Vec<T>);
 
 impl<T: FromPacket> List<T> {
@@ -176,6 +176,18 @@ impl<T: FromPacket> Maybe<T> {
         match self {
             Self::None => None,
             Self::Some(v) => Some(v),
+        }
+    }
+}
+
+impl<T: Serialize + FromPacket> Serialize for Maybe<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Maybe::Some(t) => t.serialize(serializer),
+            Maybe::None => serializer.serialize_none(),
         }
     }
 }

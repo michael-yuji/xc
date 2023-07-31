@@ -391,7 +391,7 @@ impl JailConfig {
         if let Some(config) = &config.config {
             let entrypoint = config.entrypoint.clone().unwrap_or_default();
             let cmd = config.cmd.clone().unwrap_or_default();
-            let work_dir = config.working_dir.clone();//.map(|path| std::path::PathBuf::from(&path));
+            let work_dir = config.working_dir.clone(); //.map(|path| std::path::PathBuf::from(&path));
 
             if !entrypoint.is_empty() || !cmd.is_empty() {
                 let (exec, args, default_args) = if entrypoint.is_empty() {
@@ -435,7 +435,8 @@ impl JailConfig {
                     user: None,
                     group: None,
                 };
-                meta.entry_points.insert("oci_entry_point".to_string(), entry_point);
+                meta.entry_points
+                    .insert("oci_entry_point".to_string(), entry_point);
                 meta.default_entry_point = Some("oci_entry_point".to_string());
             }
         }

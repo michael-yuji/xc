@@ -172,7 +172,7 @@ impl NetworkManager {
         match req {
             NetworkAllocRequest::Any { .. } => {
                 let Some(address) = netpool.next_cidr(&self.db, token)? else {
-                    return Err(Error::AllocationFailure(network_name))
+                    return Err(Error::AllocationFailure(network_name));
                 };
 
                 self.insert_to_cache(token, &network_name, &address.addr());

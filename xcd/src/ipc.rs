@@ -180,7 +180,7 @@ async fn pull_image(
     }
 }
 
-#[derive(FromPacket)]
+#[derive(FromPacket, Serialize)]
 pub struct CopyFile {
     pub source: Fd,
     pub destination: String,
@@ -192,7 +192,7 @@ pub struct EntryPointSpec {
     pub entry_point_args: Vec<String>,
 }
 
-#[derive(FromPacket)]
+#[derive(Serialize, FromPacket)]
 pub struct InstantiateRequest {
     pub image_reference: ImageReference,
     pub alt_root: Option<String>,
@@ -278,7 +278,7 @@ impl Default for InstantiateRequest {
             linux_no_create_proc_dir: false,
             linux_no_mount_proc: false,
             user: None,
-            group: None
+            group: None,
         }
     }
 }
@@ -622,13 +622,10 @@ async fn show_container_nocache(
     request: ShowContainerRequest,
 ) -> GenericResult<ShowContainerResponse> {
     let context = context.read().await;
-    if let Some(container) = context
-        .resolve_container_by_name_nocache(&request.id)
-        .await
-    {
+    if let Some(container) = context.resolve_container_by_name_nocache(&request.id).await {
         container.map(|manifest| ShowContainerResponse {
             running_container: manifest,
-            container_dead: false
+            container_dead: false,
         })
     } else {
         enoent("container with such identifier not found")
@@ -642,18 +639,15 @@ async fn show_container(
     request: ShowContainerRequest,
 ) -> GenericResult<ShowContainerResponse> {
     let context = context.read().await;
-    if let Some(container) = context
-        .resolve_container_by_name(&request.id)
-        .await
-    {
+    if let Some(container) = context.resolve_container_by_name(&request.id).await {
         Ok(ShowContainerResponse {
             running_container: container,
-            container_dead: false
+            container_dead: false,
         })
     } else if let Some(container) = context.find_corpse(&request.id).await {
         Ok(ShowContainerResponse {
             running_container: container,
-            container_dead: true
+            container_dead: true,
         })
     } else {
         enoent("container with such identifier not found")
@@ -979,9 +973,14 @@ async fn exec(
     local_context: &mut ConnectionContext<Variables>,
     request: ExecCommandRequest,
 ) -> GenericResult<xc::container::process::SpawnInfo> {
-
-    let uid = request.user.clone().and_then(|user| user.parse::<u32>().ok());
-    let gid = request.group.clone().and_then(|group| group.parse::<u32>().ok());
+    let uid = request
+        .user
+        .clone()
+        .and_then(|user| user.parse::<u32>().ok());
+    let gid = request
+        .group
+        .clone()
+        .and_then(|group| group.parse::<u32>().ok());
 
     let jexec = Jexec {
         arg0: request.arg0,

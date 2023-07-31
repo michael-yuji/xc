@@ -21,6 +21,8 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use tracing::error;
+use usdt::register_probes;
 use xcd::xmain;
 
 // this enable us to better debug issues via coredump and lldb
@@ -37,6 +39,9 @@ pub fn register_panic_handler() {
 }
 
 fn main() {
+    if let Err(error) = register_probes() {
+        error!("failed register DTrace USDT probes: {error:?}");
+    }
     if std::env::var("XC_PANIC_COREDUMP").is_ok() {
         register_panic_handler();
     }

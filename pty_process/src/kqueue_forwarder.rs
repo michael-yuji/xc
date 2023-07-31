@@ -103,7 +103,6 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
             change_list.clear();
 
             for event in event_list {
-
                 let evfilt = event.filter().expect("unknown filter flag");
 
                 if evfilt == EventFilter::EVFILT_PROC {

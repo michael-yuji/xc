@@ -158,7 +158,6 @@ pub struct XcConfig {
 
 impl XcConfig {
     pub fn prepare(&self) -> anyhow::Result<()> {
-
         macro_rules! wb {
             ($($t:tt)*) => {
                 if self.warn_only {
