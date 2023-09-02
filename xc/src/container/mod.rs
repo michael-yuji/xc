@@ -350,6 +350,9 @@ impl CreateContainer {
             default_router: self.default_router,
             log_directory: self.log_directory.clone(),
             fault: None,
+            created: Some(crate::util::epoch_now_nano()),
+            started: None,
+            finished_at: None,
         })
     }
 }
@@ -381,6 +384,9 @@ pub struct ContainerManifest {
     pub allowing: Vec<String>,
     pub image_reference: Option<ImageReference>,
     pub fault: Option<String>,
+    pub created: Option<u64>,
+    pub started: Option<u64>,
+    pub finished_at: Option<u64>,
 }
 
 impl ContainerManifest {

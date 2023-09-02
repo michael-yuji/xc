@@ -25,7 +25,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xc::res::network::Network;
 
+use crate::volume::Volume;
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Inventory {
+    #[serde(default)]
     pub networks: HashMap<String, Network>,
+    #[serde(default)]
+    pub volumes: HashMap<String, Volume>,
 }

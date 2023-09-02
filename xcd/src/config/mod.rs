@@ -28,7 +28,7 @@ use anyhow::{bail, Context};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::warn;
 
 fn default_socket_path() -> PathBuf {
     PathBuf::from("/var/run/xc.sock")
@@ -71,6 +71,15 @@ pub struct XcConfigArg {
     /// Dataset holding the rootfs of the running containers
     #[arg(long = "container-dataset")]
     pub container_dataset: Option<String>,
+
+    #[arg(long = "default-volume-driver")]
+    pub default_volume_driver: Option<String>,
+
+    #[arg(long = "default-volume-dataset")]
+    pub default_volume_dataset: Option<PathBuf>,
+
+    #[arg(long = "default-volume-directory")]
+    pub default_volume_directory: Option<PathBuf>,
 
     /// Sqlite database storing the rootfs of the images
     #[arg(long = "image-dataset-store")]
@@ -125,6 +134,12 @@ pub struct XcConfig {
 
     /// Dataset for running containers
     pub container_dataset: String,
+
+    pub default_volume_driver: Option<String>,
+
+    pub default_volume_dataset: Option<PathBuf>,
+
+    pub default_volume_directory: Option<PathBuf>,
 
     #[serde(default = "default_database_store")]
     pub image_database_store: PathBuf,
@@ -235,6 +250,10 @@ impl XcConfig {
         );
         if let Some(force_devfs_ruleset) = arg.force_devfs_ruleset {
             self.force_devfs_ruleset = Some(force_devfs_ruleset);
+        } else if let Some(default_volume_dataset) = arg.default_volume_dataset {
+            self.default_volume_dataset = Some(default_volume_dataset);
+        } else if let Some(default_volume_directory) = arg.default_volume_directory {
+            self.default_volume_directory = Some(default_volume_directory);
         }
     }
 }

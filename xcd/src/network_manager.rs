@@ -27,13 +27,13 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tokio::sync::watch::Receiver;
 use xc::container::request::NetworkAllocRequest;
 use xc::models::network::IpAssign;
 use xc::res::network::{Netpool, Network};
 
-use crate::config::inventory::Inventory;
+use crate::config::config_manager::InventoryManager;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetworkInfo {
@@ -62,8 +62,7 @@ impl NetworkInfo {
 
 pub(crate) struct NetworkManager {
     db: Connection,
-    recv: Receiver<Inventory>,
-    // { "conatiner_id": { "network_name": [ "ip_address", ...] }
+    inventory_manager: Arc<Mutex<InventoryManager>>,
     table_cache: HashMap<String, HashMap<String, Vec<IpAddr>>>,
 }
 
@@ -98,20 +97,28 @@ impl From<anyhow::Error> for Error {
 }
 
 impl NetworkManager {
-    pub(crate) fn new(db: Connection, recv: Receiver<Inventory>) -> NetworkManager {
+    pub(crate) fn new(
+        db: Connection,
+        inventory_manager: Arc<Mutex<InventoryManager>>,
+    ) -> NetworkManager {
         NetworkManager {
             db,
-            recv,
+            inventory_manager,
             table_cache: HashMap::new(),
         }
     }
 
     pub(crate) fn has_network(&self, name: &str) -> bool {
-        self.recv.borrow().networks.contains_key(name)
+        self.inventory_manager
+            .lock()
+            .unwrap()
+            .borrow()
+            .networks
+            .contains_key(name)
     }
 
     pub(crate) fn get_network_info(&self) -> Result<Vec<NetworkInfo>, anyhow::Error> {
-        let config = self.recv.borrow().clone();
+        let config = self.inventory_manager.lock().unwrap().borrow().clone();
         let mut info = Vec::new();
         for (name, network) in config.networks.iter() {
             let netpool = Netpool::from_conn(&self.db, name.to_string())?.context("")?;
@@ -126,6 +133,9 @@ impl NetworkManager {
         network: &Network,
     ) -> Result<(), rusqlite::Error> {
         _ = Netpool::create_or_load(&self.db, name, network)?;
+        self.inventory_manager.lock().unwrap().modify(|inventory| {
+            inventory.networks.insert(name.to_string(), network.clone());
+        });
         Ok(())
     }
 
@@ -153,7 +163,7 @@ impl NetworkManager {
         token: &str,
     ) -> Result<(IpAssign, Option<IpAddr>), Error> {
         let network_name = req.network();
-        let config = self.recv.borrow().clone();
+        let config = self.inventory_manager.lock().unwrap().borrow().clone();
         let network = config
             .networks
             .get(&network_name)

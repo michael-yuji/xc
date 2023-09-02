@@ -22,7 +22,7 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use crate::config::XcConfig;
-use crate::context::instantiate::InstantiateBlueprint;
+use crate::instantiate::InstantiateBlueprint;
 
 use anyhow::{anyhow, bail, Context};
 use freebsd::event::{EventFdNotify, Notify};
@@ -48,7 +48,6 @@ use xc::container::{ContainerManifest, CreateContainer};
 use xc::models::exec::Jexec;
 use xc::models::jail_image::JailImage;
 use xc::models::network::HostEntry;
-use xc::precondition_failure;
 
 enum SiteState {
     Empty,
@@ -456,7 +455,7 @@ impl Site {
                 let container_notify = running_container.notify.clone();
                 let main_started_notify = running_container.main_started_notify.clone();
 
-                let (kq, recv, aliveness) =
+                let (_kq, recv, aliveness) =
                     xc::container::runner::run(running_container, sock_b, !blueprint.create_only);
 
                 self.container = Some(recv);

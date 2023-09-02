@@ -64,6 +64,39 @@ pub struct ZfsHandle {
     inherit_stderr: bool,
 }
 
+pub struct ZfsCreate {
+    dataset: PathBuf,
+    properties: HashMap<String, String>,
+    create_ancestors: bool,
+    no_mount: bool,
+}
+
+impl ZfsCreate {
+    /// Create a ZFS create template
+    ///
+    /// # Arguments
+    ///
+    /// * `dataset` - The dataset to be created
+    /// * `create_ancestors` - Also create intermediate datasets
+    /// * `no_mount` - Do no mount the created dataset
+    pub fn new(dataset: impl AsRef<Path>, create_ancestors: bool, no_mount: bool) -> ZfsCreate {
+        ZfsCreate {
+            dataset: dataset.as_ref().to_path_buf(),
+            create_ancestors,
+            no_mount,
+            properties: HashMap::new()
+        }
+    }
+
+    pub fn set_props(&mut self, props: HashMap<String, String>) {
+        self.properties = props;
+    }
+
+    pub fn insert_pop(&mut self, key: &str, value: &str) {
+        self.properties.insert(key.to_string(), value.to_string());
+    }
+}
+
 pub struct ZfsClone {
     dataset: String,
     dest: String,
@@ -259,34 +292,28 @@ impl ZfsHandle {
         })
     }
 
-    /// Create a new ZFS dataset
     pub fn create(
         &self,
-        dataset: impl AsRef<Path>,
-        create_ancestors: bool,
-        no_mount: bool,
-        properties: Option<&[(impl AsRef<str>, impl AsRef<str>)]>,
+        arg: ZfsCreate
     ) -> Result<()> {
         self.use_command(|c| {
             c.arg("create");
-            if no_mount {
+            if arg.no_mount {
                 c.arg("-u");
             }
-            if create_ancestors {
+            if arg.create_ancestors {
                 c.arg("-p");
             }
-            match properties {
-                Some(properties) if !properties.is_empty() => {
+            if !arg.properties.is_empty() {
+                for (key, value) in arg.properties.iter() {
                     c.arg("-o");
-                    for (key, value) in properties {
-                        c.arg(format!("{}={}", key.as_ref(), value.as_ref()));
-                    }
+                    c.arg(format!("{}={}", key, value));
                 }
-                _ => (),
             }
-            c.arg(dataset.as_ref());
+            c.arg(arg.dataset);
         })
     }
+
 
     /// # Arguments
     /// * `dataset`

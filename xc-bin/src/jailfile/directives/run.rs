@@ -31,17 +31,18 @@ use anyhow::{bail, Result};
 use freebsd::event::EventFdNotify;
 use freebsd::event::KEventExt;
 use ipc::packet::codec::{Fd, Maybe};
-use nix::sys::event::{kevent_ts, EventFilter, EventFlag, KEvent};
+use nix::sys::event::{kevent_ts, EventFilter, KEvent};
 use nix::unistd::pipe;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::os::fd::AsRawFd;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use xcd::ipc::*;
 
 #[derive(Debug)]
 enum Input {
+    // XXX: File as input has not yet implemented
     File(File),
     Content(String),
     None,
@@ -157,7 +158,10 @@ impl Directive for RunDirective {
 
                 let mut writer: Box<dyn InputSource> = match &self.input {
                     Input::None => Box::new(VecSlice::new(&[])),
-                    Input::File(_file) => todo!(),
+                    Input::File(_file) => {
+                        error!("using file as stdin has not been implemented");
+                        todo!()
+                    },
                     Input::Content(content) => Box::new(VecSlice::new(content.as_bytes())),
                 };
 
@@ -184,11 +188,13 @@ impl Directive for RunDirective {
                                         ) {
                                             Err(err) => {
                                                 error!("cannot read from remote stdout: {err}");
-                                                nix::unistd::close(fd);
+                                                if let Err(err) = nix::unistd::close(fd) {
+                                                    warn!("cannot close receiving end of remote stdout pipe: {err}")
+                                                }
                                             }
                                             Ok(bytes) => {
                                                 available -= bytes;
-                                                std::io::stdout().write_all(&stdout_buf[..bytes]);
+                                                _ = std::io::stdout().write_all(&stdout_buf[..bytes]);
                                             }
                                         }
                                     }
@@ -200,11 +206,13 @@ impl Directive for RunDirective {
                                         ) {
                                             Err(err) => {
                                                 error!("cannot read from remote stderr: {err}");
-                                                nix::unistd::close(fd);
+                                                if let Err(err) = nix::unistd::close(fd) {
+                                                    warn!("cannot close receiving end of remote stderr pipe: {err}")
+                                                }
                                             }
                                             Ok(bytes) => {
                                                 available -= bytes;
-                                                std::io::stderr().write_all(&stderr_buf[..bytes]);
+                                                _ = std::io::stderr().write_all(&stderr_buf[..bytes]);
                                             }
                                         }
                                     }
@@ -222,7 +230,7 @@ impl Directive for RunDirective {
                                 match nix::unistd::write(fd, &write_buf[..bytes_to_write]) {
                                     Err(err) => {
                                         error!("cannot write to remote process stdin: {err}");
-                                        nix::unistd::close(fd);
+                                        _ = nix::unistd::close(fd);
                                     }
                                     Ok(bytes) => {
                                         if bytes != bytes_to_write {
@@ -237,18 +245,8 @@ impl Directive for RunDirective {
                                         }
                                     }
                                 }
-                                //                                let cancel_flags = EventFlag::EV_DISABLE | EventFlag::EV_DELETE;
-                                eprintln!("check if empty");
                                 if writer.is_empty() {
-                                    eprintln!("registering cancel event");
-                                    /*
-                                    kevent_ts(
-                                        kq,
-                                        &[KEvent::from_write(fd).set_flags(cancel_flags)],
-                                        &mut [],
-                                        None);
-                                        */
-                                    nix::unistd::close(fd);
+                                    _ = nix::unistd::close(fd);
                                 }
                             }
                             _ => unreachable!(),
@@ -256,10 +254,18 @@ impl Directive for RunDirective {
                     }
                 }
 
-                nix::unistd::close(kq);
-                nix::unistd::close(stdout_a);
-                nix::unistd::close(stderr_a);
-                nix::unistd::close(stdin_a);
+                if let Err(err) = nix::unistd::close(kq) {
+                    warn!("cannot close kq fd: {err}")
+                }
+                if let Err(err) = nix::unistd::close(stdout_a) {
+                    warn!("cannot close stdout pipe: {err}")
+                }
+                if let Err(err) = nix::unistd::close(stderr_a) {
+                    warn!("cannot close stderr pipe: {err}")
+                }
+                if let Err(err) = nix::unistd::close(stdin_a) {
+                    warn!("cannot close stdin pipe: {err}")
+                }
                 Ok(())
             }
             Err(err) => bail!("exec failure: {err:?}"),

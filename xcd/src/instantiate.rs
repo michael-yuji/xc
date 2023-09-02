@@ -26,10 +26,11 @@ use crate::auth::Credential;
 use crate::devfs_store::DevfsRulesetStore;
 use crate::ipc::InstantiateRequest;
 use crate::network_manager::NetworkManager;
+use crate::volume::{VolumeManager, Volume};
 
 use anyhow::Context;
 use freebsd::event::EventFdNotify;
-use freebsd::libc::{EEXIST, EINVAL, EIO, ENOENT, ENOTDIR, EPERM};
+use freebsd::libc::{EINVAL, EIO, ENOENT, EPERM};
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -60,6 +61,7 @@ impl AppliedInstantiateRequest {
         oci_config: &JailImage,
         cred: &Credential,
         network_manager: &NetworkManager,
+        volume_manager: &VolumeManager,
     ) -> anyhow::Result<AppliedInstantiateRequest> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let available_allows = xc::util::jail_allowables();
@@ -178,39 +180,43 @@ impl AppliedInstantiateRequest {
 
         for req in request.mount_req.iter() {
             let source_path = std::path::Path::new(&req.source);
-            if !source_path.exists() {
-                precondition_failure!(ENOENT, "source mount point does not exist: {source_path:?}");
-            }
-            if !source_path.is_dir() && !source_path.is_file() {
-                precondition_failure!(
-                    ENOTDIR,
-                    "mount point source is not a file nor directory: {source_path:?}"
-                )
-            }
-            let Ok(meta) = std::fs::metadata(source_path) else {
-                precondition_failure!(ENOENT, "invalid nullfs mount source")
+
+            let volume = if !source_path.is_absolute() {
+                let name = source_path.to_string_lossy().to_string();
+                match volume_manager.query_volume(&name) {
+                    None => {
+                        precondition_failure!(ENOENT, "no such volume {name}")
+                    },
+                    Some(volume) => {
+                        if !volume.can_mount(cred.uid()) {
+                            precondition_failure!(EPERM, "this user is not allowed to mount the volume")
+                        } else {
+                            volume
+                        }
+                    }
+                }
+            } else {
+                Volume::adhoc(source_path)
             };
 
-            if !cred.can_mount(&meta, false) {
-                precondition_failure!(EPERM, "permission denied: {source_path:?}")
+            let mount_spec = mount_specs.remove(&req.dest);
+
+            if mount_spec.is_some() {
+                added_mount_specs.insert(&req.dest, mount_spec.clone().unwrap());
             }
 
-            if let Some(mount_spec) = mount_specs.remove(&req.dest) {
-                // XXX: mount options
-                let mut mount = Mount::nullfs(&req.source, &mount_spec.destination);
-                if mount_spec.read_only {
-                    mount.options.push("ro".to_string());
+            let mount = volume_manager.mount(cred, req, mount_spec.as_ref(), &volume)?;
+/*
+            let mount = match volume.driver {
+                VolumeDriverKind::Directory => {
+                    LocalDriver::default().mount(cred, req, mount_spec.as_ref(), &volume)?
+                },
+                VolumeDriverKind::ZfsDataset => {
+                    ZfsDriver::default().mount(cred, req, mount_spec.as_ref(), &volume)?
                 }
-                mount_req.push(mount);
-                added_mount_specs.insert(&req.dest, mount_spec);
-            } else if req.dest.starts_with('/') {
-                // use snapdir to check destination mount-ability
-                mount_req.push(Mount::nullfs(&req.source, &req.dest));
-            } else if added_mount_specs.get(&req.dest).is_some() {
-                precondition_failure!(EEXIST, "duplicated mount detected {}", &req.dest);
-            } else {
-                precondition_failure!(ENOENT, "no such volume {}", &req.dest);
-            }
+            };
+*/
+            mount_req.push(mount);
         }
 
         for (key, spec) in mount_specs.iter() {
@@ -305,9 +311,8 @@ impl InstantiateBlueprint {
         id: &str,
         oci_config: &JailImage,
         request: AppliedInstantiateRequest,
-        //request: InstantiateRequest,
         devfs_store: &mut DevfsRulesetStore,
-        cred: &Credential,
+        _cred: &Credential,
         network_manager: &mut NetworkManager,
     ) -> anyhow::Result<InstantiateBlueprint> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;

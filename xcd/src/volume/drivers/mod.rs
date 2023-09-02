@@ -21,3 +21,29 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+pub mod local;
+pub mod zfs;
+
+use crate::auth::Credential;
+use super::Volume;
+use std::collections::HashMap;
+use xc::container::{error::PreconditionFailure, request::{Mount, MountReq}};
+use xc::models::MountSpec;
+
+pub trait VolumeDriver {
+    fn mount(
+        &self,
+        cred: &Credential,
+        mount_req: &MountReq,
+        mount_spec: Option<&MountSpec>,
+        volume: &Volume) -> Result<Mount, PreconditionFailure>;
+
+    fn create(
+        &self,
+        name: &str,
+        template: Option<MountSpec>,
+        source: Option<std::path::PathBuf>,
+        props: HashMap<String, String>
+    ) -> Result<Volume, PreconditionFailure>;
+
+}

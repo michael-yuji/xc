@@ -30,6 +30,7 @@ mod jailfile;
 mod network;
 mod redirect;
 mod run;
+mod volume;
 
 use crate::channel::{use_channel_action, ChannelAction};
 use crate::error::ActionError;
@@ -39,6 +40,7 @@ use crate::jailfile::directives::volume::VolumeDirective;
 use crate::network::{use_network_action, NetworkAction};
 use crate::redirect::{use_rdr_action, RdrAction};
 use crate::run::{CreateArgs, RunArg};
+use crate::volume::{use_volume_action, VolumeAction};
 
 use clap::Parser;
 use freebsd::event::{eventfd, EventFdNotify};
@@ -194,6 +196,8 @@ enum Action {
         #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
         args: Vec<String>,
     },
+    #[command(subcommand)]
+    Volume(VolumeAction),
 }
 
 fn main() -> Result<(), ActionError> {
@@ -555,10 +559,14 @@ fn main() -> Result<(), ActionError> {
             let mount_req = mounts
                 .iter()
                 .map(|mount| {
-                    let source = std::fs::canonicalize(mount.source.clone())
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string();
+                    let source = if mount.source.starts_with('.') || mount.source.starts_with('/') {
+                        std::fs::canonicalize(mount.source.clone())
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string()
+                    } else {
+                        mount.source.to_string()
+                    };
                     MountReq {
                         source,
                         dest: mount.destination.clone(),
@@ -699,10 +707,14 @@ fn main() -> Result<(), ActionError> {
             let mount_req = mounts
                 .iter()
                 .map(|mount| {
-                    let source = std::fs::canonicalize(mount.source.clone())
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string();
+                    let source = if mount.source.starts_with('.') || mount.source.starts_with('/') {
+                        std::fs::canonicalize(mount.source.clone())
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string()
+                    } else {
+                        mount.source.to_string()
+                    };
                     MountReq {
                         source,
                         dest: mount.destination.clone(),
@@ -945,6 +957,9 @@ fn main() -> Result<(), ActionError> {
                 std::process::exit((exit.unwrap_or(2) - 1) as i32)
                 */
             }
+        }
+        Action::Volume(action) => {
+            use_volume_action(&mut conn, action)?;
         }
     };
 

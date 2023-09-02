@@ -83,6 +83,12 @@ pub struct RunningContainer {
     pub log_directory: Option<PathBuf>,
 
     pub fault: Option<String>,
+
+    pub created: Option<u64>,
+
+    pub finished_at: Option<u64>,
+
+    pub started: Option<u64>,
 }
 
 impl RunningContainer {
@@ -181,6 +187,9 @@ impl RunningContainer {
             allowing: self.allowing.clone(),
             image_reference: self.image_reference.clone(),
             fault: self.fault.clone(),
+            started: self.started,
+            finished_at: self.finished_at,
+            created: self.created,
         }
     }
 }

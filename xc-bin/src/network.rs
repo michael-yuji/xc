@@ -24,6 +24,7 @@
 use clap::Subcommand;
 use std::net::IpAddr;
 use std::os::unix::net::UnixStream;
+use tracing::error;
 use xcd::ipc::*;
 
 #[derive(Subcommand, Debug)]
@@ -62,19 +63,24 @@ pub(crate) fn use_network_action(
             network,
             container,
         } => {
+            let netgroup_name = network.to_string();
             let request = NetgroupAddContainerRequest {
-                netgroup_name: network,
+                netgroup_name,
                 container_name: container,
                 auto_create_netgroup: true,
                 commit_immediately: !no_commit,
             };
-            do_add_container_to_netgroup(conn, request)?;
+            if let Err(err) = do_add_container_to_netgroup(conn, request)? {
+                error!("Cannot add container to netgroup {network}: {err:?}")
+            }
         }
         NetworkAction::CommitTag { network } => {
             let request = NetgroupCommit {
                 netgroup_name: network.to_string(),
             };
-            do_commit_netgroup(conn, request)?;
+            if let Err(err) = do_commit_netgroup(conn, request)? {
+                error!("Cannot commit netgroup {network}: {err:?}")
+            }
         }
         NetworkAction::List => {
             let req = ListNetworkRequest {};

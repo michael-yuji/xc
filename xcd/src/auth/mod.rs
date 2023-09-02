@@ -40,6 +40,10 @@ pub struct Credential {
 }
 
 impl Credential {
+    pub(crate) fn uid(&self) -> u32 {
+        self.unix_credential.uid
+    }
+
     pub(crate) fn from_conn_ctx(cctx: &ConnectionContext<Variables>) -> Credential {
         let unix_credential = cctx.unix_credential.clone().unwrap();
         Credential {

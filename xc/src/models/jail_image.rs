@@ -51,6 +51,7 @@ pub struct Version {
     tag: u32,
 }
 
+#[allow(unused)]
 impl Version {
     fn prehistorial() -> Version {
         Version {

@@ -223,6 +223,60 @@ pub unsafe fn get_gid_in_jail(jid: i32, groupname: &str) -> Result<Option<u32>, 
     }
 }
 
+pub fn get_username(uid: u32) -> Result<Option<String>, std::io::Error> {
+    unsafe {
+        let mut pw: nix::libc::passwd = std::mem::zeroed();
+        let mut result: *mut nix::libc::passwd = std::ptr::null_mut();
+        let mut bufsize = nix::libc::sysconf(nix::libc::_SC_GETPW_R_SIZE_MAX);
+        if bufsize == -1 {
+            bufsize = 8192;
+        }
+        let mut buffer = vec![0i8; bufsize as usize];
+        if nix::libc::getpwuid_r(
+            uid,
+            &mut pw,
+            buffer.as_mut_ptr(),
+            bufsize as usize,
+            &mut result,
+        ) != 0
+        {
+            Err(std::io::Error::last_os_error())
+        } else if result.is_null() {
+            Ok(None)
+        } else {
+            let cstring = std::ffi::CString::from_raw(pw.pw_name);
+            Ok(Some(cstring.to_string_lossy().to_string()))
+        }
+    }
+}
+
+pub fn get_uid(username: impl AsRef<str>) -> Result<Option<u32>, std::io::Error> {
+    let name = std::ffi::CString::new(username.as_ref())?;
+    unsafe {
+        let mut pw: nix::libc::passwd = std::mem::zeroed();
+        let mut result: *mut nix::libc::passwd = std::ptr::null_mut();
+        let mut bufsize = nix::libc::sysconf(nix::libc::_SC_GETPW_R_SIZE_MAX);
+        if bufsize == -1 {
+            bufsize = 8192;
+        }
+        let mut buffer = vec![0i8; bufsize as usize];
+        if nix::libc::getpwnam_r(
+            name.as_ptr(),
+            &mut pw,
+            buffer.as_mut_ptr(),
+            bufsize as usize,
+            &mut result,
+        ) != 0
+        {
+            Err(std::io::Error::last_os_error())
+        } else if result.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(pw.pw_uid))
+        }
+    }
+}
+
 pub unsafe fn get_uid_in_jail(jid: i32, username: &str) -> Result<Option<u32>, std::io::Error> {
     let eventfd = crate::event::EventFdNotify::new();
     let name = std::ffi::CString::new(username)?;

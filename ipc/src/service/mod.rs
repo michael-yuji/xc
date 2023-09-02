@@ -22,7 +22,7 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use crate::packet::codec::json::JsonPacket;
-use crate::packet::{Packet, TypedPacket};
+use crate::packet::TypedPacket;
 use crate::proto::{IpcError, Request, Response};
 use crate::transport::tokio_io::AsyncPacketTransport;
 use crate::transport::ChannelError;

@@ -26,23 +26,24 @@ mod config;
 mod context;
 mod devfs_store;
 mod image;
+mod instantiate;
 mod network_manager;
 mod port;
 mod registry;
 mod site;
 mod task;
 mod util;
+pub mod volume;
 
 pub mod ipc;
 
-use crate::config::{config_manager::ConfigManager, XcConfig};
+use crate::config::XcConfig;
 
-use anyhow::{bail, Context};
 use clap::Parser;
 use context::ServerContext;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info};
+use tracing::info;
 
 pub async fn xmain() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
@@ -51,7 +52,7 @@ pub async fn xmain() -> Result<(), anyhow::Error> {
     let config_path = &args.config_dir;
     info!("loading configuration from {config_path:?}");
 
-    let config_file = std::fs::OpenOptions::new().read(true).open(&config_path)?;
+    let config_file = std::fs::OpenOptions::new().read(true).open(config_path)?;
 
     let mut config: XcConfig = serde_yaml::from_reader(config_file)?;
     config.merge(args);

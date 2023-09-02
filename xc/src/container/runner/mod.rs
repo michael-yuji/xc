@@ -45,12 +45,12 @@ use jail::process::Jailed;
 use nix::libc::intptr_t;
 use nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
 use std::collections::{HashMap, VecDeque};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::watch::{channel, Receiver, Sender};
+use tokio::sync::watch::{channel, Receiver};
 use tracing::{debug, error, info, trace, warn};
 
 #[usdt::provider]
@@ -71,14 +71,13 @@ pub struct ProcessRunner {
 
     control_streams: HashMap<i32, ControlStream>,
 
-    created: Option<u64>,
-
-    /// This field records the epoch seconds when the container is "started", which defined by a
-    /// container that has completed its init-routine
-    started: Option<u64>,
-
-    finished_at: Option<u64>,
-
+    //    created: Option<u64>,
+    //
+    //    /// This field records the epoch seconds when the container is "started", which defined by a
+    //    /// container that has completed its init-routine
+    //    started: Option<u64>,
+    //
+    //    finished_at: Option<u64>,
     /// If `auto_start` is true, the container executes its init routine automatically after
     /// creation
     auto_start: bool,
@@ -367,9 +366,6 @@ impl ProcessRunner {
             parent_map: HashMap::new(),
             descentdant_map: HashMap::new(),
             control_streams: HashMap::new(),
-            created: None,
-            started: None,
-            finished_at: None,
             spawn_queue: VecDeque::new(),
             inits: SerialExec::new("init", container.init_proto.clone(), !container.init_norun),
             deinits: SerialExec::new("deinit", container.deinit_proto.clone(), false),
@@ -462,8 +458,8 @@ impl ProcessRunner {
     }
 
     fn start(&mut self) {
-        if self.started.is_none() {
-            self.started = Some(epoch_now_nano());
+        if self.container.started.is_none() {
+            self.container.started = Some(epoch_now_nano());
             if self.inits.is_empty() && !self.container.main_norun {
                 self.run_main();
             } else if let Some((id, jexec)) = self.inits.pop_front() {
@@ -530,7 +526,7 @@ impl ProcessRunner {
                             stat.set_tree_exited();
                             if stat.id() == "main" {
                                 self.main_exited = true;
-                                self.finished_at = Some(epoch_now_nano());
+                                self.container.finished_at = Some(epoch_now_nano());
                                 if (self.container.deinit_norun || self.deinits.is_empty())
                                     && !self.container.persist
                                 {
@@ -592,7 +588,7 @@ impl ProcessRunner {
                     Ok(spawn_info) => {
                         debug!("{id} spawn: {spawn_info:#?}");
                         if id == "main" {
-                            self.started = Some(epoch_now_nano());
+                            self.container.started = Some(epoch_now_nano());
                             self.send_update(&mut sender);
                             self.container.main_started_notify.notify_waiters();
                         }
@@ -606,7 +602,7 @@ impl ProcessRunner {
                                 .notify_waiters_with_value(2);
 
                             self.main_exited = true;
-                            self.finished_at = Some(epoch_now_nano());
+                            self.container.finished_at = Some(epoch_now_nano());
                             if (self.container.deinit_norun || self.deinits.is_empty())
                                 && !self.container.persist
                             {

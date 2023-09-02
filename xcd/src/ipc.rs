@@ -26,6 +26,7 @@ use crate::auth::Credential;
 use crate::context::ServerContext;
 use crate::image::pull::PullImageError;
 use crate::image::push::{PushImageError, PushImageStatusDesc};
+use crate::volume::{Volume, VolumeDriverKind};
 use freebsd::event::EventFdNotify;
 use freebsd::libc::{EINVAL, EIO};
 use ipc::packet::codec::{Fd, FromPacket, List, Maybe};
@@ -36,11 +37,13 @@ use oci_util::digest::OciDigest;
 use oci_util::distribution::client::{BasicAuth, Registry};
 use oci_util::image_reference::{ImageReference, ImageTag};
 use serde::{Deserialize, Serialize};
+use xc::image_store::ImageStoreError;
 use std::collections::HashMap;
 use std::io::Seek;
 use std::net::IpAddr;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::*;
@@ -294,7 +297,6 @@ async fn instantiate(
     load_context: &mut ConnectionContext<Variables>,
     request: InstantiateRequest,
 ) -> GenericResult<InstantiateResponse> {
-    //    let id = Uuid::new_v4().to_string();
     let id = gen_id();
 
     if request
@@ -577,9 +579,6 @@ async fn create_network(
         match nm.create_network(&request.name, &network) {
             Ok(_) => {
                 info!("created new network: {}", request.name);
-                context.inventory.modify_config(|config| {
-                    config.networks.insert(request.name.to_string(), network);
-                });
                 Ok(())
             }
             Err(e) => {
@@ -1049,7 +1048,7 @@ async fn add_container_to_netgroup(
     if let Some(container_id) = context.alias_map.get(&request.container_name) {
         let cid = container_id.to_string();
 
-        let js = if let Some(jails) = context.ng2jails.get_mut(&request.netgroup_name) {
+        let _ = if let Some(jails) = context.ng2jails.get_mut(&request.netgroup_name) {
             jails.push(cid.to_string());
             jails.clone()
         } else if request.auto_create_netgroup {
@@ -1132,6 +1131,66 @@ async fn push_image(
         })
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateVolumeRequest {
+    pub name: String,
+    pub template: Option<(ImageReference, String)>,
+    pub device: Option<PathBuf>,
+    pub zfs_props: HashMap<String, String>,
+    pub kind: VolumeDriverKind
+}
+
+#[ipc_method(method = "create_volume")]
+async fn create_volume(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: CreateVolumeRequest,
+) -> GenericResult<()>
+{
+    let template = match request.template {
+        None => None,
+        Some((image_reference, volume)) => {
+            match context.read().await.image_manager.read().await.query_manifest(&image_reference).await {
+                Ok(image) => {
+                    let specs = image.manifest.jail_config().mounts;
+                    specs.get(&volume).cloned()
+                },
+                Err(ImageStoreError::ManifestNotFound(manifest)) => {
+                    return enoent(&format!("no such manifest {manifest}"))
+                }
+                Err(ImageStoreError::TagNotFound(a, b)) => {
+                    return enoent(&format!("no such image {a}:{b}"))
+                }
+                Err(error) => {
+                    return ipc_err(EINVAL, &format!("image store error: {error:?}"))
+                }
+            }
+        }
+    };
+
+    if let Err(err) = context.write().await.create_volume(
+        &request.name,
+        template,
+        request.kind,
+        request.device,
+        request.zfs_props).await
+    {
+        ipc_err(err.errno(), &err.error_message())
+    } else {
+        Ok(())
+    }
+}
+
+#[ipc_method(method = "list_volumes")]
+async fn list_volumes(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: ()
+) -> GenericResult<HashMap<String, Volume>>
+{
+    Ok(context.read().await.list_volumes().await)
+}
+
 #[allow(non_upper_case_globals)]
 const on_channel_closed: OnChannelClosed = OnChannelClosed {};
 
@@ -1161,6 +1220,8 @@ pub(crate) async fn register_to_service(
     service: &mut Service<tokio::sync::RwLock<ServerContext>, Variables>,
 ) {
     service.register_event_delegate(on_channel_closed).await;
+    service.register(create_volume).await;
+    service.register(list_volumes).await;
     service.register(commit_netgroup).await;
     service.register(add_container_to_netgroup).await;
     service.register(purge).await;

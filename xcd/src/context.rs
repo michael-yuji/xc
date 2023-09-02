@@ -21,13 +21,12 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-pub mod instantiate;
 
 use crate::auth::Credential;
 use crate::config::config_manager::InventoryManager;
 use crate::config::inventory::Inventory;
 use crate::config::XcConfig;
-use crate::context::instantiate::InstantiateBlueprint;
+use crate::instantiate::{InstantiateBlueprint, AppliedInstantiateRequest};
 use crate::devfs_store::DevfsRulesetStore;
 use crate::image::pull::PullImageError;
 use crate::image::ImageManager;
@@ -37,6 +36,7 @@ use crate::port::PortForwardTable;
 use crate::registry::JsonRegistryProvider;
 use crate::site::Site;
 use crate::util::TwoWayMap;
+use crate::volume::{VolumeManager, Volume, VolumeDriverKind};
 
 use anyhow::Context;
 use freebsd::fs::zfs::ZfsHandle;
@@ -44,6 +44,7 @@ use freebsd::net::pf;
 use oci_util::digest::OciDigest;
 use oci_util::image_reference::{ImageReference, ImageTag};
 use oci_util::layer::ChainId;
+use xc::container::error::PreconditionFailure;
 use std::collections::HashMap;
 use std::os::fd::{FromRawFd, RawFd};
 use std::str::FromStr;
@@ -54,9 +55,8 @@ use xc::container::ContainerManifest;
 use xc::image_store::sqlite::SqliteImageStore;
 use xc::image_store::ImageRecord;
 use xc::models::jail_image::{JailConfig, JailImage};
-use xc::models::network::*;
+use xc::models::{network::*, MountSpec};
 
-use self::instantiate::AppliedInstantiateRequest;
 
 #[usdt::provider]
 mod context_provider {
@@ -81,7 +81,9 @@ pub struct ServerContext {
     pub(crate) ng2jails: HashMap<String, Vec<String>>,
     pub(crate) jail2ngs: HashMap<String, Vec<String>>,
 
-    pub(crate) inventory: InventoryManager,
+    pub(crate) inventory: Arc<std::sync::Mutex<InventoryManager>>,
+
+    pub(crate) volume_manager: Arc<Mutex<VolumeManager>>,
 }
 
 impl ServerContext {
@@ -97,10 +99,11 @@ impl ServerContext {
 
         xc::res::create_tables(&db).expect("cannot create tables");
 
-        let inventory =
-            InventoryManager::load_from_path(&config.inventory).expect("cannot write inventory");
+        let inventory = Arc::new(std::sync::Mutex::new(
+            InventoryManager::load_from_path(&config.inventory).expect("cannot write inventory"),
+        ));
 
-        let network_manager = Arc::new(Mutex::new(NetworkManager::new(db, inventory.subscribe())));
+        let network_manager = Arc::new(Mutex::new(NetworkManager::new(db, inventory.clone())));
 
         let is = Arc::new(Mutex::new(image_store));
         let provider = JsonRegistryProvider::from_path(&config.registries).unwrap();
@@ -111,6 +114,13 @@ impl ServerContext {
             &config.layers_dir,
             Arc::new(Mutex::new(Box::new(provider))),
         );
+
+        let volume_manager = Arc::new(Mutex::new(
+                VolumeManager::new(
+                    inventory.clone(),
+                    config.default_volume_dataset.clone(),
+                    None,
+                )));
 
         ServerContext {
             network_manager,
@@ -124,6 +134,7 @@ impl ServerContext {
             ng2jails: HashMap::new(),
             jail2ngs: HashMap::new(),
             inventory,
+            volume_manager,
         }
     }
 
@@ -132,7 +143,7 @@ impl ServerContext {
     }
 
     pub(crate) fn inventory(&self) -> Inventory {
-        self.inventory.config()
+        self.inventory.lock().unwrap().borrow().clone()
     }
 
     pub(crate) fn create_channel(
@@ -545,7 +556,9 @@ impl ServerContext {
             let applied = {
                 let network_manager = this.network_manager.clone();
                 let network_manager = network_manager.lock().await;
-                AppliedInstantiateRequest::new(request, image, &cred, &network_manager)?
+                let volume_manager = this.volume_manager.clone();
+                let volume_manager = volume_manager.lock().await;
+                AppliedInstantiateRequest::new(request, image, &cred, &network_manager, &volume_manager)?
             };
 
             let blueprint = {
@@ -653,5 +666,21 @@ impl ServerContext {
             error!("result: {result:#?}");
         }
         result.map(|_| ())
+    }
+
+    pub(crate) async fn list_volumes(&self) -> HashMap<String, Volume>
+    {
+        self.volume_manager.lock().await.list_volumes()
+    }
+
+    pub(crate) async fn create_volume(
+        &mut self,
+        name: &str,
+        template: Option<MountSpec>,
+        kind: VolumeDriverKind,
+        source: Option<std::path::PathBuf>,
+        zfs_props: HashMap<String, String>) -> Result<(), PreconditionFailure>
+    {
+        self.volume_manager.lock().await.create_volume(kind, name, template, source, zfs_props)
     }
 }

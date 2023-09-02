@@ -57,7 +57,7 @@ pub struct DiffMap {
 
 /// Shared environment accessible to workers
 #[derive(Clone)]
-pub(self) struct SharedContext {
+struct SharedContext {
     image_store: Arc<tokio::sync::Mutex<Box<SqliteImageStore>>>,
     registries: Arc<tokio::sync::Mutex<Box<dyn RegistriesProvider + Sync + Send>>>,
     image_dataset: PathBuf,

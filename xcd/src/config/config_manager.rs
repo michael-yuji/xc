@@ -21,71 +21,15 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-use crate::config::XcConfig;
 use anyhow::Context;
 use std::path::{Path, PathBuf};
-use tokio::sync::watch::{channel, Receiver, Sender};
 use tracing::error;
 
 use crate::config::inventory::Inventory;
 
-/// Provide configuration to the rest of the components and synchronize updates to the original
-/// configuration. The previous version of the configuration actually contains the inventory
-/// informations, which makes it require to synchronize to the disk when user perform inventory
-/// related changes (adding networks). Although we no longer need to synchronize the configuration
-/// itself to disk, still temporarily keep the code just in case
-pub(crate) struct ConfigManager {
-    path: PathBuf,
-    sender: Sender<XcConfig>,
-}
-
-impl ConfigManager {
-    pub(crate) fn load_from_path(path: impl AsRef<Path>) -> Result<ConfigManager, anyhow::Error> {
-        let path = path.as_ref().to_path_buf();
-        let data = std::fs::read_to_string(&path).context("Cannot read config file")?;
-        let config: XcConfig = serde_yaml::from_str(&data).context("Cannot parse config")?;
-        let (sender, _) = channel(config);
-        Ok(ConfigManager { path, sender })
-    }
-
-    pub(crate) fn config(&self) -> XcConfig {
-        self.sender.borrow().clone()
-    }
-
-    pub(crate) fn subscribe(&self) -> Receiver<XcConfig> {
-        self.sender.subscribe()
-    }
-    /*
-        /// Modify the underlying config, and synchronize the changes to underlying config file
-        pub(crate) fn modify_config<F>(&self, f: F)
-        where
-            F: FnOnce(&mut XcConfig),
-        {
-            let mut config = self.config();
-            let old_config = config.clone();
-
-            f(&mut config);
-
-            if old_config != config {
-                if let Ok(serialized) = serde_json::to_vec_pretty(&config) {
-                    if std::fs::write(&self.path, serialized).is_err() {
-                        error!(
-                            "failed to write new config to config file at {:?}",
-                            self.path
-                        );
-                    }
-                } else {
-                    error!("failed to serialize new config to bytes");
-                }
-                _ = self.sender.send_replace(config);
-            }
-        }
-    */
-}
-
 pub(crate) struct InventoryManager {
     path: PathBuf,
-    sender: Sender<Inventory>,
+    cached: Inventory,
 }
 
 impl InventoryManager {
@@ -94,7 +38,7 @@ impl InventoryManager {
     ) -> Result<InventoryManager, anyhow::Error> {
         let path = path.as_ref().to_path_buf();
         let data = std::fs::read_to_string(&path).context("Cannot read config file")?;
-        let config: Inventory = match serde_json::from_str(&data).context("Cannot parse config") {
+        let cached: Inventory = match serde_json::from_str(&data).context("Cannot parse config") {
             Ok(inventory) => inventory,
             Err(_) => {
                 let default = Inventory::default();
@@ -103,24 +47,19 @@ impl InventoryManager {
                 default
             }
         };
-        let (sender, _) = channel(config);
-        Ok(InventoryManager { path, sender })
+        Ok(InventoryManager { path, cached })
     }
 
-    pub(crate) fn config(&self) -> Inventory {
-        self.sender.borrow().clone()
-    }
-
-    pub(crate) fn subscribe(&self) -> Receiver<Inventory> {
-        self.sender.subscribe()
+    pub(crate) fn borrow(&self) -> &Inventory {
+        &self.cached
     }
 
     /// Modify the underlying config, and synchronize the changes to underlying config file
-    pub(crate) fn modify_config<F>(&self, f: F)
+    pub(crate) fn modify<F>(&mut self, f: F)
     where
         F: FnOnce(&mut Inventory),
     {
-        let mut config = self.config();
+        let mut config = self.cached.clone();
         let old_config = config.clone();
 
         f(&mut config);
@@ -136,7 +75,7 @@ impl InventoryManager {
             } else {
                 error!("failed to serialize new config to bytes");
             }
-            _ = self.sender.send_replace(config);
+            self.cached = config
         }
     }
 }
