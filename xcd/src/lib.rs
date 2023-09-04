@@ -24,9 +24,11 @@
 mod auth;
 mod config;
 mod context;
+mod database;
 mod devfs_store;
 mod image;
 mod instantiate;
+mod network;
 mod network_manager;
 mod port;
 mod registry;

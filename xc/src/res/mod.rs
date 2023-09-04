@@ -22,7 +22,6 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 pub mod devfs;
-pub mod network;
 
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
@@ -101,6 +100,11 @@ pub fn create_tables(connection: &Connection) -> rusqlite::Result<()> {
             network text not null,
             token   text not null,
             address text not null primary key
+        );
+
+        create table if not exists network_last_addrs (
+            network text not null primary key,
+            addr text not null
         );
 
         create index if not exists address_alloc_network_index on address_allocation(network);

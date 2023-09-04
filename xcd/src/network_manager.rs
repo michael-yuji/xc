@@ -21,9 +21,9 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+
 use anyhow::Context;
 use ipcidr::IpCidr;
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -31,8 +31,9 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use xc::container::request::NetworkAllocRequest;
 use xc::models::network::IpAssign;
-use xc::res::network::{Netpool, Network};
 
+use crate::network::{Network, AddressStore};
+use crate::database::Database;
 use crate::config::config_manager::InventoryManager;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -47,10 +48,11 @@ pub struct NetworkInfo {
 }
 
 impl NetworkInfo {
-    pub fn new(network: &Network, netpool: &Netpool) -> NetworkInfo {
+    fn new(db: &impl AddressStore, name: String, network: &Network) -> NetworkInfo {
+        let netpool = network.parameterize(&name, db);
         NetworkInfo {
-            name: netpool.network.clone(),
-            subnet: netpool.subnet.clone(),
+            name,
+            subnet: netpool.network.subnet.clone(),
             start_addr: netpool.start_addr,
             end_addr: netpool.end_addr,
             last_addr: netpool.last_addr,
@@ -61,7 +63,7 @@ impl NetworkInfo {
 }
 
 pub(crate) struct NetworkManager {
-    db: Connection,
+    db: Arc<Database>,
     inventory_manager: Arc<Mutex<InventoryManager>>,
     table_cache: HashMap<String, HashMap<String, Vec<IpAddr>>>,
 }
@@ -78,8 +80,6 @@ pub(crate) enum Error {
     InvalidAddress(IpAddr, String),
     #[error("no such network {0}")]
     NoSuchNetwork(String),
-    #[error("no such network {0} in database")]
-    NoSuchNetworkDatabase(String),
     #[error("{0}")]
     Other(anyhow::Error),
 }
@@ -98,7 +98,7 @@ impl From<anyhow::Error> for Error {
 
 impl NetworkManager {
     pub(crate) fn new(
-        db: Connection,
+        db: Arc<Database>,
         inventory_manager: Arc<Mutex<InventoryManager>>,
     ) -> NetworkManager {
         NetworkManager {
@@ -121,8 +121,8 @@ impl NetworkManager {
         let config = self.inventory_manager.lock().unwrap().borrow().clone();
         let mut info = Vec::new();
         for (name, network) in config.networks.iter() {
-            let netpool = Netpool::from_conn(&self.db, name.to_string())?.context("")?;
-            info.push(NetworkInfo::new(network, &netpool))
+            let db: &Database = &self.db;
+            info.push(NetworkInfo::new(db, name.to_string(), network));
         }
         Ok(info)
     }
@@ -132,7 +132,6 @@ impl NetworkManager {
         name: &str,
         network: &Network,
     ) -> Result<(), rusqlite::Error> {
-        _ = Netpool::create_or_load(&self.db, name, network)?;
         self.inventory_manager.lock().unwrap().modify(|inventory| {
             inventory.networks.insert(name.to_string(), network.clone());
         });
@@ -143,7 +142,7 @@ impl NetworkManager {
         &mut self,
         token: &str,
     ) -> anyhow::Result<HashMap<String, Vec<IpAddr>>> {
-        Netpool::release_addresses(&self.db, token).context("fail on address release")?;
+        self.db.release_addresses(token).context("fail to release addresses")?;
         let networks = self.table_cache.remove(token).unwrap_or_default();
         Ok(networks)
     }
@@ -171,17 +170,18 @@ impl NetworkManager {
             .clone();
 
         let interface = if vnet {
-            network.bridge_iface
+            network.bridge_iface.to_string()
         } else {
-            network.alias_iface
+            network.alias_iface.to_string()
         };
 
-        let mut netpool = Netpool::from_conn(&self.db, network_name.to_string())?
-            .ok_or_else(|| Error::NoSuchNetworkDatabase(network_name.to_string()))?;
+        let db: &Database = &self.db;
+
+        let mut netpool = network.parameterize(&network_name, db);
 
         match req {
             NetworkAllocRequest::Any { .. } => {
-                let Some(address) = netpool.next_cidr(&self.db, token)? else {
+                let Some(address) = netpool.next_cidr(token)? else {
                     return Err(Error::AllocationFailure(network_name));
                 };
 
@@ -197,12 +197,12 @@ impl NetworkManager {
                 ))
             }
             NetworkAllocRequest::Explicit { ip, .. } => {
-                let address = IpCidr::from_addr(*ip, netpool.subnet.mask()).unwrap();
-                if netpool.subnet.network_addr() == address.network_addr() {
-                    if netpool.is_address_consumed(&self.db, ip)? {
+                let address = IpCidr::from_addr(*ip, netpool.network.subnet.mask()).unwrap();
+                if netpool.network.subnet.network_addr() == address.network_addr() {
+                    if netpool.is_address_consumed(ip)? {
                         return Err(Error::AddressUsed(*ip));
                     }
-                    netpool.register_address(&self.db, ip, token)?;
+                    netpool.register_address(ip, token)?;
                     self.insert_to_cache(token, &network_name, ip);
 
                     Ok((
@@ -220,6 +220,7 @@ impl NetworkManager {
         }
     }
 
+    #[inline]
     fn insert_to_cache(&mut self, token: &str, network: &str, address: &IpAddr) {
         if let Some(network_address) = self.table_cache.get_mut(token) {
             if let Some(addresses) = network_address.get_mut(network) {

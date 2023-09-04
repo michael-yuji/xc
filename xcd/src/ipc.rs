@@ -26,7 +26,9 @@ use crate::auth::Credential;
 use crate::context::ServerContext;
 use crate::image::pull::PullImageError;
 use crate::image::push::{PushImageError, PushImageStatusDesc};
+use crate::network::Network;
 use crate::volume::{Volume, VolumeDriverKind};
+
 use freebsd::event::EventFdNotify;
 use freebsd::libc::{EINVAL, EIO};
 use ipc::packet::codec::{Fd, FromPacket, List, Maybe};
@@ -51,7 +53,6 @@ use xc::container::request::{MountReq, NetworkAllocRequest};
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
-use xc::res::network::Network;
 use xc::util::{gen_id, CompressionFormat, CompressionFormatExt};
 
 #[derive(FromPacket, Debug)]

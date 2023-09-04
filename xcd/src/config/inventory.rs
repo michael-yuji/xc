@@ -23,8 +23,8 @@
 // SUCH DAMAGE.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use xc::res::network::Network;
 
+use crate::network::Network;
 use crate::volume::Volume;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

@@ -343,7 +343,7 @@ pub fn mk_string(
 
 #[cfg(test)]
 mod tests {
-    use super::{mk_string, realpath};
+    use super::mk_string;
     /*
     #[test]
     fn test_to_hex() {
@@ -367,23 +367,5 @@ mod tests {
         assert_eq!(mk_string(&["a"], "[", ",", "]"), "[a]".to_string());
         let empty = Vec::<String>::new();
         assert_eq!(mk_string(&empty, "[", ",", "]"), "[]".to_string());
-    }
-
-    #[test]
-    fn test_jail_parameters() {
-        let parameters = super::jail_allowables();
-        eprintln!("{parameters:#?}");
-        assert!(false)
-    }
-
-    #[test]
-    fn test_real_path() {
-        let root = "/usr/home/yuuji/test_xc_realpath/root";
-        let path = "/a/b/c";
-        let expected = "/usr/home/yuuji/test_xc_realpath/root/usr";
-        let result = realpath(root, path);
-        eprintln!("result: {result:#?}");
-        assert!(false);
-        //        assert_eq!(result, Ok(Some(std::path::PathBuf::from(expected))))
     }
 }

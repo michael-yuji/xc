@@ -26,6 +26,7 @@ use crate::auth::Credential;
 use crate::config::config_manager::InventoryManager;
 use crate::config::inventory::Inventory;
 use crate::config::XcConfig;
+use crate::database::Database;
 use crate::instantiate::{InstantiateBlueprint, AppliedInstantiateRequest};
 use crate::devfs_store::DevfsRulesetStore;
 use crate::image::pull::PullImageError;
@@ -94,10 +95,11 @@ impl ServerContext {
             .expect("failed to create tables");
 
         let image_store: Box<SqliteImageStore> = Box::new(image_store_db);
-        let db = rusqlite::Connection::open(&config.database_store)
-            .expect("cannot open sqlite database");
 
-        xc::res::create_tables(&db).expect("cannot create tables");
+        let db = Arc::new(Database::from(rusqlite::Connection::open(&config.database_store)
+            .expect("cannot open sqlite database")));
+
+        db.perform(xc::res::create_tables).expect("cannot create tables");
 
         let inventory = Arc::new(std::sync::Mutex::new(
             InventoryManager::load_from_path(&config.inventory).expect("cannot write inventory"),
@@ -280,8 +282,6 @@ impl ServerContext {
                     .and_then(|oss| oss.to_str())
                     .and_then(|s| s.parse::<ChainId>().ok())
             });
-
-        //        eprintln!("chain_ids: {chain_ids:#?}");
 
         let mut file_set: std::collections::HashSet<OciDigest> =
             std::collections::HashSet::from_iter(files);

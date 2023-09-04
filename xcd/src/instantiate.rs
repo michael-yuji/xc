@@ -388,9 +388,6 @@ impl InstantiateBlueprint {
                             "network {network} is missing from config file"
                         )
                     }
-                    crate::network_manager::Error::NoSuchNetworkDatabase(network) => {
-                        precondition_failure!(ENOENT, "network {network} is missing from database")
-                    }
                     crate::network_manager::Error::Other(error) => {
                         Err(error).context("error occured during address allocation")?;
                     }

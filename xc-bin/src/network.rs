@@ -42,12 +42,14 @@ pub(crate) enum NetworkAction {
         default_router: Option<IpAddr>,
     },
     List,
+    // add a container to a network group
     Tag {
         #[arg(long = "no-commit", action)]
         no_commit: bool,
         network: String,
         container: String,
     },
+    // commit changes of a network group
     CommitTag {
         network: String,
     },
