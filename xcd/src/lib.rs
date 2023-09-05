@@ -25,6 +25,7 @@ mod auth;
 mod config;
 mod context;
 mod database;
+mod dataset;
 mod devfs_store;
 mod image;
 mod instantiate;

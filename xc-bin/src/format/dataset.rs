@@ -21,3 +21,40 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use std::io::{Error, ErrorKind};
+use std::path::PathBuf;
+use std::str::FromStr;
+use varutil::string_interpolation::Var;
+
+#[derive(Clone, Debug)]
+pub struct DatasetParam {
+    pub key: Option<Var>,
+    pub dataset: PathBuf,
+}
+
+impl FromStr for DatasetParam {
+    type Err = std::io::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_once(':') {
+            None => {
+                if s.starts_with('/') {
+                    return Err(Error::new(ErrorKind::Other, "invalid dataset path"));
+                }
+                let dataset = s
+                    .parse::<PathBuf>()
+                    .map_err(|_| Error::new(ErrorKind::Other, "invalid dataset path"))?;
+                Ok(DatasetParam { key: None, dataset })
+            }
+            Some((env, dataset)) => {
+                if dataset.starts_with('/') {
+                    return Err(Error::new(ErrorKind::Other, "invalid dataset path"));
+                }
+                let key = varutil::string_interpolation::Var::from_str(env)?;
+                Ok(DatasetParam {
+                    key: Some(key),
+                    dataset: dataset.into(),
+                })
+            }
+        }
+    }
+}

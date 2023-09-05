@@ -553,6 +553,8 @@ fn main() -> Result<(), ActionError> {
             extra_layers,
             publish,
             image_reference,
+            props,
+            jail_dataset,
         }) => {
             let hostname = hostname.or_else(|| name.clone());
 
@@ -568,6 +570,7 @@ fn main() -> Result<(), ActionError> {
                         mount.source.to_string()
                     };
                     MountReq {
+                        read_only: false,
                         source,
                         dest: mount.destination.clone(),
                     }
@@ -589,13 +592,23 @@ fn main() -> Result<(), ActionError> {
                 })
                 .collect();
 
-            let envs = {
+            let mut envs = {
                 let mut map = std::collections::HashMap::new();
                 for env in envs.into_iter() {
                     map.insert(env.key, env.value);
                 }
                 map
             };
+
+            let mut jail_datasets = Vec::new();
+
+            for spec in jail_dataset.into_iter() {
+                if let Some(key) = &spec.key {
+                    let path_str = spec.dataset.to_string_lossy().to_string();
+                    envs.insert(key.to_string(), path_str);
+                }
+                jail_datasets.push(spec.dataset);
+            }
 
             let mut extra_layer_files = Vec::new();
 
@@ -605,6 +618,14 @@ fn main() -> Result<(), ActionError> {
 
             let extra_layers =
                 List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
+
+            let mut override_props = std::collections::HashMap::new();
+
+            for prop in props.iter() {
+                if let Some((key, value)) = prop.split_once('=') {
+                    override_props.insert(key.to_string(), value.to_string());
+                }
+            }
 
             let res = {
                 let reqt = InstantiateRequest {
@@ -625,6 +646,8 @@ fn main() -> Result<(), ActionError> {
                     main_norun: true,
                     init_norun: true,
                     deinit_norun: true,
+                    override_props,
+                    jail_datasets,
                     ..InstantiateRequest::default()
                 };
 
@@ -669,6 +692,8 @@ fn main() -> Result<(), ActionError> {
             ips,
             user,
             group,
+            props,
+            jail_dataset,
         }) => {
             if detach && link {
                 panic!("detach and link flags are mutually exclusive");
@@ -678,13 +703,23 @@ fn main() -> Result<(), ActionError> {
                 panic!("--dns-nop and --empty-dns are mutually exclusive");
             }
 
-            let envs = {
+            let mut envs = {
                 let mut map = std::collections::HashMap::new();
                 for env in envs.into_iter() {
                     map.insert(env.key, env.value);
                 }
                 map
             };
+
+            let mut jail_datasets = Vec::new();
+
+            for spec in jail_dataset.into_iter() {
+                if let Some(key) = &spec.key {
+                    let path_str = spec.dataset.to_string_lossy().to_string();
+                    envs.insert(key.to_string(), path_str);
+                }
+                jail_datasets.push(spec.dataset);
+            }
 
             let dns = if empty_dns {
                 DnsSetting::Specified {
@@ -717,6 +752,7 @@ fn main() -> Result<(), ActionError> {
                     };
                     MountReq {
                         source,
+                        read_only: false,
                         dest: mount.destination.clone(),
                     }
                 })
@@ -745,6 +781,13 @@ fn main() -> Result<(), ActionError> {
 
             let extra_layers =
                 List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
+            let mut override_props = std::collections::HashMap::new();
+
+            for prop in props.iter() {
+                if let Some((key, value)) = prop.split_once('=') {
+                    override_props.insert(key.to_string(), value.to_string());
+                }
+            }
 
             let (res, notify) = {
                 let main_started_notify = if detach {
@@ -774,6 +817,8 @@ fn main() -> Result<(), ActionError> {
                     group,
                     ips: ips.into_iter().map(|v| v.0).collect(),
                     main_started_notify: main_started_notify.clone(),
+                    override_props,
+                    jail_datasets,
                     ..InstantiateRequest::default()
                 };
 
@@ -844,7 +889,7 @@ fn main() -> Result<(), ActionError> {
                 notify: notify.clone(),
             };
 
-            if let Ok(res) = do_run_main(&mut conn, req)? {
+            if let Ok(_res) = do_run_main(&mut conn, req)? {
                 if !detach {
                     if let Maybe::Some(notify) = notify {
                         EventFdNotify::from_fd(notify.as_raw_fd()).notified_sync();

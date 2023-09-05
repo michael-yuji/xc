@@ -32,9 +32,9 @@ use thiserror::Error;
 use xc::container::request::NetworkAllocRequest;
 use xc::models::network::IpAssign;
 
-use crate::network::{Network, AddressStore};
-use crate::database::Database;
 use crate::config::config_manager::InventoryManager;
+use crate::database::Database;
+use crate::network::{AddressStore, Network};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetworkInfo {
@@ -142,7 +142,9 @@ impl NetworkManager {
         &mut self,
         token: &str,
     ) -> anyhow::Result<HashMap<String, Vec<IpAddr>>> {
-        self.db.release_addresses(token).context("fail to release addresses")?;
+        self.db
+            .release_addresses(token)
+            .context("fail to release addresses")?;
         let networks = self.table_cache.remove(token).unwrap_or_default();
         Ok(networks)
     }

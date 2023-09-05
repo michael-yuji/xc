@@ -27,17 +27,18 @@ use crate::config::config_manager::InventoryManager;
 use crate::config::inventory::Inventory;
 use crate::config::XcConfig;
 use crate::database::Database;
-use crate::instantiate::{InstantiateBlueprint, AppliedInstantiateRequest};
+use crate::dataset::JailedDatasetTracker;
 use crate::devfs_store::DevfsRulesetStore;
 use crate::image::pull::PullImageError;
 use crate::image::ImageManager;
+use crate::instantiate::{AppliedInstantiateRequest, InstantiateBlueprint};
 use crate::ipc::InstantiateRequest;
 use crate::network_manager::NetworkManager;
 use crate::port::PortForwardTable;
 use crate::registry::JsonRegistryProvider;
 use crate::site::Site;
 use crate::util::TwoWayMap;
-use crate::volume::{VolumeManager, Volume, VolumeDriverKind};
+use crate::volume::{Volume, VolumeDriverKind, VolumeManager};
 
 use anyhow::Context;
 use freebsd::fs::zfs::ZfsHandle;
@@ -45,19 +46,18 @@ use freebsd::net::pf;
 use oci_util::digest::OciDigest;
 use oci_util::image_reference::{ImageReference, ImageTag};
 use oci_util::layer::ChainId;
-use xc::container::error::PreconditionFailure;
 use std::collections::HashMap;
 use std::os::fd::{FromRawFd, RawFd};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
+use xc::container::error::PreconditionFailure;
 use xc::container::ContainerManifest;
 use xc::image_store::sqlite::SqliteImageStore;
 use xc::image_store::ImageRecord;
 use xc::models::jail_image::{JailConfig, JailImage};
 use xc::models::{network::*, MountSpec};
-
 
 #[usdt::provider]
 mod context_provider {
@@ -85,6 +85,7 @@ pub struct ServerContext {
     pub(crate) inventory: Arc<std::sync::Mutex<InventoryManager>>,
 
     pub(crate) volume_manager: Arc<Mutex<VolumeManager>>,
+    pub(crate) dataset_tracker: Arc<RwLock<JailedDatasetTracker>>,
 }
 
 impl ServerContext {
@@ -96,10 +97,13 @@ impl ServerContext {
 
         let image_store: Box<SqliteImageStore> = Box::new(image_store_db);
 
-        let db = Arc::new(Database::from(rusqlite::Connection::open(&config.database_store)
-            .expect("cannot open sqlite database")));
+        let db = Arc::new(Database::from(
+            rusqlite::Connection::open(&config.database_store)
+                .expect("cannot open sqlite database"),
+        ));
 
-        db.perform(xc::res::create_tables).expect("cannot create tables");
+        db.perform(xc::res::create_tables)
+            .expect("cannot create tables");
 
         let inventory = Arc::new(std::sync::Mutex::new(
             InventoryManager::load_from_path(&config.inventory).expect("cannot write inventory"),
@@ -117,12 +121,11 @@ impl ServerContext {
             Arc::new(Mutex::new(Box::new(provider))),
         );
 
-        let volume_manager = Arc::new(Mutex::new(
-                VolumeManager::new(
-                    inventory.clone(),
-                    config.default_volume_dataset.clone(),
-                    None,
-                )));
+        let volume_manager = Arc::new(Mutex::new(VolumeManager::new(
+            inventory.clone(),
+            config.default_volume_dataset.clone(),
+            None,
+        )));
 
         ServerContext {
             network_manager,
@@ -137,6 +140,7 @@ impl ServerContext {
             jail2ngs: HashMap::new(),
             inventory,
             volume_manager,
+            dataset_tracker: Arc::new(RwLock::new(JailedDatasetTracker::default())),
         }
     }
 
@@ -425,6 +429,7 @@ impl ServerContext {
             self.port_forward_table.remove_rules(id);
             self.reload_pf_rdr_anchor()?;
             self.alias_map.remove_all_referenced(id);
+            self.dataset_tracker.write().await.release_container(id);
 
             if let Some(networks) = self.jail2ngs.get(id) {
                 for network in networks.iter() {
@@ -550,6 +555,7 @@ impl ServerContext {
             let this = this.clone();
             let mut this = this.write().await;
             let mut site = Site::new(id, this.config());
+
             site.stage(image)?;
             let name = request.name.clone();
 
@@ -558,12 +564,23 @@ impl ServerContext {
                 let network_manager = network_manager.lock().await;
                 let volume_manager = this.volume_manager.clone();
                 let volume_manager = volume_manager.lock().await;
-                AppliedInstantiateRequest::new(request, image, &cred, &network_manager, &volume_manager)?
+                AppliedInstantiateRequest::new(
+                    request,
+                    image,
+                    &cred,
+                    &network_manager,
+                    &volume_manager,
+                )?
             };
 
             let blueprint = {
                 let network_manager = this.network_manager.clone();
                 let mut network_manager = network_manager.lock().await;
+                let volume_manager = this.volume_manager.clone();
+                let volume_manager = volume_manager.lock().await;
+                let dataset_tracker = this.dataset_tracker.clone();
+                let mut dataset_tracker = dataset_tracker.write().await;
+
                 InstantiateBlueprint::new(
                     id,
                     image,
@@ -571,6 +588,8 @@ impl ServerContext {
                     &mut this.devfs_store,
                     &cred,
                     &mut network_manager,
+                    &volume_manager,
+                    &mut dataset_tracker,
                 )?
             };
 
@@ -668,8 +687,7 @@ impl ServerContext {
         result.map(|_| ())
     }
 
-    pub(crate) async fn list_volumes(&self) -> HashMap<String, Volume>
-    {
+    pub(crate) async fn list_volumes(&self) -> HashMap<String, Volume> {
         self.volume_manager.lock().await.list_volumes()
     }
 
@@ -679,8 +697,11 @@ impl ServerContext {
         template: Option<MountSpec>,
         kind: VolumeDriverKind,
         source: Option<std::path::PathBuf>,
-        zfs_props: HashMap<String, String>) -> Result<(), PreconditionFailure>
-    {
-        self.volume_manager.lock().await.create_volume(kind, name, template, source, zfs_props)
+        zfs_props: HashMap<String, String>,
+    ) -> Result<(), PreconditionFailure> {
+        self.volume_manager
+            .lock()
+            .await
+            .create_volume(kind, name, template, source, zfs_props)
     }
 }

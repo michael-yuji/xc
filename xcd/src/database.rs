@@ -21,9 +21,9 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-use std::sync::Mutex;
+use rusqlite::{Connection, OptionalExtension, Params, Row};
 use std::net::IpAddr;
-use rusqlite::{Connection, Params, Row, OptionalExtension};
+use std::sync::Mutex;
 
 use crate::network::AddressStore;
 
@@ -39,7 +39,8 @@ impl From<Connection> for Database {
 
 impl Database {
     pub fn perform<F, T>(&self, func: F) -> T
-        where F: FnOnce(&Connection) -> T
+    where
+        F: FnOnce(&Connection) -> T,
     {
         let conn = self.db.lock().unwrap();
         func(&conn)
@@ -51,9 +52,9 @@ impl Database {
     }
 
     pub fn query_row<T, P, F>(&self, sql: &str, params: P, f: F) -> rusqlite::Result<T>
-        where
-            P: Params,
-            F: FnOnce(&Row<'_>) -> rusqlite::Result<T>
+    where
+        P: Params,
+        F: FnOnce(&Row<'_>) -> rusqlite::Result<T>,
     {
         let conn = self.db.lock().unwrap();
         conn.query_row(sql, params, f)
@@ -63,7 +64,8 @@ impl Database {
 impl AddressStore for Database {
     fn all_allocated_addresses(&self, network: &str) -> rusqlite::Result<Vec<IpAddr>> {
         self.perform(|conn| {
-            let mut stmt = conn.prepare("select address from address_allocation where network=?")?;
+            let mut stmt =
+                conn.prepare("select address from address_allocation where network=?")?;
             let rows = stmt.query_map([network], |row| {
                 let column: String = row.get(0)?;
                 let ipaddr: IpAddr = column.parse().unwrap();
@@ -81,11 +83,14 @@ impl AddressStore for Database {
     fn last_allocated_adddress(&self, network: &str) -> rusqlite::Result<Option<IpAddr>> {
         self.query_row(
             "select addr from network_last_addrs where network=?",
-            [network], |row| {
+            [network],
+            |row| {
                 let addr_text: String = row.get(0)?;
                 let addr = addr_text.parse().unwrap();
                 Ok(addr)
-            }).optional()
+            },
+        )
+        .optional()
     }
     fn is_address_allocated(&self, network: &str, addr: &IpAddr) -> rusqlite::Result<bool> {
         self.perform(|conn| {
@@ -114,7 +119,9 @@ impl AddressStore for Database {
             "
             insert into network_last_addrs (network, addr) values (?, ?)
                 on conflict (network) do update set addr=?
-            ", [network, addr.as_str(), addr.as_str()])?;
+            ",
+            [network, addr.as_str(), addr.as_str()],
+        )?;
         Ok(())
     }
 }

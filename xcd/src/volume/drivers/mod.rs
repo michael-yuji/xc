@@ -24,10 +24,13 @@
 pub mod local;
 pub mod zfs;
 
-use crate::auth::Credential;
 use super::Volume;
+use crate::auth::Credential;
 use std::collections::HashMap;
-use xc::container::{error::PreconditionFailure, request::{Mount, MountReq}};
+use xc::container::{
+    error::PreconditionFailure,
+    request::{Mount, MountReq},
+};
 use xc::models::MountSpec;
 
 pub trait VolumeDriver {
@@ -36,14 +39,14 @@ pub trait VolumeDriver {
         cred: &Credential,
         mount_req: &MountReq,
         mount_spec: Option<&MountSpec>,
-        volume: &Volume) -> Result<Mount, PreconditionFailure>;
+        volume: &Volume,
+    ) -> Result<Mount, PreconditionFailure>;
 
     fn create(
         &self,
         name: &str,
         template: Option<MountSpec>,
         source: Option<std::path::PathBuf>,
-        props: HashMap<String, String>
+        props: HashMap<String, String>,
     ) -> Result<Volume, PreconditionFailure>;
-
 }

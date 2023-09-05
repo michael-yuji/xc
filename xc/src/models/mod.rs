@@ -34,6 +34,20 @@ use std::collections::{HashMap, HashSet};
 use varutil::string_interpolation::{InterpolatedString, Var};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub enum EnforceStatfs {
+    ExposeAll,
+    Strict,
+    BelowRoot,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct DatasetSpec {
+    name: String,
+    required: bool,
+    required_props: HashMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MountSpec {
     pub description: String,
     pub destination: String,

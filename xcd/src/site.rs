@@ -440,6 +440,9 @@ impl Site {
                     image_reference: blueprint.image_reference,
                     default_router: blueprint.default_router,
                     log_directory: Some(std::path::PathBuf::from(&self.config.logs_dir)),
+                    override_props: blueprint.override_props,
+                    enforce_statfs: blueprint.enforce_statfs,
+                    jailed_datasets: blueprint.jailed_datasets,
                 };
 
                 let running_container = container

@@ -156,6 +156,7 @@ pub async fn push_image(
         let mut selections = Vec::new();
         //            let (tx, upload_status) = tokio::sync::watch::channel(UploadStat::default());
 
+        #[allow(unreachable_code)]
         'layer_loop: for layer in layers.iter() {
             let maps = {
                 let this = this.clone();
@@ -206,17 +207,13 @@ pub async fn push_image(
                 "plain" => "application/vnd.oci.image.layer.v1.tar",
                 _ => unreachable!(),
             };
-            /*
-                        let path = format!("{layers_dir}/{}", map.archive_digest);
-                        let path = std::path::Path::new(&path);
-            */
+
             let mut path = layers_dir.to_path_buf();
             path.push(map.archive_digest.as_str());
             let file = std::fs::OpenOptions::new().read(true).open(&path)?;
             let metadata = file.metadata().unwrap();
             let layer_size = metadata.len() as usize;
 
-            //                let dedup_check = Ok::<bool, std::io::Error>(false);
             let dedup_check = session.exists_digest(&map.archive_digest).await;
 
             _ = emitter.use_try(|state| {
@@ -268,14 +265,6 @@ pub async fn push_image(
                         size: layer_size,
                     }
                 }
-
-                /*
-                let maybe_descriptor = session
-                    .upload_content(Some(tx), content_type.to_string(), file)
-                    .await;
-
-                maybe_descriptor?
-                */
             };
             uploads.push(descriptor);
             _ = emitter.use_try(|state| {

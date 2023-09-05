@@ -48,29 +48,37 @@ pub(crate) enum VolumeAction {
 
         driver: VolumeDriverKind,
     },
-    List
+    List,
 }
 
-pub(crate) fn use_volume_action(conn: &mut UnixStream, action: VolumeAction)
-    -> Result<(), crate::ActionError>
-{
+pub(crate) fn use_volume_action(
+    conn: &mut UnixStream,
+    action: VolumeAction,
+) -> Result<(), crate::ActionError> {
     match action {
         VolumeAction::List => {
             if let Ok(volumes) = do_list_volumes(conn, ())? {
                 println!("{volumes:#?}")
             }
-        },
-        VolumeAction::Create { name, image_reference, volume, device, zfs_props, driver } => {
-            let template = image_reference.and_then(|ir| {
-                volume.map(|v| (ir, v))
-            });
+        }
+        VolumeAction::Create {
+            name,
+            image_reference,
+            volume,
+            device,
+            zfs_props,
+            driver,
+        } => {
+            let template = image_reference.and_then(|ir| volume.map(|v| (ir, v)));
             let zfs_props = {
                 let mut props = HashMap::new();
                 for value in zfs_props.into_iter() {
                     if let Some((key, value)) = value.split_once('=') {
                         props.insert(key.to_string(), value.to_string());
                     } else {
-                        Err(anyhow!("invalid zfs option, accepted formats are $key=$value"))?;
+                        Err(anyhow!(
+                            "invalid zfs option, accepted formats are $key=$value"
+                        ))?;
                     }
                 }
                 props
@@ -80,7 +88,7 @@ pub(crate) fn use_volume_action(conn: &mut UnixStream, action: VolumeAction)
                 template,
                 device,
                 zfs_props,
-                kind: driver
+                kind: driver,
             };
             if let Err(err) = do_create_volume(conn, request)? {
                 eprintln!("error occurred: {err:#?}")

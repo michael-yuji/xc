@@ -23,10 +23,11 @@
 // SUCH DAMAGE.
 
 use crate::auth::Credential;
+use crate::dataset::JailedDatasetTracker;
 use crate::devfs_store::DevfsRulesetStore;
 use crate::ipc::InstantiateRequest;
 use crate::network_manager::NetworkManager;
-use crate::volume::{VolumeManager, Volume};
+use crate::volume::{Volume, VolumeManager};
 
 use anyhow::Context;
 use freebsd::event::EventFdNotify;
@@ -41,6 +42,7 @@ use xc::format::devfs_rules::DevfsRule;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
 use xc::models::network::{DnsSetting, IpAssign};
+use xc::models::EnforceStatfs;
 use xc::precondition_failure;
 
 pub struct AppliedInstantiateRequest {
@@ -52,7 +54,7 @@ pub struct AppliedInstantiateRequest {
     envs: HashMap<String, String>,
     allowing: Vec<String>,
     copies: Vec<xc::container::request::CopyFileReq>,
-    mount_req: Vec<Mount>,
+    enforce_statfs: EnforceStatfs,
 }
 
 impl AppliedInstantiateRequest {
@@ -143,7 +145,7 @@ impl AppliedInstantiateRequest {
             }
         }
 
-        let allowing = {
+        let mut allowing = {
             let mut allows = Vec::new();
             for allow in config.allow.iter() {
                 if available_allows.contains(allow) {
@@ -153,6 +155,17 @@ impl AppliedInstantiateRequest {
                 }
             }
             allows
+        };
+
+        if !request.jail_datasets.is_empty() {
+            allowing.push("mount".to_string());
+            allowing.push("mount.zfs".to_string());
+        }
+
+        let enforce_statfs = if request.jail_datasets.is_empty() {
+            EnforceStatfs::Strict
+        } else {
+            EnforceStatfs::BelowRoot
         };
 
         let copies: Vec<xc::container::request::CopyFileReq> = request
@@ -165,58 +178,29 @@ impl AppliedInstantiateRequest {
             })
             .collect();
 
-        let mut mount_req = Vec::new();
-
-        for special_mount in config.special_mounts.iter() {
-            if special_mount.mount_type.as_str() == "procfs" {
-                mount_req.push(Mount::procfs(&special_mount.mount_point));
-            } else if special_mount.mount_type.as_str() == "fdescfs" {
-                mount_req.push(Mount::fdescfs(&special_mount.mount_point));
-            }
-        }
-
         let mut mount_specs = oci_config.jail_config().mounts;
-        let mut added_mount_specs = HashMap::new();
 
         for req in request.mount_req.iter() {
             let source_path = std::path::Path::new(&req.source);
 
-            let volume = if !source_path.is_absolute() {
+            if !source_path.is_absolute() {
                 let name = source_path.to_string_lossy().to_string();
                 match volume_manager.query_volume(&name) {
                     None => {
                         precondition_failure!(ENOENT, "no such volume {name}")
-                    },
+                    }
                     Some(volume) => {
                         if !volume.can_mount(cred.uid()) {
-                            precondition_failure!(EPERM, "this user is not allowed to mount the volume")
-                        } else {
-                            volume
+                            precondition_failure!(
+                                EPERM,
+                                "this user is not allowed to mount the volume"
+                            )
                         }
                     }
                 }
-            } else {
-                Volume::adhoc(source_path)
-            };
-
-            let mount_spec = mount_specs.remove(&req.dest);
-
-            if mount_spec.is_some() {
-                added_mount_specs.insert(&req.dest, mount_spec.clone().unwrap());
             }
 
-            let mount = volume_manager.mount(cred, req, mount_spec.as_ref(), &volume)?;
-/*
-            let mount = match volume.driver {
-                VolumeDriverKind::Directory => {
-                    LocalDriver::default().mount(cred, req, mount_spec.as_ref(), &volume)?
-                },
-                VolumeDriverKind::ZfsDataset => {
-                    ZfsDriver::default().mount(cred, req, mount_spec.as_ref(), &volume)?
-                }
-            };
-*/
-            mount_req.push(mount);
+            mount_specs.remove(&req.dest);
         }
 
         for (key, spec) in mount_specs.iter() {
@@ -266,7 +250,7 @@ impl AppliedInstantiateRequest {
             main,
             envs,
             allowing,
-            mount_req,
+            enforce_statfs,
         })
     }
 }
@@ -304,6 +288,9 @@ pub struct InstantiateBlueprint {
     pub linux_no_create_proc_dir: bool,
     pub linux_no_mount_sys: bool,
     pub linux_no_mount_proc: bool,
+    pub override_props: HashMap<String, String>,
+    pub enforce_statfs: EnforceStatfs,
+    pub jailed_datasets: Vec<std::path::PathBuf>,
 }
 
 impl InstantiateBlueprint {
@@ -312,8 +299,10 @@ impl InstantiateBlueprint {
         oci_config: &JailImage,
         request: AppliedInstantiateRequest,
         devfs_store: &mut DevfsRulesetStore,
-        _cred: &Credential,
+        cred: &Credential,
         network_manager: &mut NetworkManager,
+        volume_manager: &VolumeManager,
+        dataset_tracker: &mut JailedDatasetTracker,
     ) -> anyhow::Result<InstantiateBlueprint> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let config = oci_config.jail_config();
@@ -395,6 +384,64 @@ impl InstantiateBlueprint {
             };
         }
 
+        let mut mount_req = Vec::new();
+
+        for special_mount in config.special_mounts.iter() {
+            if special_mount.mount_type.as_str() == "procfs" {
+                mount_req.push(Mount::procfs(&special_mount.mount_point));
+            } else if special_mount.mount_type.as_str() == "fdescfs" {
+                mount_req.push(Mount::fdescfs(&special_mount.mount_point));
+            }
+        }
+
+        let mut mount_specs = oci_config.jail_config().mounts;
+        let mut added_mount_specs = HashMap::new();
+
+        for req in request.base.mount_req.iter() {
+            let source_path = std::path::Path::new(&req.source);
+
+            let volume = if !source_path.is_absolute() {
+                let name = source_path.to_string_lossy().to_string();
+                match volume_manager.query_volume(&name) {
+                    None => {
+                        precondition_failure!(ENOENT, "no such volume {name}")
+                    }
+                    Some(volume) => {
+                        if !volume.can_mount(cred.uid()) {
+                            precondition_failure!(
+                                EPERM,
+                                "this user is not allowed to mount the volume"
+                            )
+                        } else {
+                            volume
+                        }
+                    }
+                }
+            } else {
+                Volume::adhoc(source_path)
+            };
+
+            let mount_spec = mount_specs.remove(&req.dest);
+
+            if mount_spec.is_some() {
+                added_mount_specs.insert(&req.dest, mount_spec.clone().unwrap());
+            }
+
+            let mount = volume_manager.mount(id, cred, req, mount_spec.as_ref(), &volume)?;
+            mount_req.push(mount);
+        }
+
+        for dataset in request.base.jail_datasets.iter() {
+            if dataset_tracker.is_jailed(dataset) {
+                precondition_failure!(
+                    EPERM,
+                    "another container is using this dataset: {dataset:?}"
+                )
+            } else {
+                dataset_tracker.set_jailed(id, dataset)
+            }
+        }
+
         let mut devfs_rules = vec![
             "include 1".to_string(),
             "include 2".to_string(),
@@ -431,7 +478,7 @@ impl InstantiateBlueprint {
             main: request.main,
             ips: request.base.ips,
             ipreq: request.base.ipreq,
-            mount_req: request.mount_req,
+            mount_req,
             linux: config.linux,
             deinit_norun: request.base.deinit_norun,
             init_norun: request.base.init_norun,
@@ -453,6 +500,9 @@ impl InstantiateBlueprint {
             linux_no_create_proc_dir: request.base.linux_no_create_proc_dir,
             linux_no_mount_sys: request.base.linux_no_mount_sys,
             linux_no_mount_proc: request.base.linux_no_mount_proc,
+            override_props: request.base.override_props,
+            enforce_statfs: request.enforce_statfs,
+            jailed_datasets: request.base.jail_datasets,
         })
     }
 }

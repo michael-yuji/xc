@@ -40,6 +40,7 @@ use std::os::fd::AsRawFd;
 use tracing::{error, info, warn};
 use xcd::ipc::*;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 enum Input {
     // XXX: File as input has not yet implemented
@@ -161,7 +162,7 @@ impl Directive for RunDirective {
                     Input::File(_file) => {
                         error!("using file as stdin has not been implemented");
                         todo!()
-                    },
+                    }
                     Input::Content(content) => Box::new(VecSlice::new(content.as_bytes())),
                 };
 
@@ -194,7 +195,8 @@ impl Directive for RunDirective {
                                             }
                                             Ok(bytes) => {
                                                 available -= bytes;
-                                                _ = std::io::stdout().write_all(&stdout_buf[..bytes]);
+                                                _ = std::io::stdout()
+                                                    .write_all(&stdout_buf[..bytes]);
                                             }
                                         }
                                     }
@@ -212,7 +214,8 @@ impl Directive for RunDirective {
                                             }
                                             Ok(bytes) => {
                                                 available -= bytes;
-                                                _ = std::io::stderr().write_all(&stderr_buf[..bytes]);
+                                                _ = std::io::stderr()
+                                                    .write_all(&stderr_buf[..bytes]);
                                             }
                                         }
                                     }

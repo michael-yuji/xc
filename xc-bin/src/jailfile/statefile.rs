@@ -1,3 +1,4 @@
+#![allow(unused)]
 // Copyright (c) 2023 Yan Ka, Chiu.
 // All rights reserved.
 //

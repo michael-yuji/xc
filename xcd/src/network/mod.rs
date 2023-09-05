@@ -38,18 +38,24 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn parameterize<'a, 'b, A: AddressStore>(&'b self, name: &str, store: &'a A)
-        -> Netpool<'a, 'b, A>
-    {
+    pub fn parameterize<'a, 'b, A: AddressStore>(
+        &'b self,
+        name: &str,
+        store: &'a A,
+    ) -> Netpool<'a, 'b, A> {
         let last_addr = store.last_allocated_adddress(name).unwrap();
         let name = name.to_string();
         Netpool {
             network: self,
             store,
             last_addr,
-            start_addr: self.start_addr.unwrap_or_else(|| self.subnet.network_addr()),
-            end_addr: self.end_addr.unwrap_or_else(|| self.subnet.broadcast_addr()),
-            name
+            start_addr: self
+                .start_addr
+                .unwrap_or_else(|| self.subnet.network_addr()),
+            end_addr: self
+                .end_addr
+                .unwrap_or_else(|| self.subnet.broadcast_addr()),
+            name,
         }
     }
 }
@@ -72,6 +78,7 @@ pub struct Netpool<'a, 'b, A: AddressStore> {
     name: String,
 }
 
+#[allow(dead_code)]
 impl<'a, 'b, A: AddressStore> Netpool<'a, 'b, A> {
     pub fn all_allocated_addresses(&self) -> rusqlite::Result<Vec<IpAddr>> {
         self.store.all_allocated_addresses(&self.name)
@@ -79,7 +86,7 @@ impl<'a, 'b, A: AddressStore> Netpool<'a, 'b, A> {
 
     pub fn next_cidr(&mut self, token: &str) -> rusqlite::Result<Option<IpCidr>> {
         self.next_address(token)
-        .map(|x| x.and_then(|a| IpCidr::from_addr(a, self.network.subnet.mask())))
+            .map(|x| x.and_then(|a| IpCidr::from_addr(a, self.network.subnet.mask())))
     }
     pub fn next_address(&mut self, token: &str) -> rusqlite::Result<Option<IpAddr>> {
         macro_rules! next_addr {
@@ -133,11 +140,7 @@ impl<'a, 'b, A: AddressStore> Netpool<'a, 'b, A> {
         self.store.is_address_allocated(&self.name, addr)
     }
 
-    pub fn register_address(
-        &self,
-        addr: &IpAddr,
-        token: &str,
-    ) -> rusqlite::Result<()> {
+    pub fn register_address(&self, addr: &IpAddr, token: &str) -> rusqlite::Result<()> {
         self.store.add_address(&self.name, addr, token)
     }
 }

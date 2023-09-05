@@ -23,6 +23,7 @@
 // SUCH DAMAGE.
 
 use crate::format::docker_compat::Expose;
+use crate::models::DatasetSpec;
 use crate::util::default_on_missing;
 
 use super::exec::Exec;
@@ -183,6 +184,9 @@ pub struct JailConfig {
     pub special_mounts: Vec<SpecialMount>,
 
     pub mounts: HashMap<String, MountSpec>,
+
+    #[serde(default)]
+    pub datasets: HashMap<String, DatasetSpec>,
 
     #[serde(default)]
     pub init: Vec<Exec>,

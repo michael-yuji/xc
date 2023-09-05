@@ -22,14 +22,20 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-use freebsd::libc::{ENOENT, EPERM, ENOTDIR};
+use freebsd::libc::{ENOENT, ENOTDIR, EPERM};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use xc::models::MountSpec;
-use xc::{container::{request::{MountReq, Mount}, error::PreconditionFailure}, precondition_failure};
+use xc::{
+    container::{
+        error::PreconditionFailure,
+        request::{Mount, MountReq},
+    },
+    precondition_failure,
+};
 
-use crate::{auth::Credential, volume::Volume};
 use crate::volume::VolumeDriverKind;
+use crate::{auth::Credential, volume::Volume};
 
 use super::VolumeDriver;
 
@@ -43,11 +49,11 @@ impl VolumeDriver for LocalDriver {
         name: &str,
         _template: Option<MountSpec>,
         source: Option<std::path::PathBuf>,
-        _props: HashMap<String, String>) -> Result<Volume, PreconditionFailure>
-    {
+        _props: HashMap<String, String>,
+    ) -> Result<Volume, PreconditionFailure> {
         let path = match source {
             None => {
-                let Some(mut parent) = self.default_subdir.clone() else  {
+                let Some(mut parent) = self.default_subdir.clone() else {
                     precondition_failure!(ENOENT, "Default volume directory not found")
                 };
                 parent.push(name);
@@ -55,7 +61,7 @@ impl VolumeDriver for LocalDriver {
                     precondition_failure!(ENOENT, "Target directory already exists")
                 }
                 parent
-            },
+            }
             Some(path) => {
                 if !path.exists() {
                     precondition_failure!(ENOENT, "No such directory")
@@ -66,12 +72,13 @@ impl VolumeDriver for LocalDriver {
             }
         };
         Ok(Volume {
+            name: Some(name.to_string()),
             rw_users: None,
             authorized_users: None,
             driver: VolumeDriverKind::Directory,
             mount_options: Vec::new(),
             driver_options: HashMap::new(),
-            device: path
+            device: path,
         })
     }
 
@@ -80,9 +87,8 @@ impl VolumeDriver for LocalDriver {
         cred: &Credential,
         mount_req: &MountReq,
         mount_spec: Option<&MountSpec>,
-        volume: &Volume
-    ) -> Result<Mount, PreconditionFailure>
-    {
+        volume: &Volume,
+    ) -> Result<Mount, PreconditionFailure> {
         let source_path = &volume.device;
         if !&source_path.exists() {
             precondition_failure!(ENOENT, "source mount point does not exist: {source_path:?}");
@@ -103,8 +109,8 @@ impl VolumeDriver for LocalDriver {
 
         let mut mount_options = HashSet::new();
 
-        if !volume.can_mount_rw(cred.uid()) ||
-            mount_spec.map(|spec| spec.read_only).unwrap_or_default()
+        if !volume.can_mount_rw(cred.uid())
+            || mount_spec.map(|spec| spec.read_only).unwrap_or_default()
         {
             mount_options.insert("ro".to_string());
         }

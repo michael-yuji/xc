@@ -25,18 +25,20 @@ pub mod drivers;
 
 use crate::auth::Credential;
 use crate::config::config_manager::InventoryManager;
-use crate::volume::drivers::VolumeDriver;
-use crate::volume::drivers::zfs::ZfsDriver;
 use crate::volume::drivers::local::LocalDriver;
+use crate::volume::drivers::zfs::ZfsDriver;
+use crate::volume::drivers::VolumeDriver;
 
+use freebsd::libc::EPERM;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
-use xc::container::error::PreconditionFailure;
-use xc::container::request::{MountReq, Mount};
-use xc::models::MountSpec;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use xc::container::error::PreconditionFailure;
+use xc::container::request::{Mount, MountReq};
+use xc::models::MountSpec;
+use xc::precondition_failure;
 
 #[derive(Default, PartialEq, Eq, Debug, Clone)]
 pub enum VolumeDriverKind {
@@ -61,7 +63,10 @@ impl std::str::FromStr for VolumeDriverKind {
         match s {
             "zfs" => Ok(Self::ZfsDataset),
             "directory" => Ok(Self::Directory),
-            _ => Err(std::io::Error::new(std::io::ErrorKind::Other, "invalid value"))
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "invalid value",
+            )),
         }
     }
 }
@@ -116,17 +121,27 @@ pub struct Volume {
 
     #[serde(default)]
     pub driver_options: HashMap<String, String>,
+
+    #[serde(skip)]
+    pub name: Option<String>,
 }
 
 impl Volume {
+    fn adhoc_identifier(driver: &VolumeDriverKind, device: impl AsRef<Path>) -> String {
+        let device = device.as_ref().as_os_str().to_string_lossy();
+        format!("{}:{}", driver, device)
+    }
 
     /// Creates an instance of volume for ad-hoc mounting purpose, e.g. -v /source:/other/location
     pub(crate) fn adhoc(device: impl AsRef<Path>) -> Self {
+        let driver = VolumeDriverKind::Directory;
+        let device = device.as_ref().to_path_buf();
         Self {
+            name: Some(Self::adhoc_identifier(&driver, &device)),
             rw_users: None,
-            device: device.as_ref().to_path_buf(),
+            device,
             authorized_users: None,
-            driver: VolumeDriverKind::Directory,
+            driver,
             mount_options: Vec::new(),
             driver_options: HashMap::new(),
         }
@@ -166,38 +181,62 @@ impl Volume {
     }
 }
 
+#[derive(PartialEq, Eq, Debug)]
+pub enum VolumeShareMode {
+    Exclusive,
+    SingleWriter,
+}
+
 pub(crate) struct VolumeManager {
     inventory: Arc<Mutex<InventoryManager>>,
     default_volume_dataset: Option<PathBuf>,
     default_volume_dir: Option<PathBuf>,
+    constrained_shares: HashMap<String, VolumeShareMode>,
 }
 
 impl VolumeManager {
-
     pub(crate) fn new(
         inventory: Arc<Mutex<InventoryManager>>,
         default_volume_dataset: Option<PathBuf>,
         default_volume_dir: Option<PathBuf>,
-    ) -> VolumeManager
-    {
-        VolumeManager { inventory, default_volume_dataset, default_volume_dir }
+    ) -> VolumeManager {
+        VolumeManager {
+            inventory,
+            default_volume_dataset,
+            default_volume_dir,
+            constrained_shares: HashMap::new(),
+        }
     }
 
     // insert or override a volume
     pub(crate) fn add_volume(&mut self, name: &str, volume: &Volume) {
         self.inventory.lock().unwrap().modify(|inventory| {
-            inventory
-                .volumes
-                .insert(name.to_string(), volume.clone());
+            inventory.volumes.insert(name.to_string(), volume.clone());
         });
     }
 
     pub(crate) fn list_volumes(&self) -> HashMap<String, Volume> {
-        self.inventory.lock().unwrap().borrow().volumes.clone()
+        let mut hm = HashMap::new();
+        for (name, volume) in self.inventory.lock().unwrap().borrow().volumes.iter() {
+            let mut vol = volume.clone();
+            vol.name = Some(name.to_string());
+            hm.insert(name.to_string(), vol);
+        }
+        hm
     }
 
     pub(crate) fn query_volume(&self, name: &str) -> Option<Volume> {
-        self.inventory.lock().unwrap().borrow().volumes.get(name).cloned()
+        self.inventory
+            .lock()
+            .unwrap()
+            .borrow()
+            .volumes
+            .get(name)
+            .cloned()
+            .map(|mut vol| {
+                vol.name = Some(name.to_string());
+                vol
+            })
     }
 
     pub(crate) fn create_volume(
@@ -206,19 +245,19 @@ impl VolumeManager {
         name: &str,
         template: Option<MountSpec>,
         source: Option<PathBuf>,
-        props: HashMap<String, String>) -> Result<(), PreconditionFailure>
-    {
+        props: HashMap<String, String>,
+    ) -> Result<(), PreconditionFailure> {
         let volume = match kind {
             VolumeDriverKind::Directory => {
                 let local_driver = LocalDriver {
-                    default_subdir: self.default_volume_dir.clone()
+                    default_subdir: self.default_volume_dir.clone(),
                 };
                 local_driver.create(name, template, source, props)?
-            },
+            }
             VolumeDriverKind::ZfsDataset => {
                 let zfs_driver = ZfsDriver {
                     handle: freebsd::fs::zfs::ZfsHandle::default(),
-                    default_dataset: self.default_volume_dataset.clone()
+                    default_dataset: self.default_volume_dataset.clone(),
                 };
                 zfs_driver.create(name, template, source, props)?
             }
@@ -231,23 +270,38 @@ impl VolumeManager {
 
     pub(crate) fn mount(
         &self,
+        _token: &str,
         cred: &Credential,
         mount_req: &MountReq,
         mount_spec: Option<&MountSpec>,
-        volume: &Volume
-    ) -> Result<Mount, PreconditionFailure>
-    {
+        volume: &Volume,
+    ) -> Result<Mount, PreconditionFailure> {
+        for (name, share) in self.constrained_shares.iter() {
+            if volume.name.as_ref().unwrap() == name {
+                if share == &VolumeShareMode::Exclusive {
+                    precondition_failure!(
+                        EPERM,
+                        "The volume has been mounted exclusively by other container"
+                    )
+                } else if share == &VolumeShareMode::SingleWriter && !mount_req.read_only {
+                    precondition_failure!(
+                        EPERM,
+                        "The volume has been mounted for exclusively write by other container"
+                    )
+                }
+            }
+        }
         match volume.driver {
             VolumeDriverKind::Directory => {
                 let local_driver = LocalDriver {
-                    default_subdir: self.default_volume_dir.clone()
+                    default_subdir: self.default_volume_dir.clone(),
                 };
                 local_driver.mount(cred, mount_req, mount_spec, volume)
-            },
+            }
             VolumeDriverKind::ZfsDataset => {
                 let zfs_driver = ZfsDriver {
                     handle: freebsd::fs::zfs::ZfsHandle::default(),
-                    default_dataset: self.default_volume_dataset.clone()
+                    default_dataset: self.default_volume_dataset.clone(),
                 };
                 zfs_driver.mount(cred, mount_req, mount_spec, volume)
             }

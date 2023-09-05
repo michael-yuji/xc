@@ -21,7 +21,7 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-mod env_pair;
+pub(crate) mod dataset;
 
 use ipcidr::IpCidr;
 use pest::Parser;

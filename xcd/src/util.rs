@@ -75,6 +75,14 @@ impl<K: Clone + Hash + Eq, V: Clone + Hash + Eq> TwoWayMap<K, V> {
         self.main_map.get(key)
     }
 
+    pub fn contains_value<Q: Eq + Hash + ?Sized>(&self, value: &Q) -> bool
+    where
+        V: Borrow<Q>,
+    {
+        self.reverse_map.contains_key(value)
+    }
+
+    /// Remove all keys that referenced the value
     pub fn remove_all_referenced<Q>(&mut self, value: &Q) -> Option<HashSet<K>>
     where
         V: Borrow<Q>,
@@ -87,7 +95,6 @@ impl<K: Clone + Hash + Eq, V: Clone + Hash + Eq> TwoWayMap<K, V> {
         Some(keys)
     }
 
-    #[allow(unused)]
     pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
@@ -97,6 +104,9 @@ impl<K: Clone + Hash + Eq, V: Clone + Hash + Eq> TwoWayMap<K, V> {
         if let Some(value) = &value {
             if let Some(keys) = self.reverse_map.get_mut(value) {
                 keys.remove(key);
+                if keys.is_empty() {
+                    self.reverse_map.remove(value);
+                }
             }
         }
         value

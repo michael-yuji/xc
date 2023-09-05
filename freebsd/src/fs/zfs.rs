@@ -84,7 +84,7 @@ impl ZfsCreate {
             dataset: dataset.as_ref().to_path_buf(),
             create_ancestors,
             no_mount,
-            properties: HashMap::new()
+            properties: HashMap::new(),
         }
     }
 
@@ -292,10 +292,7 @@ impl ZfsHandle {
         })
     }
 
-    pub fn create(
-        &self,
-        arg: ZfsCreate
-    ) -> Result<()> {
+    pub fn create(&self, arg: ZfsCreate) -> Result<()> {
         self.use_command(|c| {
             c.arg("create");
             if arg.no_mount {
@@ -314,6 +311,21 @@ impl ZfsHandle {
         })
     }
 
+    pub fn jail(&self, jail: &str, dataset: impl AsRef<Path>) -> Result<()> {
+        self.use_command(|c| {
+            c.arg("jail");
+            c.arg(jail);
+            c.arg(dataset.as_ref());
+        })
+    }
+
+    pub fn unjail(&self, jail: &str, dataset: impl AsRef<Path>) -> Result<()> {
+        self.use_command(|c| {
+            c.arg("unjail");
+            c.arg(jail);
+            c.arg(dataset.as_ref());
+        })
+    }
 
     /// # Arguments
     /// * `dataset`

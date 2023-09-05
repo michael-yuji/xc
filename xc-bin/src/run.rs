@@ -22,6 +22,7 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+use crate::format::dataset::DatasetParam;
 use crate::format::{BindMount, EnvPair, IpWant, PublishSpec};
 
 use clap::Parser;
@@ -68,6 +69,12 @@ pub(crate) struct CreateArgs {
     pub(crate) publish: Vec<PublishSpec>,
 
     pub(crate) image_reference: ImageReference,
+
+    #[arg(short = 'z')]
+    pub(crate) jail_dataset: Vec<DatasetParam>,
+
+    #[arg(short = 'o')]
+    pub(crate) props: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -142,4 +149,10 @@ pub(crate) struct RunArg {
     pub(crate) entry_point: Option<String>,
 
     pub(crate) entry_point_args: Vec<String>,
+
+    #[arg(short = 'z')]
+    pub(crate) jail_dataset: Vec<DatasetParam>,
+
+    #[arg(short = 'o')]
+    pub(crate) props: Vec<String>,
 }

@@ -39,7 +39,6 @@ use oci_util::digest::OciDigest;
 use oci_util::distribution::client::{BasicAuth, Registry};
 use oci_util::image_reference::{ImageReference, ImageTag};
 use serde::{Deserialize, Serialize};
-use xc::image_store::ImageStoreError;
 use std::collections::HashMap;
 use std::io::Seek;
 use std::net::IpAddr;
@@ -50,6 +49,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::*;
 use xc::container::request::{MountReq, NetworkAllocRequest};
+use xc::image_store::ImageStoreError;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
@@ -199,7 +199,6 @@ pub struct EntryPointSpec {
 #[derive(Serialize, FromPacket)]
 pub struct InstantiateRequest {
     pub image_reference: ImageReference,
-    pub alt_root: Option<String>,
     pub envs: HashMap<String, String>,
     pub vnet: bool,
     pub ips: Vec<IpAssign>,
@@ -224,6 +223,8 @@ pub struct InstantiateRequest {
     pub linux_no_mount_proc: bool,
     pub user: Option<String>,
     pub group: Option<String>,
+    pub override_props: HashMap<String, String>,
+    pub jail_datasets: Vec<PathBuf>,
 }
 
 impl InstantiateRequest {
@@ -254,7 +255,6 @@ impl Default for InstantiateRequest {
 
         InstantiateRequest {
             image_reference,
-            alt_root: None,
             envs: HashMap::new(),
             vnet: false,
             ips: Vec::new(),
@@ -262,10 +262,6 @@ impl Default for InstantiateRequest {
             mount_req: Vec::new(),
             copies: List::new(),
             entry_point: None,
-            /*
-            entry_point: String::new(),
-            entry_point_args: Vec::new(),
-            */
             hostname: None,
             main_norun: false,
             init_norun: false,
@@ -283,6 +279,8 @@ impl Default for InstantiateRequest {
             linux_no_mount_proc: false,
             user: None,
             group: None,
+            override_props: HashMap::new(),
+            jail_datasets: Vec::new(),
         }
     }
 }
@@ -1138,7 +1136,7 @@ pub struct CreateVolumeRequest {
     pub template: Option<(ImageReference, String)>,
     pub device: Option<PathBuf>,
     pub zfs_props: HashMap<String, String>,
-    pub kind: VolumeDriverKind
+    pub kind: VolumeDriverKind,
 }
 
 #[ipc_method(method = "create_volume")]
@@ -1146,35 +1144,45 @@ async fn create_volume(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
     request: CreateVolumeRequest,
-) -> GenericResult<()>
-{
+) -> GenericResult<()> {
     let template = match request.template {
         None => None,
         Some((image_reference, volume)) => {
-            match context.read().await.image_manager.read().await.query_manifest(&image_reference).await {
+            match context
+                .read()
+                .await
+                .image_manager
+                .read()
+                .await
+                .query_manifest(&image_reference)
+                .await
+            {
                 Ok(image) => {
                     let specs = image.manifest.jail_config().mounts;
                     specs.get(&volume).cloned()
-                },
+                }
                 Err(ImageStoreError::ManifestNotFound(manifest)) => {
                     return enoent(&format!("no such manifest {manifest}"))
                 }
                 Err(ImageStoreError::TagNotFound(a, b)) => {
                     return enoent(&format!("no such image {a}:{b}"))
                 }
-                Err(error) => {
-                    return ipc_err(EINVAL, &format!("image store error: {error:?}"))
-                }
+                Err(error) => return ipc_err(EINVAL, &format!("image store error: {error:?}")),
             }
         }
     };
 
-    if let Err(err) = context.write().await.create_volume(
-        &request.name,
-        template,
-        request.kind,
-        request.device,
-        request.zfs_props).await
+    if let Err(err) = context
+        .write()
+        .await
+        .create_volume(
+            &request.name,
+            template,
+            request.kind,
+            request.device,
+            request.zfs_props,
+        )
+        .await
     {
         ipc_err(err.errno(), &err.error_message())
     } else {
@@ -1186,9 +1194,8 @@ async fn create_volume(
 async fn list_volumes(
     context: Arc<RwLock<ServerContext>>,
     local_context: &mut ConnectionContext<Variables>,
-    request: ()
-) -> GenericResult<HashMap<String, Volume>>
-{
+    request: (),
+) -> GenericResult<HashMap<String, Volume>> {
     Ok(context.read().await.list_volumes().await)
 }
 

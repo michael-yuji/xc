@@ -43,6 +43,7 @@ pub(crate) trait Directive: Sized {
     fn up_to_date(&self) -> bool;
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConfigMod {
     Allow(Vec<String>),

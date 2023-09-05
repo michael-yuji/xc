@@ -97,7 +97,10 @@ impl Mount {
             options: Vec::new(),
         }
     }
-    pub fn nullfs(source: impl AsRef<std::path::Path>, mountpoint: impl AsRef<std::path::Path>) -> Mount {
+    pub fn nullfs(
+        source: impl AsRef<std::path::Path>,
+        mountpoint: impl AsRef<std::path::Path>,
+    ) -> Mount {
         Mount {
             source: source.as_ref().to_string_lossy().to_string(),
             dest: mountpoint.as_ref().to_string_lossy().to_string(),
@@ -111,4 +114,5 @@ impl Mount {
 pub struct MountReq {
     pub source: String,
     pub dest: String,
+    pub read_only: bool,
 }

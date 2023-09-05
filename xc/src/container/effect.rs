@@ -85,6 +85,7 @@ macro_rules! impl_undos {
                 match self {
                     $(Undo::$name { result, $($arg),* } => {
                         debug!("cleaning up {}", stringify!($name));
+                        #[allow(clippy::redundant_closure_call)]
                         {
                             $unwind_code(result)
                         }?;
@@ -260,6 +261,16 @@ impl_undos! {
         freebsd::net::pf::set_rules(Some(anchor.to_string()), &["\n"]),
         |_| {
             freebsd::net::pf::set_rules(Some(anchor.to_string()), &["\n"])
+        }
+    };
+
+    JailDataset(zfs_handle: ZfsHandle, jail: String, dataset: PathBuf) {
+        "jail a zfs dataset to `jail`",
+        zfs_handle.jail(jail.as_str(), &dataset),
+        |_| {
+            // by the time the undo stack rewind, the jail has already been destroyed and therefore
+            // unjail will not work.
+            Ok::<(), anyhow::Error>(())
         }
     }
 }

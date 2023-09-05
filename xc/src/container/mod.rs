@@ -34,6 +34,7 @@ use crate::container::running::RunningContainer;
 use crate::models::exec::Jexec;
 use crate::models::jail_image::JailImage;
 use crate::models::network::IpAssign;
+use crate::models::EnforceStatfs;
 use crate::util::realpath;
 
 use anyhow::Context;
@@ -92,6 +93,12 @@ pub struct CreateContainer {
     pub default_router: Option<IpAddr>,
 
     pub log_directory: Option<PathBuf>,
+
+    pub override_props: HashMap<String, String>,
+
+    pub enforce_statfs: EnforceStatfs,
+
+    pub jailed_datasets: Vec<PathBuf>,
 }
 
 impl CreateContainer {
@@ -254,6 +261,36 @@ impl CreateContainer {
             }
         }
 
+        proto = proto.param(
+            "enforce_statfs",
+            match self.enforce_statfs {
+                EnforceStatfs::Strict => Value::Int(2),
+                EnforceStatfs::BelowRoot => Value::Int(1),
+                EnforceStatfs::ExposeAll => Value::Int(0),
+            },
+        );
+
+        for (key, value) in self.override_props.iter() {
+            const STR_KEYS: [&str; 6] = [
+                "host.hostuuid",
+                "host.domainname",
+                "host.hostname",
+                "osrelease",
+                "path",
+                "name",
+            ];
+
+            let v = if STR_KEYS.contains(&key.as_str()) {
+                Value::String(value.to_string())
+            } else if let Ok(num) = value.parse::<i32>() {
+                Value::Int(num)
+            } else {
+                Value::String(value.to_string())
+            };
+
+            proto = proto.param(key, v);
+        }
+
         let jail = proto.start()?;
 
         if self.vnet {
@@ -315,6 +352,18 @@ impl CreateContainer {
                 .arg("default")
                 .arg(default_router.to_string())
                 .status();
+        }
+
+        println!("datasets: {:?}", self.jailed_datasets);
+
+        for dataset in self.jailed_datasets.iter() {
+            // XXX: allow to use a non-default zfs handle?
+            undo.jail_dataset(
+                freebsd::fs::zfs::ZfsHandle::default(),
+                jail.jid.to_string(),
+                dataset.to_path_buf(),
+            )
+            .with_context(|| "jail dataset: {dataset:?}")?;
         }
 
         let notify = Arc::new(EventFdNotify::new());
