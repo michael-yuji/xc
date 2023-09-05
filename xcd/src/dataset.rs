@@ -30,6 +30,9 @@ use std::path::{Path, PathBuf};
 
 /// A tracker keep tracks of mapping between containers and jailed dataset. This construct does not
 /// perform any actual effects (jailing and un-jailing datasets).
+///
+/// Ideally we should we some trie like data structure instead. Since x/y being jailed means x/y/z
+/// cannot be jailed by another sibling jail
 #[derive(Default)]
 pub(crate) struct JailedDatasetTracker {
     jailed: TwoWayMap<String, PathBuf>,

@@ -39,23 +39,23 @@ use crate::image::{use_image_action, ImageAction};
 use crate::jailfile::directives::volume::VolumeDirective;
 use crate::network::{use_network_action, NetworkAction};
 use crate::redirect::{use_rdr_action, RdrAction};
-use crate::run::{CreateArgs, RunArg};
+use crate::run::{CreateArgs, DnsArgs, RunArg};
 use crate::volume::{use_volume_action, VolumeAction};
 
 use clap::Parser;
 use freebsd::event::{eventfd, EventFdNotify};
 use freebsd::procdesc::{pd_fork, pdwait, PdForkResult};
-use ipc::packet::codec::{Fd, List, Maybe};
+use ipc::packet::codec::{Fd, Maybe};
 use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::os::fd::{AsRawFd, IntoRawFd};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use term_table::homogeneous::{TableLayout, TableSource, Title};
 use term_table::{ColumnLayout, Pos};
 use tracing::{debug, error, info};
-use xc::container::request::{MountReq, NetworkAllocRequest};
+use xc::container::request::NetworkAllocRequest;
 use xc::models::jail_image::JailConfig;
 use xc::models::network::DnsSetting;
 use xc::tasks::{ImportImageState, ImportImageStatus};
@@ -167,7 +167,14 @@ enum Action {
     },
     #[command(subcommand)]
     Rdr(RdrAction),
-    Run(RunArg),
+    Run {
+        #[command(flatten)]
+        create: CreateArgs,
+        #[command(flatten)]
+        dns: DnsArgs,
+        #[command(flatten)]
+        args: RunArg,
+    },
     RunMain {
         #[arg(long = "detach", short = 'd', action)]
         detach: bool,
@@ -539,118 +546,11 @@ fn main() -> Result<(), ActionError> {
         Action::Rdr(rdr) => {
             _ = use_rdr_action(&mut conn, rdr);
         }
-        Action::Create(CreateArgs {
-            no_clean,
-            persist,
-            networks,
-            mounts,
-            envs,
-            name,
-            hostname,
-            vnet,
-            ips,
-            copy,
-            extra_layers,
-            publish,
-            image_reference,
-            props,
-            jail_dataset,
-        }) => {
-            let hostname = hostname.or_else(|| name.clone());
-
-            let mount_req = mounts
-                .iter()
-                .map(|mount| {
-                    let source = if mount.source.starts_with('.') || mount.source.starts_with('/') {
-                        std::fs::canonicalize(mount.source.clone())
-                            .unwrap()
-                            .to_string_lossy()
-                            .to_string()
-                    } else {
-                        mount.source.to_string()
-                    };
-                    MountReq {
-                        read_only: false,
-                        source,
-                        dest: mount.destination.clone(),
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let copies: List<CopyFile> = copy
-                .into_iter()
-                .map(|bind| {
-                    let file = std::fs::OpenOptions::new()
-                        .read(true)
-                        .open(bind.source)
-                        .expect("cannot open file for reading");
-                    let source = Fd(file.into_raw_fd());
-                    CopyFile {
-                        source,
-                        destination: bind.destination,
-                    }
-                })
-                .collect();
-
-            let mut envs = {
-                let mut map = std::collections::HashMap::new();
-                for env in envs.into_iter() {
-                    map.insert(env.key, env.value);
-                }
-                map
-            };
-
-            let mut jail_datasets = Vec::new();
-
-            for spec in jail_dataset.into_iter() {
-                if let Some(key) = &spec.key {
-                    let path_str = spec.dataset.to_string_lossy().to_string();
-                    envs.insert(key.to_string(), path_str);
-                }
-                jail_datasets.push(spec.dataset);
-            }
-
-            let mut extra_layer_files = Vec::new();
-
-            for layer in extra_layers.iter() {
-                extra_layer_files.push(std::fs::OpenOptions::new().read(true).open(layer)?);
-            }
-
-            let extra_layers =
-                List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
-
-            let mut override_props = std::collections::HashMap::new();
-
-            for prop in props.iter() {
-                if let Some((key, value)) = prop.split_once('=') {
-                    override_props.insert(key.to_string(), value.to_string());
-                }
-            }
+        Action::Create(args) => {
+            let publish = args.publish.clone();
 
             let res = {
-                let reqt = InstantiateRequest {
-                    create_only: true,
-                    name,
-                    hostname,
-                    copies,
-                    envs,
-                    vnet,
-                    ipreq: networks,
-                    mount_req,
-                    entry_point: None,
-                    extra_layers,
-                    no_clean,
-                    persist,
-                    image_reference,
-                    ips: ips.into_iter().map(|v| v.0).collect(),
-                    main_norun: true,
-                    init_norun: true,
-                    deinit_norun: true,
-                    override_props,
-                    jail_datasets,
-                    ..InstantiateRequest::default()
-                };
-
+                let reqt = args.create_request()?;
                 do_instantiate(&mut conn, reqt)?
             };
 
@@ -667,167 +567,40 @@ fn main() -> Result<(), ActionError> {
                 eprintln!("{res:#?}");
             }
         }
-        Action::Run(RunArg {
-            image_reference,
-            create_only,
-            mut detach,
-            entry_point,
-            entry_point_args,
-            extra_layers,
-            no_clean,
-            persist,
-            networks,
-            mounts,
-            envs,
-            name,
-            vnet,
-            empty_dns,
-            dns_nop,
-            dns_servers,
-            dns_searchs,
-            hostname,
-            copy,
-            publish,
-            link,
-            ips,
-            user,
-            group,
-            props,
-            jail_dataset,
-        }) => {
-            if detach && link {
+        Action::Run { create, dns, args } => {
+            if args.detach && args.link {
                 panic!("detach and link flags are mutually exclusive");
             }
 
-            if dns_nop && empty_dns {
+            if dns.dns_nop && dns.empty_dns {
                 panic!("--dns-nop and --empty-dns are mutually exclusive");
             }
 
-            let mut envs = {
-                let mut map = std::collections::HashMap::new();
-                for env in envs.into_iter() {
-                    map.insert(env.key, env.value);
-                }
-                map
-            };
+            let publish = args.publish.clone();
 
-            let mut jail_datasets = Vec::new();
-
-            for spec in jail_dataset.into_iter() {
-                if let Some(key) = &spec.key {
-                    let path_str = spec.dataset.to_string_lossy().to_string();
-                    envs.insert(key.to_string(), path_str);
-                }
-                jail_datasets.push(spec.dataset);
-            }
-
-            let dns = if empty_dns {
-                DnsSetting::Specified {
-                    servers: Vec::new(),
-                    search_domains: Vec::new(),
-                }
-            } else if dns_nop {
-                DnsSetting::Nop
-            } else if dns_servers.is_empty() && dns_searchs.is_empty() {
-                DnsSetting::Inherit
-            } else {
-                DnsSetting::Specified {
-                    servers: dns_servers,
-                    search_domains: dns_searchs,
-                }
-            };
-
-            let hostname = hostname.or_else(|| name.clone());
-
-            let mount_req = mounts
-                .iter()
-                .map(|mount| {
-                    let source = if mount.source.starts_with('.') || mount.source.starts_with('/') {
-                        std::fs::canonicalize(mount.source.clone())
-                            .unwrap()
-                            .to_string_lossy()
-                            .to_string()
-                    } else {
-                        mount.source.to_string()
-                    };
-                    MountReq {
-                        source,
-                        read_only: false,
-                        dest: mount.destination.clone(),
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let copies: List<CopyFile> = copy
-                .into_iter()
-                .map(|bind| {
-                    let file = std::fs::OpenOptions::new()
-                        .read(true)
-                        .open(bind.source)
-                        .expect("cannot open file for reading");
-                    let source = Fd(file.into_raw_fd());
-                    CopyFile {
-                        source,
-                        destination: bind.destination,
-                    }
-                })
-                .collect();
-
-            let mut extra_layer_files = Vec::new();
-
-            for layer in extra_layers.iter() {
-                extra_layer_files.push(std::fs::OpenOptions::new().read(true).open(layer)?);
-            }
-
-            let extra_layers =
-                List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
-            let mut override_props = std::collections::HashMap::new();
-
-            for prop in props.iter() {
-                if let Some((key, value)) = prop.split_once('=') {
-                    override_props.insert(key.to_string(), value.to_string());
-                }
-            }
+            let dns = dns.make();
 
             let (res, notify) = {
-                let main_started_notify = if detach {
+                let main_started_notify = if args.detach {
                     Maybe::None
                 } else {
                     let fd = unsafe { eventfd(0, nix::libc::EFD_NONBLOCK) };
                     Maybe::Some(Fd(fd))
                 };
-                let mut reqt = InstantiateRequest {
-                    name,
-                    hostname,
-                    copies,
-                    envs,
-                    vnet,
-                    ipreq: networks,
-                    mount_req,
-                    entry_point: Some(EntryPointSpec {
-                        entry_point,
-                        entry_point_args,
-                    }),
-                    extra_layers,
-                    no_clean,
-                    persist,
-                    dns,
-                    image_reference,
-                    user,
-                    group,
-                    ips: ips.into_iter().map(|v| v.0).collect(),
-                    main_started_notify: main_started_notify.clone(),
-                    override_props,
-                    jail_datasets,
-                    ..InstantiateRequest::default()
-                };
 
-                if create_only {
-                    reqt.main_norun = true;
-                    reqt.init_norun = true;
-                    reqt.deinit_norun = true;
-                    detach = true;
-                }
+                let reqt = InstantiateRequest {
+                    dns,
+                    create_only: false,
+                    main_norun: false,
+                    init_norun: false,
+                    deinit_norun: false,
+                    main_started_notify: main_started_notify.clone(),
+                    entry_point: Some(EntryPointSpec {
+                        entry_point: args.entry_point,
+                        entry_point_args: args.entry_point_args,
+                    }),
+                    ..create.create_request()?
+                };
 
                 let res = do_instantiate(&mut conn, reqt)?;
                 (res, main_started_notify)
@@ -843,7 +616,7 @@ fn main() -> Result<(), ActionError> {
                     let _res = do_rdr_container(&mut conn, req)?.unwrap();
                 }
 
-                if !detach {
+                if !args.detach {
                     if let Maybe::Some(notify) = notify {
                         EventFdNotify::from_fd(notify.as_raw_fd()).notified_sync();
                     }

@@ -22,13 +22,77 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+use crate::error::ActionError;
 use crate::format::dataset::DatasetParam;
 use crate::format::{BindMount, EnvPair, IpWant, PublishSpec};
 
 use clap::Parser;
+use ipc::packet::codec::{Fd, List};
 use oci_util::image_reference::ImageReference;
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::path::PathBuf;
-use xc::container::request::NetworkAllocRequest;
+use xc::container::request::{MountReq, NetworkAllocRequest};
+use xc::models::network::DnsSetting;
+use xcd::ipc::{CopyFile, InstantiateRequest};
+
+#[derive(Parser, Debug)]
+pub(crate) struct DnsArgs {
+    /// Use empty resolv.conf
+    #[arg(long = "empty-dns", action)]
+    pub(crate) empty_dns: bool,
+
+    /// Do not attempt to generate resolv.conf
+    #[arg(long = "dns-nop", action)]
+    pub(crate) dns_nop: bool,
+
+    #[arg(long = "dns", /* multiple_occurrences */)]
+    pub(crate) dns_servers: Vec<String>,
+
+    #[arg(long = "dns-search", /* multiple_occurrences */)]
+    pub(crate) dns_searchs: Vec<String>,
+}
+
+impl DnsArgs {
+    pub(crate) fn make(self) -> DnsSetting {
+        if self.empty_dns {
+            DnsSetting::Specified {
+                servers: Vec::new(),
+                search_domains: Vec::new(),
+            }
+        } else if self.dns_nop {
+            DnsSetting::Nop
+        } else if self.dns_servers.is_empty() && self.dns_searchs.is_empty() {
+            DnsSetting::Inherit
+        } else {
+            DnsSetting::Specified {
+                servers: self.dns_servers,
+                search_domains: self.dns_searchs,
+            }
+        }
+    }
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct RunArg {
+    #[arg(long = "link", action)]
+    pub(crate) link: bool,
+
+    #[arg(long = "publish", short = 'p', /* multiple_occurrences */)]
+    pub(crate) publish: Vec<PublishSpec>,
+
+    #[arg(long = "detach", short = 'd', action)]
+    pub(crate) detach: bool,
+
+    #[arg(long = "user", short = 'u', action)]
+    pub(crate) user: Option<String>,
+
+    #[arg(long = "group", short = 'u', action)]
+    pub(crate) group: Option<String>,
+
+    pub(crate) entry_point: Option<String>,
+
+    pub(crate) entry_point_args: Vec<String>,
+}
 
 #[derive(Parser, Debug)]
 pub(crate) struct CreateArgs {
@@ -77,82 +141,102 @@ pub(crate) struct CreateArgs {
     pub(crate) props: Vec<String>,
 }
 
-#[derive(Parser, Debug)]
-pub(crate) struct RunArg {
-    #[arg(long, default_value_t, action)]
-    pub(crate) no_clean: bool,
+impl CreateArgs {
+    pub(crate) fn create_request(self) -> Result<InstantiateRequest, ActionError> {
+        let name = self.name.clone();
+        let hostname = self.hostname.or(self.name);
+        let mount_req = self
+            .mounts
+            .into_iter()
+            .map(|mount| {
+                let source = if mount.source.starts_with('.') || mount.source.starts_with('/') {
+                    std::fs::canonicalize(mount.source)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                } else {
+                    mount.source
+                };
+                MountReq {
+                    read_only: false,
+                    source,
+                    dest: mount.destination,
+                }
+            })
+            .collect::<Vec<_>>();
 
-    #[arg(long, default_value_t, action)]
-    pub(crate) persist: bool,
+        let copies: List<CopyFile> = self
+            .copy
+            .into_iter()
+            .map(|bind| {
+                let file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .open(bind.source)
+                    .expect("cannot open file for reading");
+                let source = Fd(file.into_raw_fd());
+                CopyFile {
+                    source,
+                    destination: bind.destination,
+                }
+            })
+            .collect();
 
-    #[arg(long = "create-only", action)]
-    pub(crate) create_only: bool,
+        let mut envs = {
+            let mut map = std::collections::HashMap::new();
+            for env in self.envs.into_iter() {
+                map.insert(env.key, env.value);
+            }
+            map
+        };
 
-    #[arg(long = "link", action)]
-    pub(crate) link: bool,
+        let mut jail_datasets = Vec::new();
 
-    #[arg(long = "publish", short = 'p', /* multiple_occurrences */)]
-    pub(crate) publish: Vec<PublishSpec>,
+        for dataset_spec in self.jail_dataset.into_iter() {
+            if let Some(key) = &dataset_spec.key {
+                let path_str = dataset_spec.dataset.to_string_lossy().to_string();
+                envs.insert(key.to_string(), path_str);
+            }
+            jail_datasets.push(dataset_spec.dataset);
+        }
 
-    /// Use empty resolv.conf
-    #[arg(long = "empty-dns", action)]
-    pub(crate) empty_dns: bool,
+        let mut extra_layer_files = Vec::new();
 
-    /// Do not attempt to generate resolv.conf
-    #[arg(long = "dns-nop", action)]
-    pub(crate) dns_nop: bool,
+        for layer in self.extra_layers.into_iter() {
+            extra_layer_files.push(std::fs::OpenOptions::new().read(true).open(layer)?);
+        }
 
-    #[arg(long = "dns", /* multiple_occurrences */)]
-    pub(crate) dns_servers: Vec<String>,
+        let extra_layers =
+            List::from_iter(extra_layer_files.iter().map(|file| Fd(file.as_raw_fd())));
 
-    #[arg(long = "dns-search", /* multiple_occurrences */)]
-    pub(crate) dns_searchs: Vec<String>,
+        let mut override_props = std::collections::HashMap::new();
 
-    #[arg(long = "detach", short = 'd', action)]
-    pub(crate) detach: bool,
+        for prop in self.props.iter() {
+            if let Some((key, value)) = prop.split_once('=') {
+                override_props.insert(key.to_string(), value.to_string());
+            }
+        }
 
-    #[arg(long = "network", /* multiple_occurrences */)]
-    pub(crate) networks: Vec<NetworkAllocRequest>,
-
-    #[arg(short = 'v', /* multiple_occurrences */)]
-    pub(crate) mounts: Vec<BindMount>,
-
-    #[arg(long = "env", short = 'e', /* multiple_occurrences */)]
-    pub(crate) envs: Vec<EnvPair>,
-
-    #[arg(long = "name")]
-    pub(crate) name: Option<String>,
-
-    #[arg(long = "hostname")]
-    pub(crate) hostname: Option<String>,
-
-    #[arg(long = "vnet", action)]
-    pub(crate) vnet: bool,
-
-    #[arg(long = "ip", action)]
-    pub(crate) ips: Vec<IpWant>,
-
-    #[arg(long = "user", short = 'u', action)]
-    pub(crate) user: Option<String>,
-
-    #[arg(long = "group", short = 'u', action)]
-    pub(crate) group: Option<String>,
-
-    #[arg(long = "copy", /* multiple_occurrences */)]
-    pub(crate) copy: Vec<BindMount>,
-
-    #[arg(long = "extra-layer", /* multiple_occurrences */)]
-    pub(crate) extra_layers: Vec<PathBuf>,
-
-    pub(crate) image_reference: ImageReference,
-
-    pub(crate) entry_point: Option<String>,
-
-    pub(crate) entry_point_args: Vec<String>,
-
-    #[arg(short = 'z')]
-    pub(crate) jail_dataset: Vec<DatasetParam>,
-
-    #[arg(short = 'o')]
-    pub(crate) props: Vec<String>,
+        Ok(InstantiateRequest {
+            create_only: true,
+            name,
+            hostname,
+            copies,
+            envs,
+            vnet: self.vnet,
+            ipreq: self.networks,
+            mount_req,
+            entry_point: None,
+            extra_layers,
+            no_clean: self.no_clean,
+            persist: self.persist,
+            image_reference: self.image_reference,
+            ips: self.ips.into_iter().map(|v| v.0).collect(),
+            main_norun: true,
+            init_norun: true,
+            deinit_norun: true,
+            override_props,
+            jail_datasets,
+            ..InstantiateRequest::default()
+        })
+    }
 }
