@@ -22,21 +22,18 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+use crate::ipc::MountReq;
+use crate::volume::VolumeDriverKind;
+use crate::{auth::Credential, volume::Volume};
 use freebsd::fs::zfs::{ZfsCreate, ZfsHandle};
 use freebsd::libc::{EEXIST, EIO, ENOENT, EPERM};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use xc::models::MountSpec;
 use xc::{
-    container::{
-        error::PreconditionFailure,
-        request::Mount,
-    },
+    container::{error::PreconditionFailure, request::Mount},
     precondition_failure,
 };
-use crate::ipc::MountReq;
-use crate::volume::VolumeDriverKind;
-use crate::{auth::Credential, volume::Volume};
 
 use super::VolumeDriver;
 

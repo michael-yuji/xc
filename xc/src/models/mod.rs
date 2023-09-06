@@ -30,8 +30,8 @@ use crate::util::default_on_missing;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use varutil::string_interpolation::{InterpolatedString, Var};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

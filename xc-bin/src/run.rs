@@ -151,9 +151,7 @@ impl CreateArgs {
             .map(|mount| {
                 let sst = mount.source.to_string_lossy().to_string();
                 let (source, evid) = if sst.starts_with('.') || sst.starts_with('/') {
-
-                    let source = std::fs::canonicalize(mount.source)
-                        .unwrap();
+                    let source = std::fs::canonicalize(mount.source).unwrap();
 
                     let flag = if source.is_dir() {
                         nix::fcntl::OFlag::O_DIRECTORY
@@ -164,7 +162,9 @@ impl CreateArgs {
                     let fd = Maybe::Some(Fd(nix::fcntl::open(
                         &source,
                         flag,
-                        nix::sys::stat::Mode::empty()).unwrap()));
+                        nix::sys::stat::Mode::empty(),
+                    )
+                    .unwrap()));
 
                     (source.as_os_str().to_os_string(), fd /*Maybe::None*/)
                 } else {

@@ -27,10 +27,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use xc::models::MountSpec;
 use xc::{
-    container::{
-        error::PreconditionFailure,
-        request::Mount,
-    },
+    container::{error::PreconditionFailure, request::Mount},
     precondition_failure,
 };
 

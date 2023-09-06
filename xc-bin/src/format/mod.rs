@@ -26,7 +26,7 @@ pub(crate) mod dataset;
 use ipcidr::IpCidr;
 use pest::Parser;
 use pest_derive::Parser;
-use std::{str::FromStr, ffi::OsString};
+use std::{ffi::OsString, str::FromStr};
 use xc::models::network::{IpAssign, NetProto, PortNum, PortRedirection};
 
 #[derive(Parser)]

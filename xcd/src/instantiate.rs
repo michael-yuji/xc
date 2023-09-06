@@ -423,7 +423,6 @@ impl InstantiateBlueprint {
                 match &req.evid {
                     Maybe::None => precondition_failure!(ENOENT, "missing evidence"),
                     Maybe::Some(fd) => {
-
                         println!("process to check evidence");
                         let Ok(stat) = freebsd::nix::sys::stat::fstat(fd.as_raw_fd()) else {
                             println!("cannot stat evidence");

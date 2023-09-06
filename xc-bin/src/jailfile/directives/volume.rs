@@ -22,14 +22,12 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-
-
 use super::{ConfigMod, Directive, JailContext};
 use crate::{format::EnvPair, jailfile::parse::Action};
 
 use anyhow::{bail, Result};
 use clap::Parser;
-use std::{path::PathBuf, ffi::OsString};
+use std::{ffi::OsString, path::PathBuf};
 use xc::models::MountSpec;
 
 #[derive(Parser, Debug)]
@@ -77,13 +75,10 @@ impl Directive for VolumeDirective {
             volume_hints,
             description: self.description.to_string(),
         };
-/*
-        let name = self.name
-            .as_ref()
-            .unwrap_or(|| &self.destination.as_os_str().to_os_string());
-            */
-//        let name = self.name.as_ref().unwrap_or(&self.destination).to_string();
-        let name = self.name.clone()
+
+        let name = self
+            .name
+            .clone()
             .unwrap_or_else(|| self.destination.as_os_str().to_os_string());
 
         context

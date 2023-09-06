@@ -168,9 +168,11 @@ impl PatchActions {
                 required,
                 read_only,
             } => {
-//                let destination = mount_point.to_string_lossy().to_string();
+                //                let destination = mount_point.to_string_lossy().to_string();
                 let description = description.clone().unwrap_or_default();
-                let key = name.clone().unwrap_or_else(|| mount_point.as_os_str().to_os_string());
+                let key = name
+                    .clone()
+                    .unwrap_or_else(|| mount_point.as_os_str().to_os_string());
                 let mut volume_hints = HashMap::new();
                 for hint in hints.iter() {
                     volume_hints.insert(
