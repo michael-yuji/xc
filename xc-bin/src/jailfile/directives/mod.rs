@@ -32,6 +32,7 @@ use crate::jailfile::parse::Action;
 
 use anyhow::Context;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use varutil::string_interpolation::{InterpolatedString, Var};
 use xc::models::exec::Exec;
 use xc::models::jail_image::{JailConfig, SpecialMount};
@@ -56,7 +57,7 @@ pub(crate) enum ConfigMod {
     Expose,
     EntryPoint(String, String, HashMap<Var, InterpolatedString>),
     Cmd(String, Vec<String>),
-    Volume(String, MountSpec),
+    Volume(OsString, MountSpec),
     Mount(String, String),
     SysV(Vec<String>),
     AddEnv(Var, EnvSpec),

@@ -30,6 +30,7 @@ use crate::util::default_on_missing;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
 use varutil::string_interpolation::{InterpolatedString, Var};
 
@@ -50,7 +51,7 @@ pub struct DatasetSpec {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MountSpec {
     pub description: String,
-    pub destination: String,
+    pub destination: PathBuf,
     pub volume_hints: HashMap<String, Value>,
     pub read_only: bool,
     #[serde(default, deserialize_with = "default_on_missing")]
@@ -58,10 +59,10 @@ pub struct MountSpec {
 }
 
 impl MountSpec {
-    pub fn new(destination: &str) -> MountSpec {
+    pub fn new(destination: impl AsRef<Path>) -> MountSpec {
         MountSpec {
             description: "".to_string(),
-            destination: destination.to_string(),
+            destination: destination.as_ref().to_path_buf(),
             volume_hints: HashMap::new(),
             read_only: false,
             required: false,

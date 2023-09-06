@@ -443,6 +443,7 @@ impl Site {
                     override_props: blueprint.override_props,
                     enforce_statfs: blueprint.enforce_statfs,
                     jailed_datasets: blueprint.jailed_datasets,
+                    children_max: blueprint.children_max,
                 };
 
                 let running_container = container

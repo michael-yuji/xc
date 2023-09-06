@@ -26,10 +26,11 @@ pub mod zfs;
 
 use super::Volume;
 use crate::auth::Credential;
+use crate::ipc::MountReq;
 use std::collections::HashMap;
 use xc::container::{
     error::PreconditionFailure,
-    request::{Mount, MountReq},
+    request::Mount,
 };
 use xc::models::MountSpec;
 

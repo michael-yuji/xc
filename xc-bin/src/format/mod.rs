@@ -26,7 +26,7 @@ pub(crate) mod dataset;
 use ipcidr::IpCidr;
 use pest::Parser;
 use pest_derive::Parser;
-use std::str::FromStr;
+use std::{str::FromStr, ffi::OsString};
 use xc::models::network::{IpAssign, NetProto, PortNum, PortRedirection};
 
 #[derive(Parser)]
@@ -128,8 +128,8 @@ impl std::str::FromStr for IpWant {
 
 #[derive(Debug, Clone)]
 pub(crate) struct BindMount {
-    pub(crate) source: String,
-    pub(crate) destination: String,
+    pub(crate) source: OsString,
+    pub(crate) destination: OsString,
 }
 
 impl std::str::FromStr for BindMount {
@@ -141,9 +141,9 @@ impl std::str::FromStr for BindMount {
         let root = parsed.into_iter().next().unwrap();
         let mut iinner = root.into_inner();
         let mut inner = iinner.next().unwrap();
-        let source = inner.as_str().to_string();
+        let source = OsString::from(inner.as_str());
         inner = iinner.next().unwrap();
-        let destination = inner.as_str().to_string();
+        let destination = OsString::from(inner.as_str());
         Ok(BindMount {
             source,
             destination,

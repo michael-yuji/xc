@@ -22,11 +22,14 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+
+
 use super::{ConfigMod, Directive, JailContext};
 use crate::{format::EnvPair, jailfile::parse::Action};
 
 use anyhow::{bail, Result};
 use clap::Parser;
+use std::{path::PathBuf, ffi::OsString};
 use xc::models::MountSpec;
 
 #[derive(Parser, Debug)]
@@ -39,8 +42,8 @@ pub(crate) struct VolumeDirective {
     description: String,
     #[clap(long = "ro", action)]
     read_only: bool,
-    destination: String,
-    name: Option<String>,
+    destination: PathBuf,
+    name: Option<OsString>,
 }
 impl Directive for VolumeDirective {
     fn up_to_date(&self) -> bool {
@@ -69,13 +72,19 @@ impl Directive for VolumeDirective {
 
         let mount_spec = MountSpec {
             read_only: self.read_only,
-            destination: self.destination.to_string(),
+            destination: self.destination.clone(),
             required: self.required,
             volume_hints,
             description: self.description.to_string(),
         };
-
-        let name = self.name.as_ref().unwrap_or(&self.destination).to_string();
+/*
+        let name = self.name
+            .as_ref()
+            .unwrap_or(|| &self.destination.as_os_str().to_os_string());
+            */
+//        let name = self.name.as_ref().unwrap_or(&self.destination).to_string();
+        let name = self.name.clone()
+            .unwrap_or_else(|| self.destination.as_os_str().to_os_string());
 
         context
             .config_mods

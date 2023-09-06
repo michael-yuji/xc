@@ -29,11 +29,12 @@ use xc::models::MountSpec;
 use xc::{
     container::{
         error::PreconditionFailure,
-        request::{Mount, MountReq},
+        request::Mount,
     },
     precondition_failure,
 };
 
+use crate::ipc::MountReq;
 use crate::volume::VolumeDriverKind;
 use crate::{auth::Credential, volume::Volume};
 

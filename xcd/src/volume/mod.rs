@@ -28,6 +28,7 @@ use crate::config::config_manager::InventoryManager;
 use crate::volume::drivers::local::LocalDriver;
 use crate::volume::drivers::zfs::ZfsDriver;
 use crate::volume::drivers::VolumeDriver;
+use crate::ipc::MountReq;
 
 use freebsd::libc::EPERM;
 use serde::de::Deserializer;
@@ -36,7 +37,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use xc::container::error::PreconditionFailure;
-use xc::container::request::{Mount, MountReq};
+use xc::container::request::Mount;
 use xc::models::MountSpec;
 use xc::precondition_failure;
 

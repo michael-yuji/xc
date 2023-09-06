@@ -22,7 +22,9 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 pub struct DelegateCredential {
@@ -33,7 +35,7 @@ pub struct DelegateCredential {
 #[derive(Clone, Debug)]
 pub struct CopyFileReq {
     pub source: std::os::fd::RawFd,
-    pub destination: String,
+    pub destination: OsString,
 }
 
 /// Ip allocation requests from user
@@ -75,24 +77,24 @@ impl FromStr for NetworkAllocRequest {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Mount {
     pub source: String,
-    pub dest: String,
+    pub dest: PathBuf,
     pub fs: String,
     pub options: Vec<String>,
 }
 
 impl Mount {
-    pub fn procfs(mountpoint: &str) -> Mount {
+    pub fn procfs(mountpoint: impl AsRef<Path>) -> Mount {
         Mount {
             source: "proc".to_string(),
-            dest: mountpoint.to_string(),
+            dest: mountpoint.as_ref().to_path_buf(),
             fs: "procfs".to_string(),
             options: Vec::new(),
         }
     }
-    pub fn fdescfs(mountpoint: &str) -> Mount {
+    pub fn fdescfs(mountpoint: impl AsRef<Path>) -> Mount {
         Mount {
             source: "fdescfs".to_string(),
-            dest: mountpoint.to_string(),
+            dest: mountpoint.as_ref().to_path_buf(),
             fs: "fdescfs".to_string(),
             options: Vec::new(),
         }
@@ -103,16 +105,10 @@ impl Mount {
     ) -> Mount {
         Mount {
             source: source.as_ref().to_string_lossy().to_string(),
-            dest: mountpoint.as_ref().to_string_lossy().to_string(),
+            dest: mountpoint.as_ref().to_path_buf(),
             fs: "nullfs".to_string(),
             options: Vec::new(),
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct MountReq {
-    pub source: String,
-    pub dest: String,
-    pub read_only: bool,
-}

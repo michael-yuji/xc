@@ -36,6 +36,7 @@ use oci_util::layer::ChainId;
 use oci_util::models::{FreeOciConfig, OciConfig, OciConfigRootFs, OciInnerConfig};
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
+use std::ffi::OsString;
 use varutil::string_interpolation::{InterpolatedString, Var};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -183,7 +184,7 @@ pub struct JailConfig {
 
     pub special_mounts: Vec<SpecialMount>,
 
-    pub mounts: HashMap<String, MountSpec>,
+    pub mounts: HashMap<OsString, MountSpec>,
 
     #[serde(default)]
     pub datasets: HashMap<String, DatasetSpec>,
@@ -337,8 +338,11 @@ impl JailConfig {
             .clone()
             .and_then(|config| config.volumes)
             .map(|v| {
-                v.0.iter()
-                    .map(|destination| (destination.to_string(), MountSpec::new(destination)))
+                v.0.into_iter()
+                    .map(|destination| {
+                        let spec = MountSpec::new(&destination);
+                        (destination, spec)
+                    })
                     .collect()
             })
             .unwrap_or_else(HashMap::new);

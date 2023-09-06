@@ -26,6 +26,7 @@ use crate::format::{EnvPair, MaybeEnvPair};
 
 use clap::Parser;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use varutil::string_interpolation::{InterpolatedString, Var};
 use xc::models::exec::Exec;
@@ -74,7 +75,7 @@ pub(crate) enum PatchActions {
         read_only: bool,
         /// a name for the
         #[arg(long = "name")]
-        name: Option<String>,
+        name: Option<OsString>,
         /// mount point in the container
         mount_point: PathBuf,
 
@@ -167,9 +168,9 @@ impl PatchActions {
                 required,
                 read_only,
             } => {
-                let destination = mount_point.to_string_lossy().to_string();
+//                let destination = mount_point.to_string_lossy().to_string();
                 let description = description.clone().unwrap_or_default();
-                let key = name.clone().unwrap_or_else(|| destination.to_string());
+                let key = name.clone().unwrap_or_else(|| mount_point.as_os_str().to_os_string());
                 let mut volume_hints = HashMap::new();
                 for hint in hints.iter() {
                     volume_hints.insert(
@@ -178,7 +179,7 @@ impl PatchActions {
                     );
                 }
                 for (_, mount) in config.mounts.iter() {
-                    if mount.destination == destination {
+                    if &mount.destination == mount_point {
                         panic!("mounts with such mountpoint already exists");
                     }
                 }
@@ -186,7 +187,7 @@ impl PatchActions {
                     description,
                     read_only: *read_only,
                     volume_hints,
-                    destination,
+                    destination: mount_point.to_path_buf(),
                     required: *required,
                 };
                 config.mounts.insert(key, mountspec);

@@ -40,6 +40,7 @@ use oci_util::distribution::client::{BasicAuth, Registry};
 use oci_util::image_reference::{ImageReference, ImageTag};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::Seek;
 use std::net::IpAddr;
 use std::os::fd::{AsRawFd, FromRawFd};
@@ -48,7 +49,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::*;
-use xc::container::request::{MountReq, NetworkAllocRequest};
+use xc::container::request::NetworkAllocRequest;
 use xc::image_store::ImageStoreError;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailConfig;
@@ -187,13 +188,21 @@ async fn pull_image(
 #[derive(FromPacket, Serialize)]
 pub struct CopyFile {
     pub source: Fd,
-    pub destination: String,
+    pub destination: OsString,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct EntryPointSpec {
     pub entry_point: Option<String>,
     pub entry_point_args: Vec<String>,
+}
+
+#[derive(Serialize, FromPacket, Clone)]
+pub struct MountReq {
+    pub source: OsString,
+    pub dest: OsString,
+    pub evid: Maybe<Fd>,
+    pub read_only: bool,
 }
 
 #[derive(Serialize, FromPacket)]
@@ -203,7 +212,7 @@ pub struct InstantiateRequest {
     pub vnet: bool,
     pub ips: Vec<IpAssign>,
     pub ipreq: Vec<NetworkAllocRequest>,
-    pub mount_req: Vec<MountReq>,
+    pub mount_req: List<MountReq>,
     pub copies: List<CopyFile>,
     pub entry_point: Option<EntryPointSpec>,
     pub hostname: Option<String>,
@@ -225,6 +234,7 @@ pub struct InstantiateRequest {
     pub group: Option<String>,
     pub override_props: HashMap<String, String>,
     pub jail_datasets: Vec<PathBuf>,
+    pub children_max: u32,
 }
 
 impl InstantiateRequest {
@@ -259,7 +269,7 @@ impl Default for InstantiateRequest {
             vnet: false,
             ips: Vec::new(),
             ipreq: Vec::new(),
-            mount_req: Vec::new(),
+            mount_req: List::new(),
             copies: List::new(),
             entry_point: None,
             hostname: None,
@@ -281,6 +291,7 @@ impl Default for InstantiateRequest {
             group: None,
             override_props: HashMap::new(),
             jail_datasets: Vec::new(),
+            children_max: 0,
         }
     }
 }
@@ -1133,7 +1144,7 @@ async fn push_image(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateVolumeRequest {
     pub name: String,
-    pub template: Option<(ImageReference, String)>,
+    pub template: Option<(ImageReference, OsString)>,
     pub device: Option<PathBuf>,
     pub zfs_props: HashMap<String, String>,
     pub kind: VolumeDriverKind,

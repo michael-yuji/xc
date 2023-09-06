@@ -113,8 +113,6 @@ pub fn umount(mountpoint: impl AsRef<Path>) -> Result<(), MountError> {
         Err(MountError::MountPointNotFound(
             mp.to_string_lossy().to_string(),
         ))
-    } else if !mp.is_dir() {
-        Err(MountError::InvalidMountPointType)
     } else {
         Command::new(UMOUNT_CMD)
             .arg("-f")

@@ -27,13 +27,13 @@ use crate::format::dataset::DatasetParam;
 use crate::format::{BindMount, EnvPair, IpWant, PublishSpec};
 
 use clap::Parser;
-use ipc::packet::codec::{Fd, List};
+use ipc::packet::codec::{Fd, List, Maybe};
 use oci_util::image_reference::ImageReference;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::path::PathBuf;
-use xc::container::request::{MountReq, NetworkAllocRequest};
+use xc::container::request::NetworkAllocRequest;
 use xc::models::network::DnsSetting;
-use xcd::ipc::{CopyFile, InstantiateRequest};
+use xcd::ipc::{CopyFile, InstantiateRequest, MountReq};
 
 #[derive(Parser, Debug)]
 pub(crate) struct DnsArgs {
@@ -149,17 +149,31 @@ impl CreateArgs {
             .mounts
             .into_iter()
             .map(|mount| {
-                let source = if mount.source.starts_with('.') || mount.source.starts_with('/') {
-                    std::fs::canonicalize(mount.source)
-                        .unwrap()
-                        .to_string_lossy()
-                        .to_string()
+                let sst = mount.source.to_string_lossy().to_string();
+                let (source, evid) = if sst.starts_with('.') || sst.starts_with('/') {
+
+                    let source = std::fs::canonicalize(mount.source)
+                        .unwrap();
+
+                    let flag = if source.is_dir() {
+                        nix::fcntl::OFlag::O_DIRECTORY
+                    } else {
+                        nix::fcntl::OFlag::O_RDWR
+                    };
+
+                    let fd = Maybe::Some(Fd(nix::fcntl::open(
+                        &source,
+                        flag,
+                        nix::sys::stat::Mode::empty()).unwrap()));
+
+                    (source.as_os_str().to_os_string(), fd /*Maybe::None*/)
                 } else {
-                    mount.source
+                    (mount.source, Maybe::None)
                 };
                 MountReq {
                     read_only: false,
                     source,
+                    evid,
                     dest: mount.destination,
                 }
             })
@@ -224,7 +238,7 @@ impl CreateArgs {
             envs,
             vnet: self.vnet,
             ipreq: self.networks,
-            mount_req,
+            mount_req: List::from_iter(mount_req),
             entry_point: None,
             extra_layers,
             no_clean: self.no_clean,

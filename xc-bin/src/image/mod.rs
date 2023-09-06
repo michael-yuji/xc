@@ -202,8 +202,8 @@ pub(crate) fn use_image_action(
                     }
                     println!("    Volumes:");
                     for (name, spec) in config.mounts.iter() {
-                        println!("        {name}:");
-                        println!("            Mount Point: {}", spec.destination);
+                        println!("        {name:?}:");
+                        println!("            Mount Point: {:?}", spec.destination);
                         println!("            Required: {}", spec.required);
                         println!("            Read-Only: {}", spec.read_only);
                         if !spec.volume_hints.is_empty() {

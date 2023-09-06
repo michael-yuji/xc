@@ -28,6 +28,7 @@ use anyhow::anyhow;
 use clap::Parser;
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use xcd::ipc::*;
 use xcd::volume::VolumeDriverKind;
 
@@ -38,7 +39,7 @@ pub(crate) enum VolumeAction {
         #[arg(short = 'i', long = "image")]
         image_reference: Option<ImageReference>,
         #[arg(short = 'v', long = "volume")]
-        volume: Option<String>,
+        volume: Option<OsString>,
         /// The alternative path
         #[arg(short = 's')]
         device: Option<PathBuf>,

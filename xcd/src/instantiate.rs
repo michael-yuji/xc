@@ -32,6 +32,7 @@ use crate::volume::{Volume, VolumeManager};
 use anyhow::Context;
 use freebsd::event::EventFdNotify;
 use freebsd::libc::{EINVAL, EIO, ENOENT, EPERM};
+use ipc::packet::codec::Maybe;
 use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -174,13 +175,13 @@ impl AppliedInstantiateRequest {
             .iter()
             .map(|c| xc::container::request::CopyFileReq {
                 source: c.source.as_raw_fd(),
-                destination: c.destination.to_string(),
+                destination: c.destination.clone(),
             })
             .collect();
 
         let mut mount_specs = oci_config.jail_config().mounts;
 
-        for req in request.mount_req.iter() {
+        for req in request.mount_req.clone().to_vec().iter() {
             let source_path = std::path::Path::new(&req.source);
 
             if !source_path.is_absolute() {
@@ -205,7 +206,7 @@ impl AppliedInstantiateRequest {
 
         for (key, spec) in mount_specs.iter() {
             if spec.required {
-                precondition_failure!(ENOENT, "Required volume {key} is not mounted");
+                precondition_failure!(ENOENT, "Required volume {key:?} is not mounted");
             }
         }
 
@@ -291,6 +292,7 @@ pub struct InstantiateBlueprint {
     pub override_props: HashMap<String, String>,
     pub enforce_statfs: EnforceStatfs,
     pub jailed_datasets: Vec<std::path::PathBuf>,
+    pub children_max: u32,
 }
 
 impl InstantiateBlueprint {
@@ -397,7 +399,7 @@ impl InstantiateBlueprint {
         let mut mount_specs = oci_config.jail_config().mounts;
         let mut added_mount_specs = HashMap::new();
 
-        for req in request.base.mount_req.iter() {
+        for req in request.base.mount_req.clone().to_vec().iter() {
             let source_path = std::path::Path::new(&req.source);
 
             let volume = if !source_path.is_absolute() {
@@ -418,7 +420,27 @@ impl InstantiateBlueprint {
                     }
                 }
             } else {
-                Volume::adhoc(source_path)
+                match &req.evid {
+                    Maybe::None => precondition_failure!(ENOENT, "missing evidence"),
+                    Maybe::Some(fd) => {
+
+                        println!("process to check evidence");
+                        let Ok(stat) = freebsd::nix::sys::stat::fstat(fd.as_raw_fd()) else {
+                            println!("cannot stat evidence");
+                            precondition_failure!(ENOENT, "cannot stat evidence")
+                        };
+                        let check_stat = freebsd::nix::sys::stat::stat(source_path).unwrap();
+                        println!("c: {}", stat.st_ino);
+                        println!("n: {}", check_stat.st_ino);
+                        if stat.st_ino != check_stat.st_ino {
+                            precondition_failure!(ENOENT, "evidence inode mismatch")
+                        }
+
+                        freebsd::nix::unistd::close(fd.as_raw_fd());
+
+                        Volume::adhoc(source_path)
+                    }
+                }
             };
 
             let mount_spec = mount_specs.remove(&req.dest);
@@ -503,6 +525,7 @@ impl InstantiateBlueprint {
             override_props: request.base.override_props,
             enforce_statfs: request.enforce_statfs,
             jailed_datasets: request.base.jail_datasets,
+            children_max: request.base.children_max,
         })
     }
 }

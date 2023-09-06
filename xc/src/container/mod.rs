@@ -99,6 +99,8 @@ pub struct CreateContainer {
     pub enforce_statfs: EnforceStatfs,
 
     pub jailed_datasets: Vec<PathBuf>,
+
+    pub children_max: u32,
 }
 
 impl CreateContainer {
@@ -269,6 +271,10 @@ impl CreateContainer {
                 EnforceStatfs::ExposeAll => Value::Int(0),
             },
         );
+
+        if self.children_max > 0 {
+            proto = proto.param("children.max", Value::Int(self.children_max as i32));
+        }
 
         for (key, value) in self.override_props.iter() {
             const STR_KEYS: [&str; 6] = [
