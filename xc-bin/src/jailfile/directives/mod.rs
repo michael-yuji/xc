@@ -114,7 +114,7 @@ impl ConfigMod {
                 }
             }
             Self::Volume(name, mount_spec) => {
-                config.mounts.insert(name.clone(), mount_spec.clone());
+                config.mounts.insert(name.to_string_lossy().to_string(), mount_spec.clone());
             }
             Self::WorkDir(entry_point, dir) => {
                 let work_dir = dir.to_string();

@@ -1170,7 +1170,7 @@ async fn create_volume(
             {
                 Ok(image) => {
                     let specs = image.manifest.jail_config().mounts;
-                    specs.get(&volume).cloned()
+                    specs.get(volume.to_str().unwrap()).cloned()
                 }
                 Err(ImageStoreError::ManifestNotFound(manifest)) => {
                     return enoent(&format!("no such manifest {manifest}"))

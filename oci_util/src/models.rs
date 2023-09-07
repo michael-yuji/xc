@@ -28,7 +28,6 @@ use self::aux::Set;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::ffi::OsString;
 
 pub const OCI_IMAGE_INDEX: &str = "application/vnd.oci.image.index.v1+json";
 pub const OCI_MANIFEST: &str = "application/vnd.oci.image.manifest.v1+json";
@@ -181,7 +180,7 @@ pub struct OciInnerConfig {
     pub env: Option<Vec<String>>,
     pub tty: Option<bool>,
     pub working_dir: Option<String>,
-    pub volumes: Option<Set<OsString>>,
+    pub volumes: Option<Set<String>>,
     pub exposed_ports: Option<Set<String>>,
     pub user: Option<String>,
     pub labels: Option<HashMap<String, String>>,

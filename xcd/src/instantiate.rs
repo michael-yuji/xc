@@ -201,7 +201,7 @@ impl AppliedInstantiateRequest {
                 }
             }
 
-            mount_specs.remove(&req.dest);
+            mount_specs.remove(req.dest.to_str().unwrap());
         }
 
         for (key, spec) in mount_specs.iter() {
@@ -442,7 +442,7 @@ impl InstantiateBlueprint {
                 }
             };
 
-            let mount_spec = mount_specs.remove(&req.dest);
+            let mount_spec = mount_specs.remove(req.dest.to_str().unwrap());
 
             if mount_spec.is_some() {
                 added_mount_specs.insert(&req.dest, mount_spec.clone().unwrap());

@@ -255,15 +255,12 @@ impl ImageStore for SqliteImageStore {
         while let Ok(Some(row)) = rows.next() {
             let bytes: String = row.get(4)?;
             let manifest: JailImage = serde_json::from_str(&bytes)?;
-
             let hn: String = row.get(0)?;
-
             let image_reference = ImageReference {
                 hostname: if hn.is_empty() { None } else { Some(hn) },
                 name: row.get(1)?,
                 tag: ImageTag::Tag(row.get(2)?),
             };
-
             records.push(ImageRecord {
                 image_reference,
                 digest: row.get(3)?,

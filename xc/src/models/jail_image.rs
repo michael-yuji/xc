@@ -36,7 +36,6 @@ use oci_util::layer::ChainId;
 use oci_util::models::{FreeOciConfig, OciConfig, OciConfigRootFs, OciInnerConfig};
 use serde::{de::Visitor, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
-use std::ffi::OsString;
 use varutil::string_interpolation::{InterpolatedString, Var};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -153,7 +152,6 @@ pub struct JailConfig {
     /// The secure level this jail is required
     pub secure_level: i8,
 
-    //    pub original_oci_config: Option<OciConfig>,
     /// is vnet required
     #[serde(default)]
     pub vnet: bool,
@@ -184,7 +182,7 @@ pub struct JailConfig {
 
     pub special_mounts: Vec<SpecialMount>,
 
-    pub mounts: HashMap<OsString, MountSpec>,
+    pub mounts: HashMap<String, MountSpec>,
 
     #[serde(default)]
     pub datasets: HashMap<String, DatasetSpec>,

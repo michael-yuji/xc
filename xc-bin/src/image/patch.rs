@@ -192,7 +192,7 @@ impl PatchActions {
                     destination: mount_point.to_path_buf(),
                     required: *required,
                 };
-                config.mounts.insert(key, mountspec);
+                config.mounts.insert(key.to_string_lossy().to_string(), mountspec);
             }
             PatchActions::ModAllow { allows } => {
                 for allow in allows.iter() {
