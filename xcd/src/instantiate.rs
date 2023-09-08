@@ -324,11 +324,18 @@ impl InstantiateBlueprint {
         let vnet = request.base.vnet || config.vnet;
         let envs = request.envs.clone();
 
-        if config.linux && !freebsd::exists_kld("linux64") {
-            precondition_failure!(
-                EIO,
-                "Linux image require linux64 kmod but it is missing from the system"
-            );
+        if config.linux {
+            if !freebsd::exists_kld("linux64") {
+                precondition_failure!(
+                    EIO,
+                    "Linux image require linux64 kmod but it is missing from the system"
+                );
+            } else if xc::util::elf_abi_fallback_brand() != "3" {
+                precondition_failure!(
+                    EIO,
+                    "kern.elf64.fallback_brand did not set to 3 (Linux)"
+                );
+            }
         }
 
         let main_started_notify = match request.base.main_started_notify {
