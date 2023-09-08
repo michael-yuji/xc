@@ -22,17 +22,17 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+use crate::auth::Credential;
 use crate::ipc::MountReq;
-use crate::volume::VolumeDriverKind;
-use crate::{auth::Credential, volume::Volume};
+use crate::resources::volume::{Volume, VolumeDriverKind};
 use freebsd::fs::zfs::{ZfsCreate, ZfsHandle};
 use freebsd::libc::{EEXIST, EIO, ENOENT, EPERM};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use xc::models::MountSpec;
 use xc::{
-    container::{error::PreconditionFailure, request::Mount},
-    precondition_failure,
+    container::{error::Error, request::Mount},
+    errx,
 };
 
 use super::VolumeDriver;
@@ -50,7 +50,7 @@ impl VolumeDriver for ZfsDriver {
         template: Option<MountSpec>,
         source: Option<std::path::PathBuf>,
         props: HashMap<String, String>,
-    ) -> Result<Volume, PreconditionFailure> {
+    ) -> Result<Volume, Error> {
         let mut zfs_props = props;
 
         if let Some(template) = template {
@@ -66,26 +66,26 @@ impl VolumeDriver for ZfsDriver {
         let dataset = match source {
             None => {
                 let Some(mut dataset) = self.default_dataset.clone() else {
-                    precondition_failure!(ENOENT, "Default volume dataset not set")
+                    errx!(ENOENT, "Default volume dataset not set")
                 };
                 dataset.push(name);
 
                 if self.handle.exists(&dataset) {
-                    precondition_failure!(EEXIST, "Dataset already exist")
+                    errx!(EEXIST, "Dataset already exist")
                 }
 
                 let mut zfs_create = ZfsCreate::new(&dataset, true, false);
                 zfs_create.set_props(zfs_props.clone());
 
                 if let Err(error) = self.handle.create(zfs_create) {
-                    precondition_failure!(EIO, "Cannot create zfs dataset: {error:?}")
+                    errx!(EIO, "Cannot create zfs dataset: {error:?}")
                 }
 
                 dataset
             }
             Some(dataset) => {
                 if !self.handle.exists(&dataset) {
-                    precondition_failure!(ENOENT, "Requested dataset does not exist")
+                    errx!(ENOENT, "Requested dataset does not exist")
                 }
                 dataset
             }
@@ -108,22 +108,22 @@ impl VolumeDriver for ZfsDriver {
         mount_req: &MountReq,
         mount_spec: Option<&MountSpec>,
         volume: &Volume,
-    ) -> Result<Mount, PreconditionFailure> {
+    ) -> Result<Mount, Error> {
         if !self.handle.exists(&volume.device) {
-            precondition_failure!(ENOENT, "No such dataset: {:?}", volume.device);
+            errx!(ENOENT, "No such dataset: {:?}", volume.device);
         }
         let Ok(Some(mount_point)) = self.handle.mount_point(&volume.device) else {
-            precondition_failure!(
+            errx!(
                 ENOENT,
                 "Dataset {:?} does not have a mount point",
                 volume.device
             );
         };
         let Ok(meta) = std::fs::metadata(&mount_point) else {
-            precondition_failure!(EIO, "cannot get metadata of {mount_point:?}");
+            errx!(EIO, "cannot get metadata of {mount_point:?}");
         };
         if !cred.can_mount(&meta, false) {
-            precondition_failure!(EPERM, "permission denied: {mount_point:?}");
+            errx!(EPERM, "permission denied: {mount_point:?}");
         }
 
         let mut mount_options = HashSet::new();

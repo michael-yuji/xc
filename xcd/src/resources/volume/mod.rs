@@ -24,22 +24,20 @@
 pub mod drivers;
 
 use crate::auth::Credential;
-use crate::config::config_manager::InventoryManager;
 use crate::ipc::MountReq;
-use crate::volume::drivers::local::LocalDriver;
-use crate::volume::drivers::zfs::ZfsDriver;
-use crate::volume::drivers::VolumeDriver;
+use crate::resources::volume::drivers::local::LocalDriver;
+use crate::resources::volume::drivers::zfs::ZfsDriver;
+use crate::resources::volume::drivers::VolumeDriver;
 
 use freebsd::libc::EPERM;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use xc::container::error::PreconditionFailure;
+use xc::container::error::Error;
 use xc::container::request::Mount;
+use xc::errx;
 use xc::models::MountSpec;
-use xc::precondition_failure;
 
 #[derive(Default, PartialEq, Eq, Debug, Clone)]
 pub enum VolumeDriverKind {
@@ -188,37 +186,17 @@ pub enum VolumeShareMode {
     SingleWriter,
 }
 
-pub(crate) struct VolumeManager {
-    inventory: Arc<Mutex<InventoryManager>>,
-    default_volume_dataset: Option<PathBuf>,
-    default_volume_dir: Option<PathBuf>,
-    constrained_shares: HashMap<String, VolumeShareMode>,
-}
-
-impl VolumeManager {
-    pub(crate) fn new(
-        inventory: Arc<Mutex<InventoryManager>>,
-        default_volume_dataset: Option<PathBuf>,
-        default_volume_dir: Option<PathBuf>,
-    ) -> VolumeManager {
-        VolumeManager {
-            inventory,
-            default_volume_dataset,
-            default_volume_dir,
-            constrained_shares: HashMap::new(),
-        }
-    }
-
+impl crate::resources::Resources {
     // insert or override a volume
     pub(crate) fn add_volume(&mut self, name: &str, volume: &Volume) {
-        self.inventory.lock().unwrap().modify(|inventory| {
+        self.inventory_manager.modify(|inventory| {
             inventory.volumes.insert(name.to_string(), volume.clone());
         });
     }
 
     pub(crate) fn list_volumes(&self) -> HashMap<String, Volume> {
         let mut hm = HashMap::new();
-        for (name, volume) in self.inventory.lock().unwrap().borrow().volumes.iter() {
+        for (name, volume) in self.inventory_manager.borrow().volumes.iter() {
             let mut vol = volume.clone();
             vol.name = Some(name.to_string());
             hm.insert(name.to_string(), vol);
@@ -227,9 +205,7 @@ impl VolumeManager {
     }
 
     pub(crate) fn query_volume(&self, name: &str) -> Option<Volume> {
-        self.inventory
-            .lock()
-            .unwrap()
+        self.inventory_manager
             .borrow()
             .volumes
             .get(name)
@@ -247,7 +223,7 @@ impl VolumeManager {
         template: Option<MountSpec>,
         source: Option<PathBuf>,
         props: HashMap<String, String>,
-    ) -> Result<(), PreconditionFailure> {
+    ) -> Result<(), Error> {
         let volume = match kind {
             VolumeDriverKind::Directory => {
                 let local_driver = LocalDriver {
@@ -276,16 +252,16 @@ impl VolumeManager {
         mount_req: &MountReq,
         mount_spec: Option<&MountSpec>,
         volume: &Volume,
-    ) -> Result<Mount, PreconditionFailure> {
+    ) -> Result<Mount, Error> {
         for (name, share) in self.constrained_shares.iter() {
             if volume.name.as_ref().unwrap() == name {
                 if share == &VolumeShareMode::Exclusive {
-                    precondition_failure!(
+                    errx!(
                         EPERM,
                         "The volume has been mounted exclusively by other container"
                     )
                 } else if share == &VolumeShareMode::SingleWriter && !mount_req.read_only {
-                    precondition_failure!(
+                    errx!(
                         EPERM,
                         "The volume has been mounted for exclusively write by other container"
                     )

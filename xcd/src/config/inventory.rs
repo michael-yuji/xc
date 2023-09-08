@@ -21,11 +21,14 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use tracing::error;
 
-use crate::network::Network;
-use crate::volume::Volume;
+use crate::resources::network::Network;
+use crate::resources::volume::Volume;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct Inventory {
@@ -33,4 +36,62 @@ pub(crate) struct Inventory {
     pub networks: HashMap<String, Network>,
     #[serde(default)]
     pub volumes: HashMap<String, Volume>,
+}
+
+/// Handle to access an on disk inventory storage.
+///
+/// This structure act as a middleman between the real, on disk inventory manifest and logics want
+/// to access and modify the inventories. On modification to the inventory via this structure, it
+/// automatically serialize the updated inventory and store on disk
+pub(crate) struct InventoryManager {
+    path: PathBuf,
+    cached: Inventory,
+}
+
+impl InventoryManager {
+    pub(crate) fn load_from_path(
+        path: impl AsRef<Path>,
+    ) -> Result<InventoryManager, anyhow::Error> {
+        let path = path.as_ref().to_path_buf();
+        let data = std::fs::read_to_string(&path).context("Cannot read config file")?;
+        let cached: Inventory = match serde_json::from_str(&data).context("Cannot parse config") {
+            Ok(inventory) => inventory,
+            Err(_) => {
+                let default = Inventory::default();
+                std::fs::write(&path, serde_json::to_vec_pretty(&default).unwrap())
+                    .context("cannot write default inventory")?;
+                default
+            }
+        };
+        Ok(InventoryManager { path, cached })
+    }
+
+    pub(crate) fn borrow(&self) -> &Inventory {
+        &self.cached
+    }
+
+    /// Modify the underlying config, and synchronize the changes to underlying config file
+    pub(crate) fn modify<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut Inventory),
+    {
+        let mut config = self.cached.clone();
+        let old_config = config.clone();
+
+        f(&mut config);
+
+        if old_config != config {
+            if let Ok(serialized) = serde_json::to_vec_pretty(&config) {
+                if std::fs::write(&self.path, serialized).is_err() {
+                    error!(
+                        "failed to write new config to config file at {:?}",
+                        self.path
+                    );
+                }
+            } else {
+                error!("failed to serialize new config to bytes");
+            }
+            self.cached = config
+        }
+    }
 }

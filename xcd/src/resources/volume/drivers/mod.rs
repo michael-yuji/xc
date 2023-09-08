@@ -28,7 +28,7 @@ use super::Volume;
 use crate::auth::Credential;
 use crate::ipc::MountReq;
 use std::collections::HashMap;
-use xc::container::{error::PreconditionFailure, request::Mount};
+use xc::container::{error::Error, request::Mount};
 use xc::models::MountSpec;
 
 pub trait VolumeDriver {
@@ -38,7 +38,7 @@ pub trait VolumeDriver {
         mount_req: &MountReq,
         mount_spec: Option<&MountSpec>,
         volume: &Volume,
-    ) -> Result<Mount, PreconditionFailure>;
+    ) -> Result<Mount, Error>;
 
     fn create(
         &self,
@@ -46,5 +46,5 @@ pub trait VolumeDriver {
         template: Option<MountSpec>,
         source: Option<std::path::PathBuf>,
         props: HashMap<String, String>,
-    ) -> Result<Volume, PreconditionFailure>;
+    ) -> Result<Volume, Error>;
 }

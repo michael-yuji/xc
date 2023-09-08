@@ -30,7 +30,7 @@ use oci_util::image_reference::ImageReference;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use xcd::ipc::*;
-use xcd::volume::VolumeDriverKind;
+use xcd::resources::volume::VolumeDriverKind;
 
 #[derive(Parser, Debug)]
 pub(crate) enum VolumeAction {

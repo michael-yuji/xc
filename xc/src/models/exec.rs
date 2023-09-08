@@ -105,7 +105,7 @@ impl Exec {
         &self,
         envs: &HashMap<String, String>,
         args: &[String],
-    ) -> Result<Jexec, crate::container::error::PreconditionFailure> {
+    ) -> Result<Jexec, crate::container::error::Error> {
         let mut argv = Vec::new();
         let mut resolved_envs = if self.clear_env {
             HashMap::new()
@@ -117,7 +117,7 @@ impl Exec {
 
         for env in self.required_envs.iter() {
             if !resolved_envs.contains_key(env.as_str()) {
-                return Err(crate::container::error::PreconditionFailure::new(
+                return Err(crate::container::error::Error::new(
                     freebsd::libc::ENOENT,
                     anyhow::anyhow!("missing required environment variable {env}"),
                 ));

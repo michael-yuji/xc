@@ -26,8 +26,8 @@ use crate::auth::Credential;
 use crate::context::ServerContext;
 use crate::image::pull::PullImageError;
 use crate::image::push::{PushImageError, PushImageStatusDesc};
-use crate::network::Network;
-use crate::volume::{Volume, VolumeDriverKind};
+use crate::resources::network::Network;
+use crate::resources::volume::{Volume, VolumeDriverKind};
 
 use freebsd::event::EventFdNotify;
 use freebsd::libc::{EINVAL, EIO};
@@ -333,8 +333,7 @@ async fn instantiate(
                     .await;
             if let Err(error) = instantiate_result {
                 tracing::error!("instantiate error: {error:#?}");
-                if let Some(err) = error.downcast_ref::<xc::container::error::PreconditionFailure>()
-                {
+                if let Some(err) = error.downcast_ref::<xc::container::error::Error>() {
                     ipc_err(err.errno(), &err.error_message())
                 } else {
                     enoent(error.to_string().as_str())
@@ -525,7 +524,7 @@ pub struct ListNetworkRequest {}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ListNetworkResponse {
-    pub network_info: Vec<crate::network_manager::NetworkInfo>,
+    pub network_info: Vec<crate::resources::network::NetworkInfo>,
 }
 
 #[ipc_method(method = "list_networks")]
@@ -535,9 +534,8 @@ async fn list_networks(
     request: ListNetworkRequest,
 ) -> GenericResult<ListNetworkResponse> {
     let context = context.read().await;
-    let network_manager = context.network_manager.clone();
-    let network_manager = network_manager.lock().await;
-    match network_manager.get_network_info() {
+    let resources = context.resources.read().await;
+    match resources.get_network_info() {
         Ok(network_info) => Ok(ListNetworkResponse { network_info }),
         Err(e) => ipc_err(EIO, e.to_string().as_str()),
     }
@@ -546,7 +544,6 @@ async fn list_networks(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateNetworkRequest {
     pub name: String,
-    //    pub ext_if: Option<String>,
     pub alias_iface: String,
     pub bridge_iface: String,
     pub subnet: ipcidr::IpCidr,
@@ -562,13 +559,13 @@ async fn create_network(
     request: CreateNetworkRequest,
 ) -> GenericResult<()> {
     let context = context.write().await;
-    let config = context.inventory();
+    let config = context.inventory().await;
     let existing_ifaces = freebsd::net::ifconfig::interfaces().unwrap();
     if config.networks.contains_key(&request.name) {
         ipc_err(EINVAL, "Network with such name already exists")
     } else {
-        let nm = context.network_manager.clone();
-        let nm = nm.lock().await;
+        let nm = context.resources.clone();
+        let mut nm = nm.write().await;
 
         if !existing_ifaces.contains(&request.alias_iface) {
             return enoent(format!("interface {} not found", request.alias_iface).as_str());
@@ -720,6 +717,17 @@ async fn list_site_rdr(
     } else {
         enoent(format!("no such container: {}", request.name).as_str())
     }
+}
+
+#[ipc_method(method = "list_rdr_rules")]
+async fn list_rdr_rules(
+    context: Arc<RwLock<ServerContext>>,
+    local_context: &mut ConnectionContext<Variables>,
+    request: (),
+) -> GenericResult<Vec<PortRedirection>> {
+    let context = context.read().await;
+    let rdr_rules = context.port_forward_table.all_rules();
+    Ok(rdr_rules)
 }
 
 #[derive(FromPacket)]
@@ -1239,6 +1247,7 @@ pub(crate) async fn register_to_service(
     service: &mut Service<tokio::sync::RwLock<ServerContext>, Variables>,
 ) {
     service.register_event_delegate(on_channel_closed).await;
+    service.register(list_rdr_rules).await;
     service.register(create_volume).await;
     service.register(list_volumes).await;
     service.register(commit_netgroup).await;

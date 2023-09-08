@@ -25,7 +25,7 @@ use rusqlite::{Connection, OptionalExtension, Params, Row};
 use std::net::IpAddr;
 use std::sync::Mutex;
 
-use crate::network::AddressStore;
+use crate::resources::network::AddressStore;
 
 pub struct Database {
     db: Mutex<Connection>,

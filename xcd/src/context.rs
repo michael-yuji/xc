@@ -23,25 +23,23 @@
 // SUCH DAMAGE.
 
 use crate::auth::Credential;
-use crate::config::config_manager::InventoryManager;
-use crate::config::inventory::Inventory;
 use crate::config::XcConfig;
 use crate::database::Database;
-use crate::dataset::JailedDatasetTracker;
 use crate::devfs_store::DevfsRulesetStore;
 use crate::image::pull::PullImageError;
 use crate::image::ImageManager;
 use crate::instantiate::{AppliedInstantiateRequest, InstantiateBlueprint};
 use crate::ipc::InstantiateRequest;
-use crate::network_manager::NetworkManager;
 use crate::port::PortForwardTable;
 use crate::registry::JsonRegistryProvider;
+use crate::resources::volume::{Volume, VolumeDriverKind};
+use crate::resources::Resources;
 use crate::site::Site;
 use crate::util::TwoWayMap;
-use crate::volume::{Volume, VolumeDriverKind, VolumeManager};
 
 use anyhow::Context;
 use freebsd::fs::zfs::ZfsHandle;
+use freebsd::libc::EIO;
 use freebsd::net::pf;
 use oci_util::digest::OciDigest;
 use oci_util::image_reference::{ImageReference, ImageTag};
@@ -52,8 +50,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
-use xc::container::error::PreconditionFailure;
+use xc::container::error::Error;
 use xc::container::ContainerManifest;
+use xc::errx;
 use xc::image_store::sqlite::SqliteImageStore;
 use xc::image_store::ImageRecord;
 use xc::models::jail_image::{JailConfig, JailImage};
@@ -66,7 +65,6 @@ mod context_provider {
 }
 
 pub struct ServerContext {
-    pub(crate) network_manager: Arc<Mutex<NetworkManager>>,
     pub(crate) sites: HashMap<String, Arc<RwLock<Site>>>,
     pub(crate) terminated_sites: Vec<(String, Arc<RwLock<Site>>)>,
 
@@ -82,10 +80,7 @@ pub struct ServerContext {
     pub(crate) ng2jails: HashMap<String, Vec<String>>,
     pub(crate) jail2ngs: HashMap<String, Vec<String>>,
 
-    pub(crate) inventory: Arc<std::sync::Mutex<InventoryManager>>,
-
-    pub(crate) volume_manager: Arc<Mutex<VolumeManager>>,
-    pub(crate) dataset_tracker: Arc<RwLock<JailedDatasetTracker>>,
+    pub(crate) resources: Arc<RwLock<Resources>>,
 }
 
 impl ServerContext {
@@ -105,14 +100,9 @@ impl ServerContext {
         db.perform(xc::res::create_tables)
             .expect("cannot create tables");
 
-        let inventory = Arc::new(std::sync::Mutex::new(
-            InventoryManager::load_from_path(&config.inventory).expect("cannot write inventory"),
-        ));
-
-        let network_manager = Arc::new(Mutex::new(NetworkManager::new(db, inventory.clone())));
-
         let is = Arc::new(Mutex::new(image_store));
         let provider = JsonRegistryProvider::from_path(&config.registries).unwrap();
+        let resources = Arc::new(RwLock::new(Resources::new(db, &config)));
 
         let image_manager = ImageManager::new(
             is,
@@ -121,14 +111,7 @@ impl ServerContext {
             Arc::new(Mutex::new(Box::new(provider))),
         );
 
-        let volume_manager = Arc::new(Mutex::new(VolumeManager::new(
-            inventory.clone(),
-            config.default_volume_dataset.clone(),
-            None,
-        )));
-
         ServerContext {
-            network_manager,
             alias_map: TwoWayMap::new(),
             devfs_store: DevfsRulesetStore::new(config.devfs_id_offset, config.force_devfs_ruleset),
             image_manager: Arc::new(RwLock::new(image_manager)),
@@ -138,9 +121,7 @@ impl ServerContext {
             port_forward_table: PortForwardTable::new(),
             ng2jails: HashMap::new(),
             jail2ngs: HashMap::new(),
-            inventory,
-            volume_manager,
-            dataset_tracker: Arc::new(RwLock::new(JailedDatasetTracker::default())),
+            resources,
         }
     }
 
@@ -148,8 +129,13 @@ impl ServerContext {
         self.config.clone()
     }
 
-    pub(crate) fn inventory(&self) -> Inventory {
-        self.inventory.lock().unwrap().borrow().clone()
+    pub(crate) async fn inventory(&self) -> crate::config::inventory::Inventory {
+        self.resources
+            .read()
+            .await
+            .inventory_manager
+            .borrow()
+            .clone()
     }
 
     pub(crate) fn create_channel(
@@ -380,17 +366,21 @@ impl ServerContext {
     }
 
     /// Reload the entry pf anchor "xc-rdr"
-    pub fn reload_pf_rdr_anchor(&self) -> Result<(), std::io::Error> {
+    pub fn reload_pf_rdr_anchor(&self) -> Result<(), Error> {
         let rules = self.port_forward_table.generate_rdr_rules();
         info!(rules, "reloading xc-rdr anchor");
-        pf::is_pf_enabled().and_then(|enabled| {
+        if let Err(error) = pf::is_pf_enabled().and_then(|enabled| {
             if enabled {
                 pf::set_rules_unchecked(Some("xc-rdr".to_string()), &rules)
             } else {
                 warn!("pf is not enabled");
                 Ok(())
             }
-        })
+        }) {
+            errx!(EIO, "pfctl error: {error:?}")
+        } else {
+            Ok(())
+        }
     }
 
     pub(crate) async fn terminate(&mut self, id: &str) -> Result<(), anyhow::Error> {
@@ -409,9 +399,10 @@ impl ServerContext {
                 return Err(err);
             }
 
-            let mut nm = self.network_manager.lock().await;
+            let mut resources = self.resources.write().await;
+            //            let mut nm = self.network_manager.lock().await;
 
-            let addresses = nm
+            let addresses = resources
                 .release_addresses(id)
                 .context("sqlite failure on ip address release")?;
 
@@ -429,7 +420,9 @@ impl ServerContext {
             self.port_forward_table.remove_rules(id);
             self.reload_pf_rdr_anchor()?;
             self.alias_map.remove_all_referenced(id);
-            self.dataset_tracker.write().await.release_container(id);
+
+            resources.dataset_tracker.release_container(id);
+            //            self.dataset_tracker.write().await.release_container(id);
 
             if let Some(networks) = self.jail2ngs.get(id) {
                 for network in networks.iter() {
@@ -559,47 +552,25 @@ impl ServerContext {
             site.stage(image)?;
             let name = request.name.clone();
 
-            let applied = {
-                let network_manager = this.network_manager.clone();
-                let network_manager = network_manager.lock().await;
-                let volume_manager = this.volume_manager.clone();
-                let volume_manager = volume_manager.lock().await;
-                AppliedInstantiateRequest::new(
-                    request,
-                    image,
-                    &cred,
-                    &network_manager,
-                    &volume_manager,
-                )?
-            };
+            let resources_ref = this.resources.clone();
+            let mut resources = resources_ref.write().await;
+
+            let applied =
+                { AppliedInstantiateRequest::new(request, image, &cred, &mut resources)? };
 
             let blueprint = {
-                let network_manager = this.network_manager.clone();
-                let mut network_manager = network_manager.lock().await;
-                let volume_manager = this.volume_manager.clone();
-                let volume_manager = volume_manager.lock().await;
-                let dataset_tracker = this.dataset_tracker.clone();
-                let mut dataset_tracker = dataset_tracker.write().await;
-
                 InstantiateBlueprint::new(
                     id,
                     image,
                     applied,
                     &mut this.devfs_store,
                     &cred,
-                    &mut network_manager,
-                    &volume_manager,
-                    &mut dataset_tracker,
+                    &mut resources,
                 )?
             };
 
             if pf::is_pf_enabled().unwrap_or_default() {
-                if let Some(map) = this
-                    .network_manager
-                    .lock()
-                    .await
-                    .get_allocated_addresses(id)
-                {
+                if let Some(map) = resources.get_allocated_addresses(id) {
                     for (network, addresses) in map.iter() {
                         let table = format!("xc:network:{network}");
                         let result = pf::table_add_addresses(None, &table, addresses);
@@ -688,7 +659,7 @@ impl ServerContext {
     }
 
     pub(crate) async fn list_volumes(&self) -> HashMap<String, Volume> {
-        self.volume_manager.lock().await.list_volumes()
+        self.resources.read().await.list_volumes()
     }
 
     pub(crate) async fn create_volume(
@@ -698,9 +669,9 @@ impl ServerContext {
         kind: VolumeDriverKind,
         source: Option<std::path::PathBuf>,
         zfs_props: HashMap<String, String>,
-    ) -> Result<(), PreconditionFailure> {
-        self.volume_manager
-            .lock()
+    ) -> Result<(), Error> {
+        self.resources
+            .write()
             .await
             .create_volume(kind, name, template, source, zfs_props)
     }

@@ -27,13 +27,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use xc::models::MountSpec;
 use xc::{
-    container::{error::PreconditionFailure, request::Mount},
-    precondition_failure,
+    container::{error::Error, request::Mount},
+    errx,
 };
 
+use crate::auth::Credential;
 use crate::ipc::MountReq;
-use crate::volume::VolumeDriverKind;
-use crate::{auth::Credential, volume::Volume};
+use crate::resources::volume::{Volume, VolumeDriverKind};
 
 use super::VolumeDriver;
 
@@ -48,23 +48,23 @@ impl VolumeDriver for LocalDriver {
         _template: Option<MountSpec>,
         source: Option<std::path::PathBuf>,
         _props: HashMap<String, String>,
-    ) -> Result<Volume, PreconditionFailure> {
+    ) -> Result<Volume, Error> {
         let path = match source {
             None => {
                 let Some(mut parent) = self.default_subdir.clone() else {
-                    precondition_failure!(ENOENT, "Default volume directory not found")
+                    errx!(ENOENT, "Default volume directory not found")
                 };
                 parent.push(name);
                 if parent.exists() {
-                    precondition_failure!(ENOENT, "Target directory already exists")
+                    errx!(ENOENT, "Target directory already exists")
                 }
                 parent
             }
             Some(path) => {
                 if !path.exists() {
-                    precondition_failure!(ENOENT, "No such directory")
+                    errx!(ENOENT, "No such directory")
                 } else if !path.is_dir() {
-                    precondition_failure!(ENOTDIR, "Source path is not a directory")
+                    errx!(ENOTDIR, "Source path is not a directory")
                 }
                 path
             }
@@ -86,23 +86,23 @@ impl VolumeDriver for LocalDriver {
         mount_req: &MountReq,
         mount_spec: Option<&MountSpec>,
         volume: &Volume,
-    ) -> Result<Mount, PreconditionFailure> {
+    ) -> Result<Mount, Error> {
         let source_path = &volume.device;
         if !&source_path.exists() {
-            precondition_failure!(ENOENT, "source mount point does not exist: {source_path:?}");
+            errx!(ENOENT, "source mount point does not exist: {source_path:?}");
         }
         if !&source_path.is_dir() && !source_path.is_file() {
-            precondition_failure!(
+            errx!(
                 ENOTDIR,
                 "mount point source is not a file nor directory: {source_path:?}"
             )
         }
         let Ok(meta) = std::fs::metadata(&volume.device) else {
-            precondition_failure!(ENOENT, "invalid nullfs mount source")
+            errx!(ENOENT, "invalid nullfs mount source")
         };
 
         if !cred.can_mount(&meta, false) {
-            precondition_failure!(EPERM, "permission denied: {source_path:?}")
+            errx!(EPERM, "permission denied: {source_path:?}")
         }
 
         let mut mount_options = HashSet::new();

@@ -291,7 +291,8 @@ impl CompressionFormatExt for std::fs::File {
 
 pub fn elf_abi_fallback_brand() -> String {
     Ctl::new("kern.elf64.fallback_brand")
-        .expect("cannot sysctl").value_string()
+        .expect("cannot sysctl")
+        .value_string()
         .expect("cannot get sysctl output as string")
 }
 

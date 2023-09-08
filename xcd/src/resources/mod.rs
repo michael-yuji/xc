@@ -21,53 +21,45 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-mod auth;
-mod config;
-mod context;
-mod database;
-mod dataset;
-mod devfs_store;
-mod image;
-mod instantiate;
-pub mod ipc;
-mod port;
-mod registry;
-pub mod resources;
-mod site;
-mod task;
-mod util;
-
+use crate::config::inventory::InventoryManager;
 use crate::config::XcConfig;
-
-use clap::Parser;
-use context::ServerContext;
+use crate::database::Database;
+use crate::dataset::JailedDatasetTracker;
+use crate::resources::volume::VolumeShareMode;
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::info;
 
-pub async fn xmain() -> Result<(), anyhow::Error> {
-    tracing_subscriber::fmt::init();
-    let args = crate::config::XcConfigArg::parse();
+pub(crate) mod network;
+pub mod volume;
 
-    let config_path = &args.config_dir;
-    info!("loading configuration from {config_path:?}");
+pub(crate) struct Resources {
+    pub(crate) db: Arc<Database>,
+    pub(crate) inventory_manager: InventoryManager,
+    // network: { container: [address] }
+    pub(crate) net_addr_alloc_cache: HashMap<String, HashMap<String, Vec<IpAddr>>>,
 
-    let config_file = std::fs::OpenOptions::new().read(true).open(config_path)?;
+    pub(crate) default_volume_dataset: Option<PathBuf>,
+    pub(crate) default_volume_dir: Option<PathBuf>,
 
-    let mut config: XcConfig = serde_yaml::from_reader(config_file)?;
-    config.merge(args);
+    pub(crate) constrained_shares: HashMap<String, VolumeShareMode>,
 
-    let path = config.socket_path.to_path_buf();
-    info!("config: {config:#?}");
-
-    config.prepare()?;
-
-    let context = Arc::new(RwLock::new(ServerContext::new(config)));
-    let join_handle = ServerContext::create_channel(context, &path)?;
-    join_handle.await?;
-
-    Ok(())
+    pub(crate) dataset_tracker: JailedDatasetTracker,
 }
 
-#[cfg(test)]
-mod tests {}
+impl Resources {
+    pub(crate) fn new(database: Arc<Database>, config: &XcConfig) -> Resources {
+        let inventory_manager =
+            InventoryManager::load_from_path(&config.inventory).expect("cannot read inventory");
+        Resources {
+            db: database,
+            inventory_manager,
+            default_volume_dataset: config.default_volume_dataset.clone(),
+            default_volume_dir: None,
+            net_addr_alloc_cache: HashMap::new(),
+            constrained_shares: HashMap::new(),
+            dataset_tracker: JailedDatasetTracker::default(),
+        }
+    }
+}

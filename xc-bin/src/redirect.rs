@@ -39,6 +39,7 @@ pub(crate) enum RdrAction {
         #[arg(short = 'H', action)]
         without_header: bool,
     },
+    ShowRules,
 }
 
 pub(crate) fn use_rdr_action(
@@ -70,6 +71,14 @@ pub(crate) fn use_rdr_action(
                 }
                 for rdr in response.iter() {
                     println!("{}", rdr.to_pf_rule());
+                }
+            }
+        }
+        RdrAction::ShowRules => {
+            let response = do_list_rdr_rules(conn, ())?;
+            if let Ok(response) = response {
+                for rule in response.iter() {
+                    println!("{}", rule.to_pf_rule());
                 }
             }
         }

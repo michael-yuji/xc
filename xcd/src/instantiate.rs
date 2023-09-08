@@ -23,11 +23,10 @@
 // SUCH DAMAGE.
 
 use crate::auth::Credential;
-use crate::dataset::JailedDatasetTracker;
 use crate::devfs_store::DevfsRulesetStore;
 use crate::ipc::InstantiateRequest;
-use crate::network_manager::NetworkManager;
-use crate::volume::{Volume, VolumeManager};
+use crate::resources::volume::Volume;
+use crate::resources::Resources;
 
 use anyhow::Context;
 use freebsd::event::EventFdNotify;
@@ -39,12 +38,12 @@ use std::net::IpAddr;
 use std::os::fd::{AsRawFd, RawFd};
 use varutil::string_interpolation::InterpolatedString;
 use xc::container::request::{CopyFileReq, Mount, NetworkAllocRequest};
+use xc::errx;
 use xc::format::devfs_rules::DevfsRule;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
 use xc::models::network::{DnsSetting, IpAssign};
 use xc::models::EnforceStatfs;
-use xc::precondition_failure;
 
 pub struct AppliedInstantiateRequest {
     base: InstantiateRequest,
@@ -63,8 +62,7 @@ impl AppliedInstantiateRequest {
         mut request: InstantiateRequest,
         oci_config: &JailImage,
         cred: &Credential,
-        network_manager: &NetworkManager,
-        volume_manager: &VolumeManager,
+        resources: &mut Resources,
     ) -> anyhow::Result<AppliedInstantiateRequest> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let available_allows = xc::util::jail_allowables();
@@ -82,7 +80,7 @@ impl AppliedInstantiateRequest {
                         .as_ref()
                         .map(|d| format!(" - {d}"))
                         .unwrap_or_default();
-                    precondition_failure!(
+                    errx!(
                         ENOENT,
                         "missing required environment variable: {key}{extra_info}"
                     );
@@ -142,7 +140,7 @@ impl AppliedInstantiateRequest {
         for assign in request.ips.iter() {
             let iface = &assign.interface;
             if !existing_ifaces.contains(iface) {
-                precondition_failure!(ENOENT, "missing network interface {iface}");
+                errx!(ENOENT, "missing network interface {iface}");
             }
         }
 
@@ -152,7 +150,7 @@ impl AppliedInstantiateRequest {
                 if available_allows.contains(allow) {
                     allows.push(allow.to_string());
                 } else {
-                    precondition_failure!(EIO, "allow.{allow} is not available on this system");
+                    errx!(EIO, "allow.{allow} is not available on this system");
                 }
             }
             allows
@@ -186,16 +184,13 @@ impl AppliedInstantiateRequest {
 
             if !source_path.is_absolute() {
                 let name = source_path.to_string_lossy().to_string();
-                match volume_manager.query_volume(&name) {
+                match resources.query_volume(&name) {
                     None => {
-                        precondition_failure!(ENOENT, "no such volume {name}")
+                        errx!(ENOENT, "no such volume {name}")
                     }
                     Some(volume) => {
                         if !volume.can_mount(cred.uid()) {
-                            precondition_failure!(
-                                EPERM,
-                                "this user is not allowed to mount the volume"
-                            )
+                            errx!(EPERM, "this user is not allowed to mount the volume")
                         }
                     }
                 }
@@ -206,14 +201,14 @@ impl AppliedInstantiateRequest {
 
         for (key, spec) in mount_specs.iter() {
             if spec.required {
-                precondition_failure!(ENOENT, "Required volume {key:?} is not mounted");
+                errx!(ENOENT, "Required volume {key:?} is not mounted");
             }
         }
 
         for req in request.ipreq.iter() {
             let network = req.network();
-            if !network_manager.has_network(&network) {
-                precondition_failure!(ENOENT, "no such network: {network}");
+            if !resources.has_network(&network) {
+                errx!(ENOENT, "no such network: {network}");
             }
         }
 
@@ -236,7 +231,7 @@ impl AppliedInstantiateRequest {
             let applied = rule.apply(&envs);
             match applied.parse::<xc::format::devfs_rules::DevfsRule>() {
                 Err(error) => {
-                    precondition_failure!(EINVAL, "invaild devfs rule: [{applied}], {error}")
+                    errx!(EINVAL, "invaild devfs rule: [{applied}], {error}")
                 }
                 Ok(rule) => devfs_rules.push(rule),
             }
@@ -302,9 +297,12 @@ impl InstantiateBlueprint {
         request: AppliedInstantiateRequest,
         devfs_store: &mut DevfsRulesetStore,
         cred: &Credential,
+        /*
         network_manager: &mut NetworkManager,
         volume_manager: &VolumeManager,
         dataset_tracker: &mut JailedDatasetTracker,
+        */
+        resources: &mut Resources,
     ) -> anyhow::Result<InstantiateBlueprint> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let config = oci_config.jail_config();
@@ -312,9 +310,9 @@ impl InstantiateBlueprint {
             None => format!("xc-{id}"),
             Some(name) => {
                 if name.parse::<isize>().is_ok() {
-                    precondition_failure!(EINVAL, "Jail name cannot be numeric")
+                    errx!(EINVAL, "Jail name cannot be numeric")
                 } else if name.contains('.') {
-                    precondition_failure!(EINVAL, "Jail name cannot contain dot (.)")
+                    errx!(EINVAL, "Jail name cannot contain dot (.)")
                 } else {
                     name
                 }
@@ -326,15 +324,12 @@ impl InstantiateBlueprint {
 
         if config.linux {
             if !freebsd::exists_kld("linux64") {
-                precondition_failure!(
+                errx!(
                     EIO,
                     "Linux image require linux64 kmod but it is missing from the system"
                 );
             } else if xc::util::elf_abi_fallback_brand() != "3" {
-                precondition_failure!(
-                    EIO,
-                    "kern.elf64.fallback_brand did not set to 3 (Linux)"
-                );
+                errx!(EIO, "kern.elf64.fallback_brand did not set to 3 (Linux)");
             }
         }
 
@@ -348,14 +343,10 @@ impl InstantiateBlueprint {
         let mut default_router = None;
 
         for req in request.base.ipreq.iter() {
-            match network_manager.allocate(vnet, req, id) {
+            match resources.allocate(vnet, req, id) {
                 Ok((alloc, router)) => {
                     if !existing_ifaces.contains(&alloc.interface) {
-                        precondition_failure!(
-                            ENOENT,
-                            "missing network interface {}",
-                            &alloc.interface
-                        );
+                        errx!(ENOENT, "missing network interface {}", &alloc.interface);
                     }
                     if let Some(router) = router {
                         if default_router.is_none() {
@@ -365,28 +356,22 @@ impl InstantiateBlueprint {
                     ip_alloc.push(alloc);
                 }
                 Err(error) => match error {
-                    crate::network_manager::Error::Sqlite(error) => {
+                    crate::resources::network::Error::Sqlite(error) => {
                         Err(error).context("sqlite error on address allocation")?;
                     }
-                    crate::network_manager::Error::AllocationFailure(network) => {
-                        precondition_failure!(
-                            ENOENT,
-                            "cannot allocate address from network {network}"
-                        )
+                    crate::resources::network::Error::AllocationFailure(network) => {
+                        errx!(ENOENT, "cannot allocate address from network {network}")
                     }
-                    crate::network_manager::Error::AddressUsed(addr) => {
-                        precondition_failure!(ENOENT, "address {addr} already consumed")
+                    crate::resources::network::Error::AddressUsed(addr) => {
+                        errx!(ENOENT, "address {addr} already consumed")
                     }
-                    crate::network_manager::Error::InvalidAddress(addr, network) => {
-                        precondition_failure!(EINVAL, "{addr} is not in the subnet of {network}")
+                    crate::resources::network::Error::InvalidAddress(addr, network) => {
+                        errx!(EINVAL, "{addr} is not in the subnet of {network}")
                     }
-                    crate::network_manager::Error::NoSuchNetwork(network) => {
-                        precondition_failure!(
-                            ENOENT,
-                            "network {network} is missing from config file"
-                        )
+                    crate::resources::network::Error::NoSuchNetwork(network) => {
+                        errx!(ENOENT, "network {network} is missing from config file")
                     }
-                    crate::network_manager::Error::Other(error) => {
+                    crate::resources::network::Error::Other(error) => {
                         Err(error).context("error occured during address allocation")?;
                     }
                 },
@@ -411,16 +396,13 @@ impl InstantiateBlueprint {
 
             let volume = if !source_path.is_absolute() {
                 let name = source_path.to_string_lossy().to_string();
-                match volume_manager.query_volume(&name) {
+                match resources.query_volume(&name) {
                     None => {
-                        precondition_failure!(ENOENT, "no such volume {name}")
+                        errx!(ENOENT, "no such volume {name}")
                     }
                     Some(volume) => {
                         if !volume.can_mount(cred.uid()) {
-                            precondition_failure!(
-                                EPERM,
-                                "this user is not allowed to mount the volume"
-                            )
+                            errx!(EPERM, "this user is not allowed to mount the volume")
                         } else {
                             volume
                         }
@@ -428,18 +410,18 @@ impl InstantiateBlueprint {
                 }
             } else {
                 match &req.evid {
-                    Maybe::None => precondition_failure!(ENOENT, "missing evidence"),
+                    Maybe::None => errx!(ENOENT, "missing evidence"),
                     Maybe::Some(fd) => {
                         println!("process to check evidence");
                         let Ok(stat) = freebsd::nix::sys::stat::fstat(fd.as_raw_fd()) else {
                             println!("cannot stat evidence");
-                            precondition_failure!(ENOENT, "cannot stat evidence")
+                            errx!(ENOENT, "cannot stat evidence")
                         };
                         let check_stat = freebsd::nix::sys::stat::stat(source_path).unwrap();
                         println!("c: {}", stat.st_ino);
                         println!("n: {}", check_stat.st_ino);
                         if stat.st_ino != check_stat.st_ino {
-                            precondition_failure!(ENOENT, "evidence inode mismatch")
+                            errx!(ENOENT, "evidence inode mismatch")
                         }
 
                         freebsd::nix::unistd::close(fd.as_raw_fd());
@@ -455,18 +437,18 @@ impl InstantiateBlueprint {
                 added_mount_specs.insert(&req.dest, mount_spec.clone().unwrap());
             }
 
-            let mount = volume_manager.mount(id, cred, req, mount_spec.as_ref(), &volume)?;
+            let mount = resources.mount(id, cred, req, mount_spec.as_ref(), &volume)?;
             mount_req.push(mount);
         }
 
         for dataset in request.base.jail_datasets.iter() {
-            if dataset_tracker.is_jailed(dataset) {
-                precondition_failure!(
+            if resources.dataset_tracker.is_jailed(dataset) {
+                errx!(
                     EPERM,
                     "another container is using this dataset: {dataset:?}"
                 )
             } else {
-                dataset_tracker.set_jailed(id, dataset)
+                resources.dataset_tracker.set_jailed(id, dataset)
             }
         }
 
