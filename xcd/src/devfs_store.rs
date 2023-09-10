@@ -57,6 +57,7 @@ impl DevfsRulesetStore {
                     )
                     .expect("");
                     self.next_ruleset_id += 1;
+                    self.rules.insert(digest, id);
                     id
                 }
             }
