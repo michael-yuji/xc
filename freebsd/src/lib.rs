@@ -235,7 +235,7 @@ pub fn get_username(uid: u32) -> Result<Option<String>, std::io::Error> {
         if nix::libc::getpwuid_r(
             uid,
             &mut pw,
-            buffer.as_mut_ptr(),
+            buffer.as_mut_ptr().cast(),
             bufsize as usize,
             &mut result,
         ) != 0
@@ -263,7 +263,7 @@ pub fn get_uid(username: impl AsRef<str>) -> Result<Option<u32>, std::io::Error>
         if nix::libc::getpwnam_r(
             name.as_ptr(),
             &mut pw,
-            buffer.as_mut_ptr(),
+            buffer.as_mut_ptr().cast(),
             bufsize as usize,
             &mut result,
         ) != 0
