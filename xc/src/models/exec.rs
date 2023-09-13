@@ -21,7 +21,10 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+
 use super::resolve_environ_order;
+use ipc::packet::codec::{Maybe, Fd, FromPacket};
+use ipc_macro::FromPacket;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::os::fd::RawFd;
@@ -48,6 +51,88 @@ pub enum StdioMode {
     },
 }
 
+pub enum IpcStdioMode {
+    Terminal,
+    Inherit,
+    Files {
+        stdout: Option<PathBuf>,
+        stderr: Option<PathBuf>,
+    },
+    Forward {
+        stdin: Maybe<Fd>,
+        stdout: Maybe<Fd>,
+        stderr: Maybe<Fd>
+    }
+}
+
+impl IpcStdioMode {
+    pub fn to_local(self) -> StdioMode {
+        match self {
+            Self::Terminal => StdioMode::Terminal,
+            Self::Inherit => StdioMode::Inherit,
+            Self::Files { stdout, stderr } => StdioMode::Files { stdout, stderr },
+            Self::Forward { stdin, stdout, stderr } => {
+                StdioMode::Forward {
+                    stdin: stdin.to_option().map(|fd| fd.0),
+                    stdout: stdout.to_option().map(|fd| fd.0),
+                    stderr: stderr.to_option().map(|fd| fd.0),
+                }
+            }
+        }
+    }
+}
+
+impl FromPacket for IpcStdioMode {
+    // we are abusing the `StdioMode` struct, in this mode, we store offset to the raw fd instead
+    // of the raw fds
+    type Dual = StdioMode;
+    fn encode_to_dual(self, fds: &mut Vec<i32>) -> Self::Dual {
+        match self {
+            Self::Terminal => StdioMode::Terminal,
+            Self::Inherit => StdioMode::Inherit,
+            Self::Files { stdout, stderr } => StdioMode::Files { stdout, stderr },
+            Self::Forward { stdin, stdout, stderr } => {
+                let stdin = if let Maybe::Some(fd) = stdin {
+                    let idx = fds.len();
+                    fds.push(fd.0);
+                    Some(idx as i32)
+                } else {
+                    None
+                };
+                let stdout = if let Maybe::Some(fd) = stdout {
+                    let idx = fds.len();
+                    fds.push(fd.0);
+                    Some(idx as i32)
+                } else {
+                    None
+                };
+                let stderr = if let Maybe::Some(fd) = stderr {
+                    let idx = fds.len();
+                    fds.push(fd.0);
+                    Some(idx as i32)
+                } else {
+                    None
+                };
+                StdioMode::Forward { stdin, stdout, stderr }
+            }
+        }
+    }
+    fn decode_from_dual(value: Self::Dual, fds: &[RawFd]) -> Self {
+        match value {
+            StdioMode::Terminal => Self::Terminal,
+            StdioMode::Inherit => Self::Inherit,
+            StdioMode::Files { stdout, stderr } => Self::Files { stdout, stderr },
+            StdioMode::Forward { stdin, stdout, stderr } => {
+                Self::Forward {
+                    stdin: Maybe::from_option(stdin.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
+                    stdout: Maybe::from_option(stdout.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
+                    stderr: Maybe::from_option(stderr.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
+                }
+            }
+        }
+    }
+}
+
 /// Executable parameters to be executed in container
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Jexec {
@@ -61,6 +146,37 @@ pub struct Jexec {
     pub output_mode: StdioMode,
     pub notify: Option<RawFd>,
     pub work_dir: Option<String>,
+}
+
+#[derive(FromPacket)]
+pub struct IpcJexec {
+    pub arg0: String,
+    pub args: Vec<String>,
+    pub envs: std::collections::HashMap<String, String>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub user: Option<String>,
+    pub group: Option<String>,
+    pub output_mode: IpcStdioMode,
+    pub notify: Maybe<Fd>,
+    pub work_dir: Option<String>,
+}
+
+impl IpcJexec {
+    pub fn to_local(self) -> Jexec {
+        Jexec {
+            arg0: self.arg0,
+            args: self.args,
+            envs: self.envs,
+            uid: self.uid,
+            gid: self.gid,
+            user: self.user,
+            group: self.group,
+            work_dir: self.work_dir,
+            notify: self.notify.to_option().map(|fd| fd.0),
+            output_mode: self.output_mode.to_local()
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

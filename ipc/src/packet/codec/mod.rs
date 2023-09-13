@@ -153,6 +153,7 @@ impl<T: FromPacket> FromPacket for List<T> {
 }
 
 /// Like Option<T> but without Serialize/Deserialize trait
+#[derive(Debug)]
 pub enum Maybe<T: FromPacket> {
     Some(T),
     None,

@@ -81,6 +81,8 @@ pub struct ServerContext {
     pub(crate) jail2ngs: HashMap<String, Vec<String>>,
 
     pub(crate) resources: Arc<RwLock<Resources>>,
+
+    pub(crate) ins_queue: HashMap<String, AppliedInstantiateRequest>,
 }
 
 impl ServerContext {
@@ -122,6 +124,7 @@ impl ServerContext {
             ng2jails: HashMap::new(),
             jail2ngs: HashMap::new(),
             resources,
+            ins_queue: HashMap::new(),
         }
     }
 
@@ -532,45 +535,28 @@ impl ServerContext {
         Ok(())
     }
 
-    /// Create a new site with id and instantiate a container in the site
-    pub(crate) async fn instantiate(
+    pub(crate) async fn continue_instantiate(
         this: Arc<RwLock<Self>>,
         id: &str,
-        image: &JailImage,
-        request: InstantiateRequest,
+        applied: AppliedInstantiateRequest,
         cred: Credential,
     ) -> anyhow::Result<()> {
-        let no_clean = request.no_clean;
-
-        context_provider::enter_instantiate!(|| &request);
+        let no_clean = applied.request.no_clean;
+        let name = applied.request.name.clone();
 
         let (site, notify) = {
             let this = this.clone();
             let mut this = this.write().await;
+            let res_ref = this.resources.clone();
+            let mut res = res_ref.write().await;
+
             let mut site = Site::new(id, this.config());
-
-            site.stage(image)?;
-            let name = request.name.clone();
-
-            let resources_ref = this.resources.clone();
-            let mut resources = resources_ref.write().await;
-
-            let applied =
-                { AppliedInstantiateRequest::new(request, image, &cred, &mut resources)? };
-
-            let blueprint = {
-                InstantiateBlueprint::new(
-                    id,
-                    image,
-                    applied,
-                    &mut this.devfs_store,
-                    &cred,
-                    &mut resources,
-                )?
-            };
+            site.stage(&applied.image)?;
+            let blueprint =
+                InstantiateBlueprint::new(id, applied, &mut this.devfs_store, &cred, &mut res)?;
 
             if pf::is_pf_enabled().unwrap_or_default() {
-                if let Some(map) = resources.get_allocated_addresses(id) {
+                if let Some(map) = res.get_allocated_addresses(id) {
                     for (network, addresses) in map.iter() {
                         let table = format!("xc:network:{network}");
                         let result = pf::table_add_addresses(None, &table, addresses);
@@ -625,7 +611,36 @@ impl ServerContext {
                 }
             }
         });
+
         Ok(())
+    }
+
+    /// Create a new site with id and instantiate a container in the site
+    pub(crate) async fn instantiate(
+        this: Arc<RwLock<Self>>,
+        id: &str,
+        image: &JailImage,
+        request: InstantiateRequest,
+        cred: Credential,
+    ) -> anyhow::Result<Vec<String>> {
+        context_provider::enter_instantiate!(|| &request);
+
+        let applied = {
+            let this = this.clone();
+            let this = this.write().await;
+            let resources_ref = this.resources.clone();
+            let mut resources = resources_ref.write().await;
+
+            AppliedInstantiateRequest::new(request, image, &cred, &mut resources)?
+        };
+        if !applied.devfs_rules.is_empty() {
+            let rules = applied.devfs_rules.iter().map(|r| r.to_string()).collect();
+            this.write().await.ins_queue.insert(id.to_string(), applied);
+            Ok(rules)
+        } else {
+            Self::continue_instantiate(this, id, applied, cred).await?;
+            Ok(Vec::new())
+        }
     }
 
     pub(crate) async fn push_image(

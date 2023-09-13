@@ -33,13 +33,14 @@ use crate::container::process::*;
 use crate::container::running::RunningContainer;
 use crate::container::{ContainerManifest, ProcessStat};
 use crate::elf::{brand_elf_if_unsupported, ElfBrand};
-use crate::models::exec::{Jexec, StdioMode};
+use crate::models::exec::{Jexec, StdioMode, IpcJexec};
 use crate::models::network::HostEntry;
 use crate::util::{epoch_now_nano, exists_exec};
 
 use anyhow::Context;
 use freebsd::event::{EventFdNotify, KEventExt};
 use freebsd::FreeBSDCommandExt;
+use ipc::packet::codec::FromPacket;
 use ipc::packet::codec::json::JsonPacket;
 use jail::process::Jailed;
 use nix::libc::intptr_t;
@@ -71,15 +72,8 @@ pub struct ProcessRunner {
 
     control_streams: HashMap<i32, ControlStream>,
 
-    //    created: Option<u64>,
-    //
-    //    /// This field records the epoch seconds when the container is "started", which defined by a
-    //    /// container that has completed its init-routine
-    //    started: Option<u64>,
-    //
-    //    finished_at: Option<u64>,
     /// If `auto_start` is true, the container executes its init routine automatically after
-    /// creation
+    /// create
     auto_start: bool,
 
     container: RunningContainer,
@@ -177,13 +171,7 @@ impl ProcessRunner {
         let exec_path = Path::new(&exec);
 
         if exec_path.is_absolute() {
-            let mut path = root.clone();
-            for component in exec_path.components() {
-                if component != Component::RootDir {
-                    path.push(component);
-                }
-            }
-            exists_exec(root, path, 64).unwrap()
+            exists_exec(root, exec_path, 64).unwrap()
         } else {
             env_path
                 .split(':')
@@ -393,12 +381,11 @@ impl ProcessRunner {
         use ipc::transport::PacketTransport;
 
         let packet = if method == "exec" {
-            let jexec: Jexec = serde_json::from_value(request.data.clone()).with_context(|| {
-                format!(
-                    "cannot deserialize request data, expected Jexec, got {}",
-                    request.data
-                )
-            })?;
+
+            let jexec = IpcJexec::from_packet_failable(request, |value| serde_json::from_value(value.clone()))
+                .context("cannot deserialize jexec")?;
+
+            let jexec = jexec.to_local();
 
             let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
             let result = self.spawn_process(&crate::util::gen_id(), &jexec, Some(notify), None);

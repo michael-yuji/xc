@@ -137,9 +137,14 @@ impl VolumeDriver for ZfsDriver {
             mount_options.insert(option.to_string());
         }
 
+        let real_dest = match mount_spec {
+            None => mount_req.dest.to_os_string(),
+            Some(spec) => spec.destination.as_os_str().to_os_string()
+        };
+
         Ok(Mount {
             options: Vec::from_iter(mount_options),
-            ..Mount::nullfs(&mount_point, &mount_req.dest)
+            ..Mount::nullfs(&mount_point, &real_dest)
         })
     }
 }

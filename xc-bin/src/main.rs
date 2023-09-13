@@ -607,6 +607,27 @@ fn main() -> Result<(), ActionError> {
             };
 
             if let Ok(res) = res {
+                eprintln!("required_cleanerce: {:?}", res.require_clearence.clone());
+
+                if !res.require_clearence.is_empty() {
+                    println!("this container require exposing these additional device nodes (y/n):");
+                    for dev in res.require_clearence.iter() {
+                        println!("    {dev}");
+                    }
+
+                    let mut s = String::new();
+                    std::io::stdin().read_line(&mut s).expect("cannot read user input");
+                    if s.to_lowercase().starts_with('y') {
+                        let req = ContinueInstantiateRequest {
+                            id: res.id.to_string(),
+                            clearences: res.require_clearence.clone()
+                        };
+                        _ = do_continue_instantiate(&mut conn, req)?;
+                    } else {
+                        std::process::exit(0)
+                    }
+                }
+
                 for publish in publish.iter() {
                     let redirection = publish.to_host_spec();
                     let req = DoRdr {
@@ -770,10 +791,8 @@ fn main() -> Result<(), ActionError> {
                 if let Some(socket) = response.terminal_socket {
                     _ = attach::run(socket);
                 }
-                /*
                 let exit = n.notified_sync_take_value();
                 std::process::exit((exit.unwrap_or(2) - 1) as i32)
-                */
             }
         }
         Action::Volume(action) => {

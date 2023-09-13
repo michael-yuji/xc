@@ -153,60 +153,47 @@ fn _realpath(
     if path.as_ref().is_relative() {
         Err(std::io::Error::new(
             std::io::ErrorKind::Other,
-            "path connot be relative path",
+            format!("path cannot be relative path: {:?}", path.as_ref()).as_str(),
         ))?;
     }
 
-    let mut path = path.as_ref().to_path_buf();
+    let path = path.as_ref().to_path_buf();
     let mut current = PathBuf::new();
     let mut real_path = root.clone();
     let mut directed = 0;
 
-    'p: while max_redirect > directed {
-        let mut components: VecDeque<_> = path.components().map(PathComp::from).collect();
+    let mut components: VecDeque<_> = path.components().map(PathComp::from).collect();
 
-        while let Some(head) = components.pop_front() {
-            if max_redirect <= directed {
-                return Ok(None);
+    while let Some(head) = components.pop_front() {
+        if max_redirect <= directed {
+            return Ok(None);
+        }
+        match head {
+            PathComp::RootDir => {
+                current.push(head);
+                real_path = root.clone();
             }
-            match head {
-                PathComp::RootDir => {
-                    current.push(head);
-                    real_path = root.clone();
+            PathComp::CurDir => continue,
+            PathComp::ParentDir => {
+                if !current.pop() {
+                    return Ok(None);
                 }
-                PathComp::CurDir => continue,
-                PathComp::ParentDir => {
-                    if !current.pop() {
-                        return Ok(None);
-                    }
-                    real_path.pop();
-                }
-                PathComp::Normal(ent) => {
-                    current.push(&ent);
-                    real_path.push(&ent);
-                }
+                real_path.pop();
             }
-
-            if real_path.is_symlink() {
-                directed += 1;
-                let link = real_path.read_link()?;
-                let link_components = link.components();
-                if link.is_relative() {
-                    for component in link_components.rev() {
-                        components.push_front(PathComp::from(component));
-                    }
-                } else {
-                    path = link.to_path_buf();
-                    current = PathBuf::new();
-                    real_path = root.clone();
-                    continue 'p;
-                }
-            } else {
-                continue;
+            PathComp::Normal(ent) => {
+                current.push(&ent);
+                real_path.push(&ent);
             }
         }
 
-        break;
+        if real_path.is_symlink() {
+            directed += 1;
+            let link = real_path.read_link()?;
+            let link_components = link.components();
+            for component in link_components.rev() {
+                components.push_front(PathComp::from(component));
+            }
+        }
     }
     Ok(Some(real_path))
 }
@@ -224,41 +211,17 @@ pub fn exists_exec(
     path: impl AsRef<Path>,
     max_redirect: usize,
 ) -> Result<Option<PathBuf>, std::io::Error> {
-    let root = root.as_ref();
-    let mut path = path.as_ref().to_path_buf();
-    let mut redirected = 0usize;
+    let file = _realpath(root, path, max_redirect).and_then(|path| {
+        path.ok_or(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "invalid path",
+        ))
+    })?;
 
-    if path.is_relative() {
-        panic!("path cannot be relative path");
-    }
-
-    while path.is_symlink() {
-        if max_redirect == redirected {
-            break;
-        }
-        let link = path.read_link()?;
-        if link.is_relative() {
-            let mut old_path = path.to_path_buf();
-            for component in link.components() {
-                old_path.push(component);
-            }
-            path = old_path;
-        } else {
-            let mut old_path = root.to_path_buf();
-            for component in link.components() {
-                if component != Component::RootDir {
-                    old_path.push(component);
-                }
-            }
-            path = old_path;
-        }
-        redirected += 1;
-    }
-
-    if path.exists() && path.is_file() && path.starts_with(root) {
-        Ok(Some(path))
-    } else {
+    if !file.exists() || !file.is_file() {
         Ok(None)
+    } else {
+        Ok(Some(file))
     }
 }
 

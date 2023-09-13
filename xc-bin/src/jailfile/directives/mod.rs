@@ -44,7 +44,7 @@ pub(crate) trait Directive: Sized {
     fn up_to_date(&self) -> bool;
 }
 
-#[allow(dead_code)]
+//#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ConfigMod {
     Allow(Vec<String>),
@@ -61,6 +61,7 @@ pub(crate) enum ConfigMod {
     Mount(String, String),
     SysV(Vec<String>),
     AddEnv(Var, EnvSpec),
+    Device(InterpolatedString),
 }
 
 impl ConfigMod {
@@ -198,6 +199,9 @@ impl ConfigMod {
                     }
                 }
             }
+            Self::Device(device) => {
+                config.devfs_rules.push(device.clone());
+            }
             _ => {}
         }
     }
@@ -212,6 +216,7 @@ impl ConfigMod {
             "WORKDIR",
             "ENTRYPOINT",
             "CMD",
+            "DEVICE",
         ]
     }
 }
@@ -282,6 +287,12 @@ impl Directive for ConfigMod {
                 let fstype = action.args.get(0).context("cannot get fstype")?;
                 let mountpoint = action.args.get(1).context("cannot get mountpoint")?;
                 Ok(ConfigMod::Mount(fstype.to_string(), mountpoint.to_string()))
+            }
+            "DEVICE" => {
+                let joined = action.args.join(" ");
+                let interpolated = InterpolatedString::new(&joined)
+                    .context("invalid value")?;
+                Ok(ConfigMod::Device(interpolated))
             }
             _ => unreachable!(),
         }

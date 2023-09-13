@@ -46,8 +46,8 @@ use xc::models::network::{DnsSetting, IpAssign};
 use xc::models::EnforceStatfs;
 
 pub struct AppliedInstantiateRequest {
-    base: InstantiateRequest,
-    devfs_rules: Vec<DevfsRule>,
+    pub(crate) request: InstantiateRequest,
+    pub(crate) devfs_rules: Vec<DevfsRule>,
     init: Vec<Jexec>,
     deinit: Vec<Jexec>,
     main: Option<Jexec>,
@@ -55,6 +55,7 @@ pub struct AppliedInstantiateRequest {
     allowing: Vec<String>,
     copies: Vec<xc::container::request::CopyFileReq>,
     enforce_statfs: EnforceStatfs,
+    pub(crate) image: JailImage,
 }
 
 impl AppliedInstantiateRequest {
@@ -238,7 +239,7 @@ impl AppliedInstantiateRequest {
         }
 
         Ok(AppliedInstantiateRequest {
-            base: request,
+            request,
             copies,
             devfs_rules,
             init,
@@ -247,6 +248,7 @@ impl AppliedInstantiateRequest {
             envs,
             allowing,
             enforce_statfs,
+            image: oci_config.clone(),
         })
     }
 }
@@ -293,20 +295,15 @@ pub struct InstantiateBlueprint {
 impl InstantiateBlueprint {
     pub(crate) fn new(
         id: &str,
-        oci_config: &JailImage,
         request: AppliedInstantiateRequest,
         devfs_store: &mut DevfsRulesetStore,
         cred: &Credential,
-        /*
-        network_manager: &mut NetworkManager,
-        volume_manager: &VolumeManager,
-        dataset_tracker: &mut JailedDatasetTracker,
-        */
         resources: &mut Resources,
     ) -> anyhow::Result<InstantiateBlueprint> {
+        let oci_config = &request.image;
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let config = oci_config.jail_config();
-        let name = match request.base.name {
+        let name = match request.request.name {
             None => format!("xc-{id}"),
             Some(name) => {
                 if name.parse::<isize>().is_ok() {
@@ -318,8 +315,8 @@ impl InstantiateBlueprint {
                 }
             }
         };
-        let hostname = request.base.hostname.unwrap_or_else(|| name.to_string());
-        let vnet = request.base.vnet || config.vnet;
+        let hostname = request.request.hostname.unwrap_or_else(|| name.to_string());
+        let vnet = request.request.vnet || config.vnet;
         let envs = request.envs.clone();
 
         if config.linux {
@@ -333,16 +330,16 @@ impl InstantiateBlueprint {
             }
         }
 
-        let main_started_notify = match request.base.main_started_notify {
+        let main_started_notify = match request.request.main_started_notify {
             ipc::packet::codec::Maybe::None => None,
             ipc::packet::codec::Maybe::Some(x) => Some(EventFdNotify::from_fd(x.as_raw_fd())),
         };
 
-        let mut ip_alloc = request.base.ips.clone();
+        let mut ip_alloc = request.request.ips.clone();
 
         let mut default_router = None;
 
-        for req in request.base.ipreq.iter() {
+        for req in request.request.ipreq.iter() {
             match resources.allocate(vnet, req, id) {
                 Ok((alloc, router)) => {
                     if !existing_ifaces.contains(&alloc.interface) {
@@ -391,7 +388,7 @@ impl InstantiateBlueprint {
         let mut mount_specs = oci_config.jail_config().mounts;
         let mut added_mount_specs = HashMap::new();
 
-        for req in request.base.mount_req.clone().to_vec().iter() {
+        for req in request.request.mount_req.clone().to_vec().iter() {
             let source_path = std::path::Path::new(&req.source);
 
             let volume = if !source_path.is_absolute() {
@@ -412,20 +409,15 @@ impl InstantiateBlueprint {
                 match &req.evid {
                     Maybe::None => errx!(ENOENT, "missing evidence"),
                     Maybe::Some(fd) => {
-                        println!("process to check evidence");
                         let Ok(stat) = freebsd::nix::sys::stat::fstat(fd.as_raw_fd()) else {
                             println!("cannot stat evidence");
                             errx!(ENOENT, "cannot stat evidence")
                         };
                         let check_stat = freebsd::nix::sys::stat::stat(source_path).unwrap();
-                        println!("c: {}", stat.st_ino);
-                        println!("n: {}", check_stat.st_ino);
                         if stat.st_ino != check_stat.st_ino {
                             errx!(ENOENT, "evidence inode mismatch")
                         }
-
                         freebsd::nix::unistd::close(fd.as_raw_fd());
-
                         Volume::adhoc(source_path)
                     }
                 }
@@ -441,7 +433,7 @@ impl InstantiateBlueprint {
             mount_req.push(mount);
         }
 
-        for dataset in request.base.jail_datasets.iter() {
+        for dataset in request.request.jail_datasets.iter() {
             if resources.dataset_tracker.is_jailed(dataset) {
                 errx!(
                     EPERM,
@@ -469,8 +461,10 @@ impl InstantiateBlueprint {
 
         let devfs_ruleset_id = devfs_store.get_ruleset_id(&devfs_rules);
 
+        println!("devfs_ruleset_id: {devfs_ruleset_id}");
+
         let extra_layers = request
-            .base
+            .request
             .extra_layers
             .to_vec()
             .into_iter()
@@ -486,34 +480,34 @@ impl InstantiateBlueprint {
             deinit: request.deinit,
             extra_layers,
             main: request.main,
-            ips: request.base.ips,
-            ipreq: request.base.ipreq,
+            ips: request.request.ips,
+            ipreq: request.request.ipreq,
             mount_req,
             linux: config.linux,
-            deinit_norun: request.base.deinit_norun,
-            init_norun: request.base.init_norun,
-            main_norun: request.base.main_norun,
-            persist: request.base.persist,
-            no_clean: request.base.no_clean,
-            dns: request.base.dns,
+            deinit_norun: request.request.deinit_norun,
+            init_norun: request.request.init_norun,
+            main_norun: request.request.main_norun,
+            persist: request.request.persist,
+            no_clean: request.request.no_clean,
+            dns: request.request.dns,
             origin_image: Some(oci_config.clone()),
             allowing: request.allowing,
-            image_reference: Some(request.base.image_reference),
+            image_reference: Some(request.request.image_reference),
             copies: request.copies,
             envs,
             ip_alloc,
             devfs_ruleset_id,
             default_router,
             main_started_notify,
-            create_only: request.base.create_only,
-            linux_no_create_sys_dir: request.base.linux_no_create_sys_dir,
-            linux_no_create_proc_dir: request.base.linux_no_create_proc_dir,
-            linux_no_mount_sys: request.base.linux_no_mount_sys,
-            linux_no_mount_proc: request.base.linux_no_mount_proc,
-            override_props: request.base.override_props,
+            create_only: request.request.create_only,
+            linux_no_create_sys_dir: request.request.linux_no_create_sys_dir,
+            linux_no_create_proc_dir: request.request.linux_no_create_proc_dir,
+            linux_no_mount_sys: request.request.linux_no_mount_sys,
+            linux_no_mount_proc: request.request.linux_no_mount_proc,
+            override_props: request.request.override_props,
             enforce_statfs: request.enforce_statfs,
-            jailed_datasets: request.base.jail_datasets,
-            children_max: request.base.children_max,
+            jailed_datasets: request.request.jail_datasets,
+            children_max: request.request.children_max,
         })
     }
 }

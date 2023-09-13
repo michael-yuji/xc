@@ -45,7 +45,7 @@ use tokio::sync::watch::Receiver;
 use tracing::{error, info};
 use xc::container::effect::UndoStack;
 use xc::container::{ContainerManifest, CreateContainer};
-use xc::models::exec::Jexec;
+use xc::models::exec::{Jexec, StdioMode, IpcJexec};
 use xc::models::jail_image::JailImage;
 use xc::models::network::HostEntry;
 
@@ -267,24 +267,20 @@ impl Site {
 
     pub fn exec(
         &mut self,
-        jexec: Jexec,
+        jexec: IpcJexec,
     ) -> ipc::proto::GenericResult<xc::container::process::SpawnInfo> {
         use ipc::packet::codec::FromPacket;
         use ipc::proto::ipc_err;
 
-        let value = serde_json::to_value(jexec).unwrap();
-        let request = Request {
-            method: "exec".to_string(),
-            value,
-        };
-        let encoded = serde_json::to_vec(&request).unwrap();
-        let packet = Packet {
-            data: encoded,
-            fds: Vec::new(),
-        };
+        let packet = jexec.to_packet(|dual| serde_json::to_value(dual).unwrap()).map(|value| {
+            Request {
+                method: "exec".to_string(),
+                value: value.clone()
+            }
+        }).map(|p| serde_json::to_vec(&p).unwrap());
 
         let Some(stream) = self.control_stream.as_mut() else {
-            return ipc_err(freebsd::libc::ENOENT, "no much control stream");
+            return ipc_err(freebsd::libc::ENOENT, "no such control stream");
         };
 
         let _result = stream.send_packet(&packet);

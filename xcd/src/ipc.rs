@@ -51,7 +51,7 @@ use tokio::sync::RwLock;
 use tracing::*;
 use xc::container::request::NetworkAllocRequest;
 use xc::image_store::ImageStoreError;
-use xc::models::exec::{Jexec, StdioMode};
+use xc::models::exec::{Jexec, StdioMode, IpcJexec, IpcStdioMode};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
 use xc::util::{gen_id, CompressionFormat, CompressionFormatExt};
@@ -299,6 +299,7 @@ impl Default for InstantiateRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstantiateResponse {
     pub id: String,
+    pub require_clearence: Vec<String>,
 }
 
 #[ipc_method(method = "instantiate")]
@@ -331,18 +332,50 @@ async fn instantiate(
             let instantiate_result =
                 ServerContext::instantiate(context, &id, &image_row.manifest, request, credential)
                     .await;
-            if let Err(error) = instantiate_result {
-                tracing::error!("instantiate error: {error:#?}");
-                if let Some(err) = error.downcast_ref::<xc::container::error::Error>() {
-                    ipc_err(err.errno(), &err.error_message())
-                } else {
-                    enoent(error.to_string().as_str())
+            match instantiate_result {
+                Ok(cleanerces) => {
+                    Ok(InstantiateResponse { id, require_clearence: cleanerces })
+                },
+                Err(error) => {
+                    tracing::error!("instantiate error: {error:#?}");
+                    if let Some(err) = error.downcast_ref::<xc::container::error::Error>() {
+                        ipc_err(err.errno(), &err.error_message())
+                    } else {
+                        enoent(error.to_string().as_str())
+                    }
                 }
-            } else {
-                Ok(InstantiateResponse { id })
             }
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ContinueInstantiateRequest {
+    pub id: String,
+    pub clearences: Vec<String>,
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ContinueInstantiateResponse {
+    pub id: String,
+}
+
+#[ipc_method(method = "continue_instantiate")]
+async fn continue_instantiate(
+    context: Arc<RwLock<ServerContext>>,
+    load_context: &mut ConnectionContext<Variables>,
+    request: ContinueInstantiateRequest,
+) -> GenericResult<ContinueInstantiateResponse> {
+    let Some(applied) = ({
+        context.clone().write().await.ins_queue.remove(&request.id)
+    }) else {
+        return enoent("no such instantiate request")
+    };
+    let credential = Credential::from_conn_ctx(local_context);
+    ServerContext::continue_instantiate(context, &request.id, applied, credential).await
+        .expect("todo");
+    Ok(ContinueInstantiateResponse { id: request.id })
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -999,7 +1032,7 @@ async fn exec(
         .clone()
         .and_then(|group| group.parse::<u32>().ok());
 
-    let jexec = Jexec {
+    let jexec = IpcJexec {
         arg0: request.arg0,
         args: request.args,
         envs: request.envs,
@@ -1008,15 +1041,15 @@ async fn exec(
         user: request.user.clone(),
         group: request.group.clone(),
         output_mode: if request.use_tty {
-            StdioMode::Terminal
+            IpcStdioMode::Terminal
         } else {
-            StdioMode::Forward {
-                stdin: request.stdin.to_option().map(|fd| fd.0),
-                stdout: request.stdout.to_option().map(|fd| fd.0),
-                stderr: request.stderr.to_option().map(|fd| fd.0),
+            IpcStdioMode::Forward {
+                stdin: request.stdin,
+                stdout: request.stdout,
+                stderr: request.stderr,
             }
         },
-        notify: request.notify.to_option().map(|fd| fd.0),
+        notify: request.notify,
         work_dir: None,
     };
     if let Some(arc_site) = context.write().await.get_site(&request.name) {
@@ -1247,6 +1280,7 @@ pub(crate) async fn register_to_service(
     service: &mut Service<tokio::sync::RwLock<ServerContext>, Variables>,
 ) {
     service.register_event_delegate(on_channel_closed).await;
+    service.register(continue_instantiate).await;
     service.register(list_rdr_rules).await;
     service.register(create_volume).await;
     service.register(list_volumes).await;
