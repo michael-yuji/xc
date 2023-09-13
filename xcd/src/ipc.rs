@@ -51,7 +51,7 @@ use tokio::sync::RwLock;
 use tracing::*;
 use xc::container::request::NetworkAllocRequest;
 use xc::image_store::ImageStoreError;
-use xc::models::exec::{Jexec, StdioMode, IpcJexec, IpcStdioMode};
+use xc::models::exec::{IpcJexec, IpcStdioMode, Jexec, StdioMode};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
 use xc::util::{gen_id, CompressionFormat, CompressionFormatExt};
@@ -333,9 +333,10 @@ async fn instantiate(
                 ServerContext::instantiate(context, &id, &image_row.manifest, request, credential)
                     .await;
             match instantiate_result {
-                Ok(cleanerces) => {
-                    Ok(InstantiateResponse { id, require_clearence: cleanerces })
-                },
+                Ok(cleanerces) => Ok(InstantiateResponse {
+                    id,
+                    require_clearence: cleanerces,
+                }),
                 Err(error) => {
                     tracing::error!("instantiate error: {error:#?}");
                     if let Some(err) = error.downcast_ref::<xc::container::error::Error>() {
@@ -355,7 +356,6 @@ pub struct ContinueInstantiateRequest {
     pub clearences: Vec<String>,
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContinueInstantiateResponse {
     pub id: String,
@@ -367,13 +367,12 @@ async fn continue_instantiate(
     load_context: &mut ConnectionContext<Variables>,
     request: ContinueInstantiateRequest,
 ) -> GenericResult<ContinueInstantiateResponse> {
-    let Some(applied) = ({
-        context.clone().write().await.ins_queue.remove(&request.id)
-    }) else {
-        return enoent("no such instantiate request")
+    let Some(applied) = ({ context.clone().write().await.ins_queue.remove(&request.id) }) else {
+        return enoent("no such instantiate request");
     };
     let credential = Credential::from_conn_ctx(local_context);
-    ServerContext::continue_instantiate(context, &request.id, applied, credential).await
+    ServerContext::continue_instantiate(context, &request.id, applied, credential)
+        .await
         .expect("todo");
     Ok(ContinueInstantiateResponse { id: request.id })
 }

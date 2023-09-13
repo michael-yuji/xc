@@ -23,7 +23,7 @@
 // SUCH DAMAGE.
 
 use super::resolve_environ_order;
-use ipc::packet::codec::{Maybe, Fd, FromPacket};
+use ipc::packet::codec::{Fd, FromPacket, Maybe};
 use ipc_macro::FromPacket;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -61,8 +61,8 @@ pub enum IpcStdioMode {
     Forward {
         stdin: Maybe<Fd>,
         stdout: Maybe<Fd>,
-        stderr: Maybe<Fd>
-    }
+        stderr: Maybe<Fd>,
+    },
 }
 
 impl IpcStdioMode {
@@ -71,13 +71,15 @@ impl IpcStdioMode {
             Self::Terminal => StdioMode::Terminal,
             Self::Inherit => StdioMode::Inherit,
             Self::Files { stdout, stderr } => StdioMode::Files { stdout, stderr },
-            Self::Forward { stdin, stdout, stderr } => {
-                StdioMode::Forward {
-                    stdin: stdin.to_option().map(|fd| fd.0),
-                    stdout: stdout.to_option().map(|fd| fd.0),
-                    stderr: stderr.to_option().map(|fd| fd.0),
-                }
-            }
+            Self::Forward {
+                stdin,
+                stdout,
+                stderr,
+            } => StdioMode::Forward {
+                stdin: stdin.to_option().map(|fd| fd.0),
+                stdout: stdout.to_option().map(|fd| fd.0),
+                stderr: stderr.to_option().map(|fd| fd.0),
+            },
         }
     }
 }
@@ -91,7 +93,11 @@ impl FromPacket for IpcStdioMode {
             Self::Terminal => StdioMode::Terminal,
             Self::Inherit => StdioMode::Inherit,
             Self::Files { stdout, stderr } => StdioMode::Files { stdout, stderr },
-            Self::Forward { stdin, stdout, stderr } => {
+            Self::Forward {
+                stdin,
+                stdout,
+                stderr,
+            } => {
                 let stdin = if let Maybe::Some(fd) = stdin {
                     let idx = fds.len();
                     fds.push(fd.0);
@@ -113,7 +119,11 @@ impl FromPacket for IpcStdioMode {
                 } else {
                     None
                 };
-                StdioMode::Forward { stdin, stdout, stderr }
+                StdioMode::Forward {
+                    stdin,
+                    stdout,
+                    stderr,
+                }
             }
         }
     }
@@ -122,13 +132,15 @@ impl FromPacket for IpcStdioMode {
             StdioMode::Terminal => Self::Terminal,
             StdioMode::Inherit => Self::Inherit,
             StdioMode::Files { stdout, stderr } => Self::Files { stdout, stderr },
-            StdioMode::Forward { stdin, stdout, stderr } => {
-                Self::Forward {
-                    stdin: Maybe::from_option(stdin.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
-                    stdout: Maybe::from_option(stdout.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
-                    stderr: Maybe::from_option(stderr.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
-                }
-            }
+            StdioMode::Forward {
+                stdin,
+                stdout,
+                stderr,
+            } => Self::Forward {
+                stdin: Maybe::from_option(stdin.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
+                stdout: Maybe::from_option(stdout.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
+                stderr: Maybe::from_option(stderr.map(|idx| Fd(*fds.get(idx as usize).unwrap()))),
+            },
         }
     }
 }
@@ -174,7 +186,7 @@ impl IpcJexec {
             group: self.group,
             work_dir: self.work_dir,
             notify: self.notify.to_option().map(|fd| fd.0),
-            output_mode: self.output_mode.to_local()
+            output_mode: self.output_mode.to_local(),
         }
     }
 }

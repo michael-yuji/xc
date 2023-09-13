@@ -33,15 +33,15 @@ use crate::container::process::*;
 use crate::container::running::RunningContainer;
 use crate::container::{ContainerManifest, ProcessStat};
 use crate::elf::{brand_elf_if_unsupported, ElfBrand};
-use crate::models::exec::{Jexec, StdioMode, IpcJexec};
+use crate::models::exec::{IpcJexec, Jexec, StdioMode};
 use crate::models::network::HostEntry;
 use crate::util::{epoch_now_nano, exists_exec};
 
 use anyhow::Context;
 use freebsd::event::{EventFdNotify, KEventExt};
 use freebsd::FreeBSDCommandExt;
-use ipc::packet::codec::FromPacket;
 use ipc::packet::codec::json::JsonPacket;
+use ipc::packet::codec::FromPacket;
 use jail::process::Jailed;
 use nix::libc::intptr_t;
 use nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
@@ -381,9 +381,10 @@ impl ProcessRunner {
         use ipc::transport::PacketTransport;
 
         let packet = if method == "exec" {
-
-            let jexec = IpcJexec::from_packet_failable(request, |value| serde_json::from_value(value.clone()))
-                .context("cannot deserialize jexec")?;
+            let jexec = IpcJexec::from_packet_failable(request, |value| {
+                serde_json::from_value(value.clone())
+            })
+            .context("cannot deserialize jexec")?;
 
             let jexec = jexec.to_local();
 

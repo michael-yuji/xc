@@ -45,7 +45,7 @@ use tokio::sync::watch::Receiver;
 use tracing::{error, info};
 use xc::container::effect::UndoStack;
 use xc::container::{ContainerManifest, CreateContainer};
-use xc::models::exec::{Jexec, StdioMode, IpcJexec};
+use xc::models::exec::{IpcJexec, Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
 use xc::models::network::HostEntry;
 
@@ -272,12 +272,13 @@ impl Site {
         use ipc::packet::codec::FromPacket;
         use ipc::proto::ipc_err;
 
-        let packet = jexec.to_packet(|dual| serde_json::to_value(dual).unwrap()).map(|value| {
-            Request {
+        let packet = jexec
+            .to_packet(|dual| serde_json::to_value(dual).unwrap())
+            .map(|value| Request {
                 method: "exec".to_string(),
-                value: value.clone()
-            }
-        }).map(|p| serde_json::to_vec(&p).unwrap());
+                value: value.clone(),
+            })
+            .map(|p| serde_json::to_vec(&p).unwrap());
 
         let Some(stream) = self.control_stream.as_mut() else {
             return ipc_err(freebsd::libc::ENOENT, "no such control stream");

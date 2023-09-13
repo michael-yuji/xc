@@ -290,8 +290,7 @@ impl Directive for ConfigMod {
             }
             "DEVICE" => {
                 let joined = action.args.join(" ");
-                let interpolated = InterpolatedString::new(&joined)
-                    .context("invalid value")?;
+                let interpolated = InterpolatedString::new(&joined).context("invalid value")?;
                 Ok(ConfigMod::Device(interpolated))
             }
             _ => unreachable!(),

@@ -139,7 +139,7 @@ impl VolumeDriver for ZfsDriver {
 
         let real_dest = match mount_spec {
             None => mount_req.dest.to_os_string(),
-            Some(spec) => spec.destination.as_os_str().to_os_string()
+            Some(spec) => spec.destination.as_os_str().to_os_string(),
         };
 
         Ok(Mount {

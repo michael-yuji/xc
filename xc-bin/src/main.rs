@@ -610,17 +610,21 @@ fn main() -> Result<(), ActionError> {
                 eprintln!("required_cleanerce: {:?}", res.require_clearence.clone());
 
                 if !res.require_clearence.is_empty() {
-                    println!("this container require exposing these additional device nodes (y/n):");
+                    println!(
+                        "this container require exposing these additional device nodes (y/n):"
+                    );
                     for dev in res.require_clearence.iter() {
                         println!("    {dev}");
                     }
 
                     let mut s = String::new();
-                    std::io::stdin().read_line(&mut s).expect("cannot read user input");
+                    std::io::stdin()
+                        .read_line(&mut s)
+                        .expect("cannot read user input");
                     if s.to_lowercase().starts_with('y') {
                         let req = ContinueInstantiateRequest {
                             id: res.id.to_string(),
-                            clearences: res.require_clearence.clone()
+                            clearences: res.require_clearence.clone(),
                         };
                         _ = do_continue_instantiate(&mut conn, req)?;
                     } else {

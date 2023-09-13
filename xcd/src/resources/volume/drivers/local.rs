@@ -119,9 +119,8 @@ impl VolumeDriver for LocalDriver {
 
         let real_dest = match mount_spec {
             None => mount_req.dest.to_os_string(),
-            Some(spec) => spec.destination.as_os_str().to_os_string()
+            Some(spec) => spec.destination.as_os_str().to_os_string(),
         };
-
 
         Ok(Mount {
             options: Vec::from_iter(mount_options),
