@@ -54,6 +54,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
 
+#[usdt::provider]
+mod create_container_provider {
+    fn jail_created(jid: i32, id: &str) {}
+}
+
 #[derive(Debug, Clone)]
 pub struct CreateContainer {
     pub id: String,
@@ -298,6 +303,7 @@ impl CreateContainer {
         }
 
         let jail = proto.start()?;
+        create_container_provider::jail_created!(|| (jail.jid, &self.id));
 
         if self.vnet {
             let dmillis = std::time::Duration::from_millis(10);
