@@ -177,21 +177,9 @@ impl ProcessRunner {
                 .split(':')
                 .map(|s| s.to_string())
                 .find_map(|search_path| {
-                    // we are in the host's jail trying to find an executable in child's root tree
-                    let root = root.clone();
-                    let mut path = root.clone();
-                    for component in Path::new(&search_path).components() {
-                        if component != Component::RootDir {
-                            path.push(component);
-                        }
-                    }
+                    let mut path = PathBuf::from(&search_path);
                     path.push(exec);
-                    if let Ok(candidate) = path.canonicalize() {
-                        exists_exec(root, candidate, 64).unwrap()
-                    } else {
-                        trace!("failed to canonicalize {path:?}");
-                        None
-                    }
+                    exists_exec(&root, path, 64).unwrap()
                 })
         }
     }
