@@ -296,7 +296,7 @@ impl Site {
         if response.errno == 0 {
             Ok(serde_json::from_value(response.value).unwrap())
         } else {
-            ipc_err(freebsd::libc::EIO, "something went wrong")
+            ipc_err(freebsd::libc::EIO, &format!("something went wrong: {:?}", response.value))
         }
     }
 

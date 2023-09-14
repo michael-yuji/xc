@@ -381,13 +381,16 @@ impl ProcessRunner {
 
             match result {
                 Ok(spawn_info) => write_response(0, spawn_info).unwrap(),
-                Err(_err) => write_response(
-                    freebsd::libc::EIO,
-                    serde_json::json!({
-                        "message": "failed to spawn"
-                    }),
-                )
-                .unwrap(),
+                Err(err) => {
+                    error!("exec error: {err:?}");
+                    write_response(
+                        freebsd::libc::EIO,
+                        serde_json::json!({
+                            "message": format!("failed to spawn process in container: {err:?}")
+                        }),
+                    )
+                    .unwrap()
+                },
             }
         } else if method == "run_main" {
             if let Some(main) = self.container.main_proto.clone() {

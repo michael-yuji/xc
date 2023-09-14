@@ -791,12 +791,17 @@ fn main() -> Result<(), ActionError> {
                 use_tty: terminal,
             };
 
-            if let Ok(response) = do_exec(&mut conn, request)? {
-                if let Some(socket) = response.terminal_socket {
-                    _ = attach::run(socket);
+            match do_exec(&mut conn, request)? {
+                Ok(response) => {
+                    if let Some(socket) = response.terminal_socket {
+                        _ = attach::run(socket);
+                    }
+                    let exit = n.notified_sync_take_value();
+                    std::process::exit((exit.unwrap_or(2) - 1) as i32)
+                },
+                Err(err) => {
+                    eprintln!("{err:?}")
                 }
-                let exit = n.notified_sync_take_value();
-                std::process::exit((exit.unwrap_or(2) - 1) as i32)
             }
         }
         Action::Volume(action) => {
