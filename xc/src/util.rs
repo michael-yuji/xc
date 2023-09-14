@@ -168,6 +168,7 @@ fn _realpath(
         if max_redirect <= directed {
             return Ok(None);
         }
+
         match head {
             PathComp::RootDir => {
                 current.push(head);
@@ -190,7 +191,13 @@ fn _realpath(
             directed += 1;
             let link = real_path.read_link()?;
             let link_components = link.components();
-            for component in link_components.rev() {
+            let mut link_components_rev_iter = link_components.rev();
+
+            let first = link_components_rev_iter.next().unwrap();
+            if !matches!(first, Component::Normal(_)) {
+                components.push_front(PathComp::from(first));
+            }
+            for component in link_components_rev_iter {
                 components.push_front(PathComp::from(component));
             }
         }
