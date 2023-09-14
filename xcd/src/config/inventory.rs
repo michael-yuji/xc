@@ -53,16 +53,16 @@ impl InventoryManager {
         path: impl AsRef<Path>,
     ) -> Result<InventoryManager, anyhow::Error> {
         let path = path.as_ref().to_path_buf();
-        let data = std::fs::read_to_string(&path).context("Cannot read config file")?;
-        let cached: Inventory = match serde_json::from_str(&data).context("Cannot parse config") {
-            Ok(inventory) => inventory,
-            Err(_) => {
-                let default = Inventory::default();
-                std::fs::write(&path, serde_json::to_vec_pretty(&default).unwrap())
-                    .context("cannot write default inventory")?;
-                default
-            }
+        let cached = if path.exists() {
+            let data = std::fs::read_to_string(&path).context("Cannot read config file")?;
+            serde_json::from_str(&data).context("cannot parse config")?
+        } else {
+            let default = Inventory::default();
+            std::fs::write(&path, serde_json::to_vec_pretty(&default).unwrap())
+                .context("cannot write default inventory")?;
+            default
         };
+
         Ok(InventoryManager { path, cached })
     }
 
