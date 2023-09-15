@@ -450,10 +450,12 @@ impl InstantiateBlueprint {
             "include 3".to_string(),
             "include 4".to_string(),
             "include 5".to_string(),
-            "path dtrace unhide".to_string(),
-            // allow USDT to be registered
-            "path dtrace/helper unhide".to_string(),
         ];
+
+        if request.request.enable_usdt {
+            devfs_rules.push("path dtrace unhide".to_string());
+            devfs_rules.push("path dtrace/helper unhide".to_string());
+        }
 
         for rule in request.devfs_rules.iter() {
             devfs_rules.push(rule.to_string());

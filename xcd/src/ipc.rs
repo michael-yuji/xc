@@ -210,6 +210,7 @@ pub struct InstantiateRequest {
     pub image_reference: ImageReference,
     pub envs: HashMap<String, String>,
     pub vnet: bool,
+    pub enable_usdt: bool,
     pub ips: Vec<IpAssign>,
     pub ipreq: Vec<NetworkAllocRequest>,
     pub mount_req: List<MountReq>,
@@ -265,6 +266,7 @@ impl Default for InstantiateRequest {
 
         InstantiateRequest {
             image_reference,
+            enable_usdt: false,
             envs: HashMap::new(),
             vnet: false,
             ips: Vec::new(),

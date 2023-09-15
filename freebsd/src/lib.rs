@@ -28,6 +28,7 @@ pub mod event;
 pub mod fs;
 pub mod net;
 pub mod procdesc;
+pub mod jailext;
 
 pub use jail;
 pub use nix;

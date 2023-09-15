@@ -210,7 +210,7 @@ pub(crate) fn use_image_action(
                             println!("                  Hints:");
                             for (key, value) in spec.volume_hints.iter() {
                                 let desc = serde_json::to_string(value).unwrap();
-                                println!("            {key}: {desc}");
+                                println!("                    {key}: {desc}");
                             }
                         }
                     }

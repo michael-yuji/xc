@@ -139,6 +139,10 @@ pub(crate) struct CreateArgs {
 
     #[arg(short = 'o')]
     pub(crate) props: Vec<String>,
+
+    /// Enable DTrace USDT registration from container
+    #[arg(long = "usdt")]
+    pub(crate) usdt: bool,
 }
 
 impl CreateArgs {
@@ -250,6 +254,7 @@ impl CreateArgs {
             deinit_norun: true,
             override_props,
             jail_datasets,
+            enable_usdt: self.usdt,
             ..InstantiateRequest::default()
         })
     }
