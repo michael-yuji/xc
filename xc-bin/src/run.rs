@@ -73,12 +73,15 @@ impl DnsArgs {
 }
 
 #[derive(Parser, Debug)]
+pub(crate) struct PublishArgs {
+    #[arg(long = "publish", short = 'p')]
+    pub(crate) publish: Vec<PublishSpec>,
+}
+
+#[derive(Parser, Debug)]
 pub(crate) struct RunArg {
     #[arg(long = "link", action)]
     pub(crate) link: bool,
-
-    #[arg(long = "publish", short = 'p', /* multiple_occurrences */)]
-    pub(crate) publish: Vec<PublishSpec>,
 
     #[arg(long = "detach", short = 'd', action)]
     pub(crate) detach: bool,
@@ -128,9 +131,6 @@ pub(crate) struct CreateArgs {
 
     #[arg(long = "extra-layer", /* multiple_occurrences */)]
     pub(crate) extra_layers: Vec<PathBuf>,
-
-    #[arg(long = "publish", short = 'p', /* multiple_occurrences */)]
-    pub(crate) publish: Vec<PublishSpec>,
 
     pub(crate) image_reference: ImageReference,
 
