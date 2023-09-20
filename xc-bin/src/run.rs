@@ -89,7 +89,7 @@ pub(crate) struct RunArg {
     #[arg(long = "user", short = 'u', action)]
     pub(crate) user: Option<String>,
 
-    #[arg(long = "group", short = 'u', action)]
+    #[arg(long = "group", short = 'g', action)]
     pub(crate) group: Option<String>,
 
     pub(crate) entry_point: Option<String>,
