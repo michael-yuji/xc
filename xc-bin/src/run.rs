@@ -134,6 +134,9 @@ pub(crate) struct CreateArgs {
 
     pub(crate) image_reference: ImageReference,
 
+    #[arg(long = "net-group")]
+    pub(crate) netgroups: Vec<String>,
+
     #[arg(short = 'z')]
     pub(crate) jail_dataset: Vec<DatasetParam>,
 
@@ -255,6 +258,7 @@ impl CreateArgs {
             override_props,
             jail_datasets,
             enable_usdt: self.usdt,
+            netgroups: self.netgroups,
             ..InstantiateRequest::default()
         })
     }

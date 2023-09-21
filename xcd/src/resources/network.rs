@@ -258,7 +258,7 @@ impl Resources {
         req: &NetworkAllocRequest,
         token: &str,
     ) -> Result<(IpAssign, Option<IpAddr>), Error> {
-        let network_name = req.network();
+        let network_name = req.network().to_string();
         let config = self.inventory_manager.borrow().clone();
         let network = config
             .networks

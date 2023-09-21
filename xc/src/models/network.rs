@@ -151,7 +151,7 @@ impl PortRedirection {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct HostEntry {
     pub ip_addr: IpAddr,
     pub hostname: String,

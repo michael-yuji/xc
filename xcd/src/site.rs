@@ -132,6 +132,7 @@ impl Site {
     }
 
     pub fn update_host_file(&mut self, network: &str, hosts: &[(String, IpAddr)]) {
+        eprintln!("update host file: {network}, hosts: {hosts:?}");
         self.hosts_cache.insert(network.to_string(), hosts.to_vec());
 
         let mut host_entries = Vec::new();
@@ -148,6 +149,8 @@ impl Site {
         let Some(stream) = self.control_stream.as_mut() else {
             return;
         };
+
+        eprintln!("host_entries: {host_entries:?}");
 
         let packet = ipc::proto::write_request("write_hosts", host_entries).unwrap();
         let Ok(_) = stream.send_packet(&packet) else {
@@ -376,7 +379,9 @@ impl Site {
         self.container.clone().map(|c| c.borrow().clone())
     }
 
-    pub fn run_container(&mut self, blueprint: InstantiateBlueprint) -> anyhow::Result<()> {
+    pub fn run_container(&mut self, blueprint: InstantiateBlueprint)
+        -> anyhow::Result<()>
+    {
         guard!(self, {
             let (sock_a, sock_b) = UnixStream::pair().unwrap();
             self.control_stream = Some(sock_a);

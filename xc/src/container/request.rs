@@ -22,6 +22,7 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -46,10 +47,10 @@ pub enum NetworkAllocRequest {
 }
 
 impl NetworkAllocRequest {
-    pub fn network(&self) -> String {
+    pub fn network<'a>(&'a self) -> &'a String {
         match self {
-            Self::Any { network } => network.to_string(),
-            Self::Explicit { network, .. } => network.to_string(),
+            Self::Any { network } => network,
+            Self::Explicit { network, .. } => network,
         }
     }
 }

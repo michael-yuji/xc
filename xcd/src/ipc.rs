@@ -236,6 +236,7 @@ pub struct InstantiateRequest {
     pub override_props: HashMap<String, String>,
     pub jail_datasets: Vec<PathBuf>,
     pub children_max: u32,
+    pub netgroups: Vec<String>,
 }
 
 impl InstantiateRequest {
@@ -294,6 +295,7 @@ impl Default for InstantiateRequest {
             override_props: HashMap::new(),
             jail_datasets: Vec::new(),
             children_max: 0,
+            netgroups: Vec::new()
         }
     }
 }

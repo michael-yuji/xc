@@ -728,6 +728,7 @@ pub fn run(
     if let Ok(fork_result) = unsafe { nix::unistd::fork() } {
         match fork_result {
             nix::unistd::ForkResult::Child => {
+                unsafe { freebsd::closefrom(sender.as_raw_fd()) };
                 let kq = nix::sys::event::kqueue().unwrap();
                 let mut pr = ProcessRunner::new(kq, container, auto_start);
                 pr.add_control_stream(ControlStream::new(control_stream));

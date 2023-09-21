@@ -425,7 +425,6 @@ impl ServerContext {
             self.alias_map.remove_all_referenced(id);
 
             resources.dataset_tracker.release_container(id);
-            //            self.dataset_tracker.write().await.release_container(id);
 
             if let Some(networks) = self.jail2ngs.get(id) {
                 for network in networks.iter() {
@@ -549,9 +548,10 @@ impl ServerContext {
             let mut this = this.write().await;
             let res_ref = this.resources.clone();
             let mut res = res_ref.write().await;
-
             let mut site = Site::new(id, this.config());
             site.stage(&applied.image)?;
+            let netgroups = applied.request.netgroups.clone();
+
             let blueprint =
                 InstantiateBlueprint::new(id, applied, &mut this.devfs_store, &cred, &mut res)?;
 
@@ -579,6 +579,18 @@ impl ServerContext {
             if let Some(name) = name {
                 this.alias_map.insert(name, id.to_string());
             }
+
+            this.jail2ngs.insert(id.to_string(), Vec::with_capacity(netgroups.len()));
+            for netgroup in netgroups.into_iter() {
+                if let Some(jails) = this.ng2jails.get_mut(&netgroup) {
+                    jails.push(id.to_string());
+                } else {
+                    this.ng2jails.insert(netgroup.to_string(), vec![id.to_string()]);
+                }
+                this.jail2ngs.get_mut(id).unwrap().push(netgroup.clone());
+                this.update_hosts(&netgroup).await;
+            }
+
             (arc_site, notify)
         };
 

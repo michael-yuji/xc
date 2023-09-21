@@ -213,6 +213,15 @@ impl AppliedInstantiateRequest {
             }
         }
 
+        for group in request.netgroups.iter() {
+            for req in request.ipreq.iter() {
+                if req.network() == group {
+                    continue;
+                }
+            }
+            errx!(ENOENT, "cannot add container to netgroup {group} as network {group} does not exist")
+        }
+
         let init = config
             .init
             .clone()
