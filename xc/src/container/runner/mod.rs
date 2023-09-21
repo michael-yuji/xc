@@ -390,7 +390,7 @@ impl ProcessRunner {
                         }),
                     )
                     .unwrap()
-                },
+                }
             }
         } else if method == "run_main" {
             if let Some(main) = self.container.main_proto.clone() {

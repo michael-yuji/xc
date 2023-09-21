@@ -798,7 +798,7 @@ fn main() -> Result<(), ActionError> {
                     }
                     let exit = n.notified_sync_take_value();
                     std::process::exit((exit.unwrap_or(2) - 1) as i32)
-                },
+                }
                 Err(err) => {
                     eprintln!("{err:?}")
                 }

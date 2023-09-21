@@ -219,7 +219,10 @@ impl AppliedInstantiateRequest {
                     continue;
                 }
             }
-            errx!(ENOENT, "cannot add container to netgroup {group} as network {group} does not exist")
+            errx!(
+                ENOENT,
+                "cannot add container to netgroup {group} as network {group} does not exist"
+            )
         }
 
         let init = config

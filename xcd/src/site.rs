@@ -299,7 +299,10 @@ impl Site {
         if response.errno == 0 {
             Ok(serde_json::from_value(response.value).unwrap())
         } else {
-            ipc_err(freebsd::libc::EIO, &format!("something went wrong: {:?}", response.value))
+            ipc_err(
+                freebsd::libc::EIO,
+                &format!("something went wrong: {:?}", response.value),
+            )
         }
     }
 
@@ -379,9 +382,7 @@ impl Site {
         self.container.clone().map(|c| c.borrow().clone())
     }
 
-    pub fn run_container(&mut self, blueprint: InstantiateBlueprint)
-        -> anyhow::Result<()>
-    {
+    pub fn run_container(&mut self, blueprint: InstantiateBlueprint) -> anyhow::Result<()> {
         guard!(self, {
             let (sock_a, sock_b) = UnixStream::pair().unwrap();
             self.control_stream = Some(sock_a);

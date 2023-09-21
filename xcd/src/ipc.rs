@@ -295,7 +295,7 @@ impl Default for InstantiateRequest {
             override_props: HashMap::new(),
             jail_datasets: Vec::new(),
             children_max: 0,
-            netgroups: Vec::new()
+            netgroups: Vec::new(),
         }
     }
 }

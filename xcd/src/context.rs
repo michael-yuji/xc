@@ -580,12 +580,14 @@ impl ServerContext {
                 this.alias_map.insert(name, id.to_string());
             }
 
-            this.jail2ngs.insert(id.to_string(), Vec::with_capacity(netgroups.len()));
+            this.jail2ngs
+                .insert(id.to_string(), Vec::with_capacity(netgroups.len()));
             for netgroup in netgroups.into_iter() {
                 if let Some(jails) = this.ng2jails.get_mut(&netgroup) {
                     jails.push(id.to_string());
                 } else {
-                    this.ng2jails.insert(netgroup.to_string(), vec![id.to_string()]);
+                    this.ng2jails
+                        .insert(netgroup.to_string(), vec![id.to_string()]);
                 }
                 this.jail2ngs.get_mut(id).unwrap().push(netgroup.clone());
                 this.update_hosts(&netgroup).await;
