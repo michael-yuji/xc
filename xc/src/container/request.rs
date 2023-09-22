@@ -22,7 +22,6 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::ffi::OsString;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};

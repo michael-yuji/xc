@@ -311,6 +311,14 @@ impl ZfsHandle {
         })
     }
 
+    /// There is a bug(?) there even when a dataset is unjailed, its children still cannot be
+    /// destroyed by the other jail with error "dataset is busy", this is however solvable my
+    /// setting jailed to off and on again
+    pub fn cycle_jailed_on(&self, dataset: impl AsRef<Path>) -> Result<()> {
+        self.set_prop(dataset.as_ref(), "jailed", "off")?;
+        self.set_prop(dataset, "jailed", "on")
+    }
+
     pub fn jail(&self, jail: &str, dataset: impl AsRef<Path>) -> Result<()> {
         self.use_command(|c| {
             c.arg("jail");

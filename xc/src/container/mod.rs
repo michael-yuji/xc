@@ -109,7 +109,7 @@ pub struct CreateContainer {
 }
 
 impl CreateContainer {
-    pub fn create_transactionally(&self, undo: &mut UndoStack) -> anyhow::Result<RunningContainer> {
+    pub fn create_transactionally(self, undo: &mut UndoStack) -> anyhow::Result<RunningContainer> {
         info!(name = self.name, "starting jail");
 
         let root = &self.root;
@@ -366,12 +366,12 @@ impl CreateContainer {
                 .status();
         }
 
-        println!("datasets: {:?}", self.jailed_datasets);
-
         for dataset in self.jailed_datasets.iter() {
+            let zfs = freebsd::fs::zfs::ZfsHandle::default();
+            _ = zfs.cycle_jailed_on(dataset);
             // XXX: allow to use a non-default zfs handle?
             undo.jail_dataset(
-                freebsd::fs::zfs::ZfsHandle::default(),
+                zfs,
                 jail.jid.to_string(),
                 dataset.to_path_buf(),
             )
@@ -382,9 +382,9 @@ impl CreateContainer {
 
         Ok(RunningContainer {
             devfs_ruleset_id: self.devfs_ruleset_id,
-            id: self.id.to_owned(),
-            name: self.name.to_owned(),
-            root: self.root.to_owned(),
+            id: self.id,
+            name: self.name,
+            root: self.root,
             jid: jail.jid,
             vnet: self.vnet,
             init_norun: self.init_norun,
@@ -396,24 +396,25 @@ impl CreateContainer {
             linux_no_create_sys_dir: self.linux_no_create_sys_dir,
             linux_no_create_proc_dir: self.linux_no_create_proc_dir,
             processes: HashMap::new(),
-            init_proto: self.init.clone(),
-            deinit_proto: self.deinit.clone(),
-            main_proto: self.main.clone(),
-            ip_alloc: self.ip_alloc.clone(),
-            mount_req: self.mount_req.clone(),
-            zfs_origin: self.zfs_origin.clone(),
+            init_proto: self.init,
+            deinit_proto: self.deinit,
+            main_proto: self.main,
+            ip_alloc: self.ip_alloc,
+            mount_req: self.mount_req,
+            zfs_origin: self.zfs_origin,
             notify,
             main_started_notify: Arc::new(EventFdNotify::new()),
             deleted: None,
-            origin_image: self.origin_image.clone(),
-            allowing: self.allowing.clone(),
-            image_reference: self.image_reference.clone(),
+            origin_image: self.origin_image,
+            allowing: self.allowing,
+            image_reference: self.image_reference,
             default_router: self.default_router,
-            log_directory: self.log_directory.clone(),
+            log_directory: self.log_directory,
             fault: None,
             created: Some(crate::util::epoch_now_nano()),
             started: None,
             finished_at: None,
+            jailed_datasets: self.jailed_datasets,
         })
     }
 }

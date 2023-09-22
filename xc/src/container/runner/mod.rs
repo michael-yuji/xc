@@ -49,7 +49,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::watch::{channel, Receiver};
 use tracing::{debug, error, info, trace, warn};
@@ -686,6 +686,15 @@ impl ProcessRunner {
         let jid = self.container.jid;
         container_runner::cleanup_enter!(|| (jid));
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(jid);
+
+        for jailed_dataset in self.container.jailed_datasets.iter() {
+            let handle = freebsd::fs::zfs::ZfsHandle::default();
+            info!("unjailing dataset: {jailed_dataset:?}");
+            if let Err(error) = handle.unjail(&jid.to_string(), jailed_dataset) {
+                warn!("cannot unjail dataset {jailed_dataset:?} from {jid}: {error}");
+            }
+        }
+
         let kill = jail.kill().context("cannot kill jail").map_err(|e| {
             error!("cannot kill jail: {e}");
             e
@@ -728,7 +737,6 @@ pub fn run(
     if let Ok(fork_result) = unsafe { nix::unistd::fork() } {
         match fork_result {
             nix::unistd::ForkResult::Child => {
-                unsafe { freebsd::closefrom(sender.as_raw_fd()) };
                 let kq = nix::sys::event::kqueue().unwrap();
                 let mut pr = ProcessRunner::new(kq, container, auto_start);
                 pr.add_control_stream(ControlStream::new(control_stream));

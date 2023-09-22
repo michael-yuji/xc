@@ -150,6 +150,8 @@ impl AppliedInstantiateRequest {
             for allow in config.allow.iter() {
                 if available_allows.contains(allow) {
                     allows.push(allow.to_string());
+                } else if let Some(("mount", fs)) = allow.split_once('.') {
+                    errx!(ENOENT, "{allow} is not available; maybe try kldload {fs}");
                 } else {
                     errx!(EIO, "allow.{allow} is not available on this system");
                 }

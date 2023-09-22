@@ -89,6 +89,8 @@ pub struct RunningContainer {
     pub finished_at: Option<u64>,
 
     pub started: Option<u64>,
+
+    pub jailed_datasets: Vec<PathBuf>,
 }
 
 impl RunningContainer {
