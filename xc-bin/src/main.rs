@@ -48,6 +48,7 @@ use freebsd::procdesc::{pd_fork, pdwait, PdForkResult};
 use ipc::packet::codec::{Fd, Maybe};
 use oci_util::digest::OciDigest;
 use oci_util::image_reference::ImageReference;
+use run::PublishArgs;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::os::fd::AsRawFd;
@@ -110,7 +111,12 @@ enum Action {
         tag: String,
         container_name: String,
     },
-    Create(CreateArgs),
+    Create {
+        #[command(flatten)]
+        create: CreateArgs,
+        #[command(flatten)]
+        publish: PublishArgs,
+    },
     #[command(subcommand)]
     Image(ImageAction),
     Info,
@@ -172,6 +178,8 @@ enum Action {
         create: CreateArgs,
         #[command(flatten)]
         dns: DnsArgs,
+        #[command(flatten)]
+        publish: PublishArgs,
         #[command(flatten)]
         args: RunArg,
     },
@@ -546,11 +554,11 @@ fn main() -> Result<(), ActionError> {
         Action::Rdr(rdr) => {
             _ = use_rdr_action(&mut conn, rdr);
         }
-        Action::Create(args) => {
-            let publish = args.publish.clone();
+        Action::Create {create, publish} => {
+            let publish = publish.publish.clone();
 
             let res = {
-                let reqt = args.create_request()?;
+                let reqt = create.create_request()?;
                 do_instantiate(&mut conn, reqt)?
             };
 
@@ -567,7 +575,7 @@ fn main() -> Result<(), ActionError> {
                 eprintln!("{res:#?}");
             }
         }
-        Action::Run { create, dns, args } => {
+        Action::Run { create, dns, publish, args } => {
             if args.detach && args.link {
                 panic!("detach and link flags are mutually exclusive");
             }
@@ -576,7 +584,7 @@ fn main() -> Result<(), ActionError> {
                 panic!("--dns-nop and --empty-dns are mutually exclusive");
             }
 
-            let publish = args.publish.clone();
+            let publish = publish.publish.clone();
 
             let dns = dns.make();
 
