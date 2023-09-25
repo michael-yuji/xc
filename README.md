@@ -38,7 +38,7 @@ The global state of the daemon is called `Context`, and is defined in `$src/xcd/
 
 The global state (Context) owns a number of `Site`s. A `Site` is essentially an abstraction of "a place a container lives in". Think `Context` is a landlord, a `Site` is a portion of land the landlord rents out.
 
-The purpose of this abstraction is to separate the duty of cleaning up a container. System-wise resources are made to clean up at the `Site` level, for example, destroying ZFS datasets, releasing IP addresses, etc, things that the teaent (container) shouldn't, and couldn't care about. This allows the global resources to always cleanup no matter what happened in the container to cause an exit (Jail cannot be created, precondition failure, executable crashed, cannot run the executable, etc...).
+The purpose of this abstraction is to separate the duty of cleaning up a container. System-wise resources are made to clean up at the `Site` level, for example, destroying ZFS datasets, releasing IP addresses, etc, things that the tenant (container) shouldn't, and couldn't care about. This allows the global resources to always cleanup no matter what happened in the container to cause an exit (Jail cannot be created, precondition failure, executable crashed, cannot run the executable, etc...).
 
 This is also planned to support FreeBSD containers that require multiple hosts to function in the future. More specifically, `Root-on-NFS` Jails, whose root filesystem may be exported by a different host than the host running the processes. In these cases, each host owns a site that references/relates to **one** container.
 
