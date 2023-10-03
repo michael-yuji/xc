@@ -8,5 +8,4 @@ edition = "2021"
 [dependencies]
 freebsd = { path = "../freebsd" }
 futures = "0.3.25"
-nix = { version = "0.25.0", features = ["term"] }
 tokio = { version = "^1.21", features = ["net", "process", "macros", "sync"] }

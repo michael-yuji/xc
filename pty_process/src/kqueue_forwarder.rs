@@ -22,11 +22,12 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use crate::buffer::Buffer;
-use crate::PtyCommandExt;
-use freebsd::event::KEventExt;
-use nix::pty::openpty;
-use nix::sys::event::{kevent_ts, kqueue, EventFilter, EventFlag, KEvent};
+use freebsd::event::{KEventExt, KqueueExt};
+use freebsd::nix::pty::openpty;
+use freebsd::nix::sys::event::{Kqueue, EventFilter, EventFlag, KEvent};
+use freebsd::FreeBSDCommandExt;
 use std::io::Write;
+use std::os::fd::OwnedFd;
 use std::os::unix::io::AsRawFd;
 //use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -52,7 +53,7 @@ pub struct PtyForwarder<W: Write + Send + Sync> {
     child: std::process::Child,
     listener: UnixListener,
     clients: Vec<Client>,
-    pty: i32,
+    pty: OwnedFd,
     ingress: Vec<u8>,
     egress: Buffer<1048576>,
     output_log: W,
@@ -66,6 +67,7 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
     ) -> std::io::Result<PtyForwarder<W>> {
         let pty_result = openpty(None, None)?;
         let child = command.pty(&pty_result).spawn()?;
+
         Ok(PtyForwarder {
             child,
             listener,
@@ -81,9 +83,13 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
         self.child.id()
     }
 
+    pub fn pty(&self) -> i32 {
+        self.pty.as_raw_fd()
+    }
+
     pub fn spawn(mut self) -> Result<std::process::ExitStatus, std::io::Error> {
         let mut buf = [0u8; 512];
-        let kq = kqueue()?;
+        let kq = Kqueue::new()?;
 
         let listener_fd = self.listener.as_raw_fd();
 
@@ -93,11 +99,11 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
         let mut event_list = [KEvent::zero(); 8];
 
         change_list.push(KEvent::from_read(listener_fd));
-        change_list.push(KEvent::from_read(self.pty));
+        change_list.push(KEvent::from_read(self.pty()));
         change_list.push(KEvent::from_wait_pid(self.child.id()));
 
         'kqloop: loop {
-            let n_events = kevent_ts(kq, &change_list, &mut event_list, None)?;
+            let n_events = kq.wait_events(&change_list, &mut event_list)?;
             let event_list = &event_list[..n_events];
 
             change_list.clear();
@@ -117,7 +123,7 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
                     continue;
                 }
 
-                if evfilt == EventFilter::EVFILT_READ && event.ident() as i32 == self.pty {
+                if evfilt == EventFilter::EVFILT_READ && event.ident() as i32 == self.pty() {
                     let mut bytes_available = event.data() as usize;
 
                     // if the pty is closed, there are never going to be anything for clients to
@@ -129,7 +135,7 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
                     while bytes_available > 0 {
                         let read_len = buf.len().min(bytes_available);
                         let buf = &mut buf[..read_len];
-                        let read = nix::unistd::read(self.pty, buf)?;
+                        let read = freebsd::nix::unistd::read(self.pty(), buf)?;
                         _ = self.output_log.write_all(buf);
                         self.egress.append_from_slice(buf);
                         bytes_available -= read;
@@ -137,8 +143,8 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
                     continue;
                 }
 
-                if evfilt == EventFilter::EVFILT_WRITE && event.ident() as i32 == self.pty {
-                    let written = nix::unistd::write(self.pty, &self.ingress).unwrap();
+                if evfilt == EventFilter::EVFILT_WRITE && event.ident() as i32 == self.pty() {
+                    let written = freebsd::nix::unistd::write(self.pty(), &self.ingress).unwrap();
                     self.ingress.drain(..written);
                     continue;
                 }
@@ -162,7 +168,7 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
                                 while bytes_available > 0 {
                                     let read_len = buf.len().min(bytes_available);
                                     let buf = &mut buf[..read_len];
-                                    let read = nix::unistd::read(client.fd, buf)?;
+                                    let read = freebsd::nix::unistd::read(client.fd, buf)?;
                                     self.ingress.extend_from_slice(&buf[..read]);
                                     bytes_available -= read_len;
                                 }
@@ -189,7 +195,7 @@ impl<W: Write + Send + Sync> PtyForwarder<W> {
             }
             // if there are client written into ingress, mark pty to handle the input
             if !self.ingress.is_empty() {
-                change_list.push(KEvent::from_write(self.pty).set_flags(EventFlag::EV_ONESHOT));
+                change_list.push(KEvent::from_write(self.pty()).set_flags(EventFlag::EV_ONESHOT));
             }
 
             // even the worst case is O(rn^2), it is probably faster with Vec than Hmap as we are

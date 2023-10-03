@@ -21,16 +21,16 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
-use freebsd::event::KEventExt;
-use nix::libc::{STDIN_FILENO, STDOUT_FILENO, VMIN, VTIME};
-use nix::sys::event::{kevent_ts, kqueue, EventFilter, EventFlag, KEvent};
-use nix::sys::socket::{recv, send, MsgFlags};
-use nix::sys::termios::{tcsetattr, InputFlags, LocalFlags, OutputFlags, SetArg, Termios};
-use nix::unistd::{read, write};
+use freebsd::event::{KEventExt, KqueueExt};
+use freebsd::nix::libc::{STDIN_FILENO, STDOUT_FILENO, VMIN, VTIME};
+use freebsd::nix::sys::event::{Kqueue, EventFilter, EventFlag, KEvent};
+use freebsd::nix::sys::socket::{recv, send, MsgFlags};
+use freebsd::nix::sys::termios::{tcsetattr, InputFlags, LocalFlags, OutputFlags, SetArg, Termios};
+use freebsd::nix::unistd::{read, write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::prelude::AsRawFd;
 
-fn enable_raw(orig: &Termios) -> Result<(), nix::Error> {
+fn enable_raw(orig: &Termios) -> Result<(), freebsd::nix::Error> {
     let mut tio = orig.clone();
     let mut input_flags = tio.input_flags;
     let mut local_flags = tio.local_flags;
@@ -68,17 +68,18 @@ fn enable_raw(orig: &Termios) -> Result<(), nix::Error> {
     tio.control_chars[VMIN] = 1;
     tio.control_chars[VTIME] = 0;
 
-    tcsetattr(STDIN_FILENO, SetArg::TCSADRAIN, &tio)
+    let stdin = std::io::stdin();
+    tcsetattr(stdin, SetArg::TCSADRAIN, &tio)
 }
 
-fn with_raw_terminal<F>(f: F) -> Result<(), nix::Error>
+fn with_raw_terminal<F>(f: F) -> Result<(), freebsd::nix::Error>
 where
-    F: Fn() -> Result<(), nix::Error>,
+    F: Fn() -> Result<(), freebsd::nix::Error>,
 {
-    let tio = nix::sys::termios::tcgetattr(STDIN_FILENO)?;
+    let tio = freebsd::nix::sys::termios::tcgetattr(std::io::stdin())?;
     enable_raw(&tio)?;
     f()?;
-    tcsetattr(STDIN_FILENO, SetArg::TCSAFLUSH, &tio)?;
+    tcsetattr(std::io::stdin(), SetArg::TCSAFLUSH, &tio)?;
     Ok(())
 }
 
@@ -128,7 +129,7 @@ pub fn run(path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
     let stream_fd = stream.as_raw_fd();
 
     Ok(with_raw_terminal(move || {
-        let kq = kqueue()?;
+        let kq = Kqueue::new()?;
         let mut add_events = vec![
             KEvent::from_read(stream_fd),
             KEvent::from_read(STDIN_FILENO),
@@ -137,7 +138,8 @@ pub fn run(path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
         let mut state = ForwardState::new();
 
         'm: loop {
-            let n_ev = kevent_ts(kq, &add_events, &mut events, None)?;
+            let n_ev = kq.wait_events(&add_events, &mut events)?;
+            //            let n_ev = kevent_ts(kq, &add_events, &mut events, None)?;
             add_events.clear();
             for event in events.iter().take(n_ev) {
                 if event.ident() == stream_fd as usize {

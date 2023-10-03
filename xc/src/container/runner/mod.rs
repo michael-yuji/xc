@@ -38,13 +38,13 @@ use crate::models::network::HostEntry;
 use crate::util::{epoch_now_nano, exists_exec};
 
 use anyhow::Context;
-use freebsd::event::{EventFdNotify, KEventExt};
+use freebsd::event::{kevent_classic, EventFdNotify, KEventExt};
+use freebsd::nix::libc::intptr_t;
+use freebsd::nix::sys::event::{EventFilter, EventFlag, FilterFlag, KEvent};
 use freebsd::FreeBSDCommandExt;
 use ipc::packet::codec::json::JsonPacket;
 use ipc::packet::codec::FromPacket;
 use jail::process::Jailed;
-use nix::libc::intptr_t;
-use nix::sys::event::{kevent_ts, EventFilter, EventFlag, FilterFlag, KEvent};
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::os::fd::AsRawFd;
@@ -163,7 +163,7 @@ impl ProcessRunner {
         let fd = control_stream.socket_fd();
         self.control_streams.insert(fd, control_stream);
         let read_event = KEvent::from_read(fd);
-        _ = kevent_ts(self.kq, &[read_event], &mut [], None);
+        _ = kevent_classic(self.kq, &[read_event], &mut []);
     }
 
     fn find_exec(&self, env_path: &str, exec: &str) -> Option<PathBuf> {
@@ -322,7 +322,7 @@ impl ProcessRunner {
         self.named_process.push(rstat);
         self.descentdant_map.insert(pid, vec![pid]);
         let event = KEvent::from_trace_pid(pid, FilterFlag::NOTE_EXIT);
-        _ = kevent_ts(self.kq, &[event], &mut [], None);
+        _ = kevent_classic(self.kq, &[event], &mut []);
 
         Ok(spawn_info)
     }
@@ -478,7 +478,9 @@ impl ProcessRunner {
                         if ancestor == pid {
                             stat.set_exited(event.data() as i32);
                             info!("exited: {}", event.data());
-                            unsafe { nix::libc::waitpid(pid as i32, std::ptr::null_mut(), 0) };
+                            unsafe {
+                                freebsd::nix::libc::waitpid(pid as i32, std::ptr::null_mut(), 0)
+                            };
 
                             if self
                                 .inits
@@ -498,7 +500,7 @@ impl ProcessRunner {
                                 // allow for the last deinit action to run at most
                                 // 15 seconds
                                 let event = KEvent::from_timer_seconds_oneshot(1486, 15);
-                                _ = kevent_ts(self.kq, &[event], &mut [], None);
+                                _ = kevent_classic(self.kq, &[event], &mut []);
                             }
                         }
                         if descentdant_gone {
@@ -551,7 +553,7 @@ impl ProcessRunner {
             0 as intptr_t,
         );
 
-        _ = kevent_ts(kq, &[kill_event], &mut [], None);
+        _ = kevent_classic(kq, &[kill_event], &mut []);
 
         let mut last_deinit = None;
 
@@ -600,7 +602,7 @@ impl ProcessRunner {
                 self.send_update(&mut sender);
             }
 
-            let nevx = kevent_ts(kq, &[], &mut events, None);
+            let nevx = kevent_classic(kq, &[], &mut events);
             let nev = nevx.unwrap();
 
             for event in &events[..nev] {
@@ -621,10 +623,11 @@ impl ProcessRunner {
                                 if process.id() == id {
                                     if let Some(pids) = self.descentdant_map.get(&process.pid()) {
                                         for pid in pids.iter() {
-                                            let pid = nix::unistd::Pid::from_raw(*pid as i32);
-                                            _ = nix::sys::signal::kill(
+                                            let pid =
+                                                freebsd::nix::unistd::Pid::from_raw(*pid as i32);
+                                            _ = freebsd::nix::sys::signal::kill(
                                                 pid,
-                                                nix::sys::signal::SIGKILL,
+                                                freebsd::nix::sys::signal::Signal::SIGKILL,
                                             );
                                         }
                                     }
@@ -734,27 +737,27 @@ pub fn run(
     let (ltx, lrx) = channel(true);
     let (parent, sender) = std::os::unix::net::UnixStream::pair().unwrap();
 
-    if let Ok(fork_result) = unsafe { nix::unistd::fork() } {
+    if let Ok(fork_result) = unsafe { freebsd::nix::unistd::fork() } {
         match fork_result {
-            nix::unistd::ForkResult::Child => {
-                let kq = nix::sys::event::kqueue().unwrap();
+            freebsd::nix::unistd::ForkResult::Child => {
+                let kq = unsafe { freebsd::nix::libc::kqueue() };
                 let mut pr = ProcessRunner::new(kq, container, auto_start);
                 pr.add_control_stream(ControlStream::new(control_stream));
                 pr.run(sender);
                 std::process::exit(0);
             }
-            nix::unistd::ForkResult::Parent { child } => {
-                let kq = nix::sys::event::kqueue().unwrap();
+            freebsd::nix::unistd::ForkResult::Parent { child } => {
+                let kq = unsafe { freebsd::nix::libc::kqueue() };
                 let mut recv_events = [
                     KEvent::from_read(parent.as_raw_fd()),
                     KEvent::from_wait_pid(child.as_raw() as u32),
                 ];
-                kevent_ts(kq, &recv_events, &mut [], None).unwrap();
+                kevent_classic(kq, &recv_events, &mut []).unwrap();
 
                 let mut control_stream = ControlStream::new(parent);
                 std::thread::spawn(move || {
                     'kq: loop {
-                        let nenv = kevent_ts(kq, &[], &mut recv_events, None).unwrap();
+                        let nenv = kevent_classic(kq, &[], &mut recv_events).unwrap();
                         let events = &recv_events[..nenv];
 
                         for event in events {

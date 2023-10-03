@@ -554,7 +554,7 @@ fn main() -> Result<(), ActionError> {
         Action::Rdr(rdr) => {
             _ = use_rdr_action(&mut conn, rdr);
         }
-        Action::Create {create, publish} => {
+        Action::Create { create, publish } => {
             let publish = publish.publish.clone();
 
             let res = {
@@ -575,7 +575,12 @@ fn main() -> Result<(), ActionError> {
                 eprintln!("{res:#?}");
             }
         }
-        Action::Run { create, dns, publish, args } => {
+        Action::Run {
+            create,
+            dns,
+            publish,
+            args,
+        } => {
             if args.detach && args.link {
                 panic!("detach and link flags are mutually exclusive");
             }
@@ -592,7 +597,7 @@ fn main() -> Result<(), ActionError> {
                 let main_started_notify = if args.detach {
                     Maybe::None
                 } else {
-                    let fd = unsafe { eventfd(0, nix::libc::EFD_NONBLOCK) };
+                    let fd = unsafe { eventfd(0, freebsd::nix::libc::EFD_NONBLOCK) };
                     Maybe::Some(Fd(fd))
                 };
 
@@ -686,7 +691,7 @@ fn main() -> Result<(), ActionError> {
             let notify = if detach {
                 Maybe::None
             } else {
-                let fd = unsafe { eventfd(0, nix::libc::EFD_NONBLOCK) };
+                let fd = unsafe { eventfd(0, freebsd::nix::libc::EFD_NONBLOCK) };
                 Maybe::Some(Fd(fd))
             };
 

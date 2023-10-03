@@ -370,12 +370,8 @@ impl CreateContainer {
             let zfs = freebsd::fs::zfs::ZfsHandle::default();
             _ = zfs.cycle_jailed_on(dataset);
             // XXX: allow to use a non-default zfs handle?
-            undo.jail_dataset(
-                zfs,
-                jail.jid.to_string(),
-                dataset.to_path_buf(),
-            )
-            .with_context(|| "jail dataset: {dataset:?}")?;
+            undo.jail_dataset(zfs, jail.jid.to_string(), dataset.to_path_buf())
+                .with_context(|| "jail dataset: {dataset:?}")?;
         }
 
         let notify = Arc::new(EventFdNotify::new());

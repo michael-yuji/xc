@@ -108,7 +108,7 @@ impl RunningContainer {
         let sfd = sink.as_raw_fd();
 
         let _size = unsafe {
-            nix::libc::copy_file_range(
+            freebsd::nix::libc::copy_file_range(
                 in_fd,
                 std::ptr::null_mut(),
                 sfd,

@@ -51,7 +51,7 @@ use tokio::sync::RwLock;
 use tracing::*;
 use xc::container::request::NetworkAllocRequest;
 use xc::image_store::ImageStoreError;
-use xc::models::exec::{IpcJexec, IpcStdioMode, Jexec, StdioMode};
+use xc::models::exec::{IpcJexec, IpcStdioMode};
 use xc::models::jail_image::JailConfig;
 use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
 use xc::util::{gen_id, CompressionFormat, CompressionFormatExt};

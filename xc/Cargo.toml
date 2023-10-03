@@ -18,7 +18,6 @@ ipc = { path = "../ipc" }
 ipc-macro = { path = "../ipc-macro" }
 ipcidr = { path = "../ipcidr" }
 jail = "*"
-nix = { version = "0.25.0", features = ["term", "process", "event"] }
 oci_util = { path = "../oci_util" }
 paste = "1.0.11"
 pest = "2.6.0"
