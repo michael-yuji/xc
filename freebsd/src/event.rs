@@ -160,8 +160,7 @@ pub fn kevent_classic(
     changelist: &[KEvent],
     eventlist: &mut [KEvent],
 ) -> nix::Result<usize> {
-    let mut interrupted = true;
-    while interrupted {
+    loop {
         let res = unsafe {
             nix::libc::kevent(
                 kq,
@@ -178,28 +177,23 @@ pub fn kevent_classic(
         match res {
             -1 => {
                 if errno != nix::libc::EINTR {
-                    return Err(nix::errno::Errno::EINTR);
-                } else {
-                    interrupted = true
+                    break Err(nix::errno::Errno::from_i32(errno))
                 }
             }
-            size => return Ok(size as usize),
+            size => break Ok(size as usize),
         }
     }
-    unreachable!()
 }
 
 impl KqueueExt for nix::sys::event::Kqueue {
     fn wait_events(&self, changelist: &[KEvent], eventlist: &mut [KEvent]) -> nix::Result<usize> {
-        let mut interrupted = true;
-        while interrupted {
+        loop {
             match self.kevent(changelist, eventlist, None) {
-                Ok(size) => return Ok(size),
-                Err(Errno::EINTR) => interrupted = true,
-                Err(errno) => return Err(errno),
+                Ok(size) => break Ok(size),
+                Err(errno) if errno != Errno::EINTR => break Err(errno),
+                _ => continue
             }
         }
-        unreachable!()
     }
 }
 
