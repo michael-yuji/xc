@@ -600,8 +600,17 @@ impl ProcessRunner {
                 self.send_update(&mut sender);
             }
 
-            let nevx = kevent_ts(kq, &[], &mut events, None);
-            let nev = nevx.unwrap();
+            let nev = match kevent_ts(kq, &[], &mut events, None) {
+                Ok(value) => value,
+                Err(value) => {
+                    if value == nix::errno::Errno::EINTR {
+                        continue;
+                    } else {
+                        panic!("kevent_ts error: {}", value);
+                    }
+                }
+            };
+
 
             for event in &events[..nev] {
                 match event.filter().unwrap() {
