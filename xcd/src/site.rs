@@ -45,7 +45,7 @@ use tokio::sync::watch::Receiver;
 use tracing::{error, info};
 use xc::container::effect::UndoStack;
 use xc::container::{ContainerManifest, CreateContainer};
-use xc::models::exec::{IpcJexec, Jexec, StdioMode};
+use xc::models::exec::IpcJexec;
 use xc::models::jail_image::JailImage;
 use xc::models::network::HostEntry;
 

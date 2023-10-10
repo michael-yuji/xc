@@ -15,7 +15,6 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ipcidr = { path = "../ipcidr" }
 freebsd = { path = "../freebsd" }
-nix = { version = "0.25.0", features = ["term", "process", "event"] }
 oci_util = { path = "../oci_util" }
 ipc = { path = "../ipc" }
 pest = "2.6.0"

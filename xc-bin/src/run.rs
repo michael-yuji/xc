@@ -161,15 +161,15 @@ impl CreateArgs {
                     let source = std::fs::canonicalize(mount.source).unwrap();
 
                     let flag = if source.is_dir() {
-                        nix::fcntl::OFlag::O_DIRECTORY
+                        freebsd::nix::fcntl::OFlag::O_DIRECTORY
                     } else {
-                        nix::fcntl::OFlag::O_RDWR
+                        freebsd::nix::fcntl::OFlag::O_RDWR
                     };
 
-                    let fd = Maybe::Some(Fd(nix::fcntl::open(
+                    let fd = Maybe::Some(Fd(freebsd::nix::fcntl::open(
                         &source,
                         flag,
-                        nix::sys::stat::Mode::empty(),
+                        freebsd::nix::sys::stat::Mode::empty(),
                     )
                     .unwrap()));
 

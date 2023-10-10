@@ -164,7 +164,7 @@ pub(super) fn spawn_process_pty(
     std::thread::spawn(move || {
         // XXX
         _ = forwarder.spawn();
-        unsafe { nix::libc::waitpid(pid as i32, std::ptr::null_mut(), 0) };
+        unsafe { freebsd::libc::waitpid(pid as i32, std::ptr::null_mut(), 0) };
     });
     Ok(SpawnInfo {
         pid,

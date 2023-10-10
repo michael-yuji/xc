@@ -28,11 +28,10 @@ use crate::jailfile::parse::Action;
 use crate::jailfile::JailContext;
 
 use anyhow::{bail, Result};
-use freebsd::event::EventFdNotify;
-use freebsd::event::KEventExt;
+use freebsd::event::{kevent_classic, EventFdNotify, KEventExt};
+use freebsd::nix::sys::event::{EventFilter, KEvent};
+use freebsd::nix::unistd::pipe;
 use ipc::packet::codec::{Fd, Maybe};
-use nix::sys::event::{kevent_ts, EventFilter, KEvent};
-use nix::unistd::pipe;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -119,7 +118,7 @@ impl Directive for RunDirective {
         let (stderr_a, stderr_b) = pipe()?;
         let (stdin_a, stdin_b) = pipe()?;
 
-        let kq = unsafe { nix::libc::kqueue() };
+        let kq = unsafe { freebsd::nix::libc::kqueue() };
 
         info!("RUN: (shell = {}) {}", self.shell, self.command);
 
@@ -145,13 +144,12 @@ impl Directive for RunDirective {
                 let exit_event = KEvent::from_read(notify.as_raw_fd());
 
                 if self.input.is_none() {
-                    _ = kevent_ts(kq, &[stdout_event, stderr_event, exit_event], &mut [], None)?;
+                    _ = kevent_classic(kq, &[stdout_event, stderr_event, exit_event], &mut [])?;
                 } else {
-                    _ = kevent_ts(
+                    _ = kevent_classic(
                         kq,
                         &[stdin_event, stdout_event, stderr_event, exit_event],
                         &mut [],
-                        None,
                     )?;
                 }
 
@@ -172,7 +170,7 @@ impl Directive for RunDirective {
                 let mut write_buf = vec![0u8; 8192];
 
                 'kq: loop {
-                    let nev = kevent_ts(kq, &[], &mut events, None)?;
+                    let nev = kevent_classic(kq, &[], &mut events)?;
                     for event in &events[..nev] {
                         match event.filter().unwrap() {
                             EventFilter::EVFILT_READ => {
@@ -183,13 +181,13 @@ impl Directive for RunDirective {
                                     break 'kq;
                                 } else if fd == stdout_a {
                                     while available > 0 {
-                                        match nix::unistd::read(
+                                        match freebsd::nix::unistd::read(
                                             fd,
                                             &mut stdout_buf[..available.min(8192)],
                                         ) {
                                             Err(err) => {
                                                 error!("cannot read from remote stdout: {err}");
-                                                if let Err(err) = nix::unistd::close(fd) {
+                                                if let Err(err) = freebsd::nix::unistd::close(fd) {
                                                     warn!("cannot close receiving end of remote stdout pipe: {err}")
                                                 }
                                             }
@@ -202,13 +200,13 @@ impl Directive for RunDirective {
                                     }
                                 } else if fd == stderr_a {
                                     while available > 0 {
-                                        match nix::unistd::read(
+                                        match freebsd::nix::unistd::read(
                                             fd,
                                             &mut stderr_buf[..available.min(8192)],
                                         ) {
                                             Err(err) => {
                                                 error!("cannot read from remote stderr: {err}");
-                                                if let Err(err) = nix::unistd::close(fd) {
+                                                if let Err(err) = freebsd::nix::unistd::close(fd) {
                                                     warn!("cannot close receiving end of remote stderr pipe: {err}")
                                                 }
                                             }
@@ -230,10 +228,10 @@ impl Directive for RunDirective {
                                 let bytes_to_write =
                                     writer.read_to(&mut write_buf[..writable.min(8192)]);
 
-                                match nix::unistd::write(fd, &write_buf[..bytes_to_write]) {
+                                match freebsd::nix::unistd::write(fd, &write_buf[..bytes_to_write]) {
                                     Err(err) => {
                                         error!("cannot write to remote process stdin: {err}");
-                                        _ = nix::unistd::close(fd);
+                                        _ = freebsd::nix::unistd::close(fd);
                                     }
                                     Ok(bytes) => {
                                         if bytes != bytes_to_write {
@@ -249,7 +247,7 @@ impl Directive for RunDirective {
                                     }
                                 }
                                 if writer.is_empty() {
-                                    _ = nix::unistd::close(fd);
+                                    _ = freebsd::nix::unistd::close(fd);
                                 }
                             }
                             _ => unreachable!(),
@@ -257,16 +255,16 @@ impl Directive for RunDirective {
                     }
                 }
 
-                if let Err(err) = nix::unistd::close(kq) {
+                if let Err(err) = freebsd::nix::unistd::close(kq) {
                     warn!("cannot close kq fd: {err}")
                 }
-                if let Err(err) = nix::unistd::close(stdout_a) {
+                if let Err(err) = freebsd::nix::unistd::close(stdout_a) {
                     warn!("cannot close stdout pipe: {err}")
                 }
-                if let Err(err) = nix::unistd::close(stderr_a) {
+                if let Err(err) = freebsd::nix::unistd::close(stderr_a) {
                     warn!("cannot close stderr pipe: {err}")
                 }
-                if let Err(err) = nix::unistd::close(stdin_a) {
+                if let Err(err) = freebsd::nix::unistd::close(stdin_a) {
                     warn!("cannot close stdin pipe: {err}")
                 }
                 Ok(())

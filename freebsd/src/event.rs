@@ -24,6 +24,7 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
+use nix::errno::Errno;
 use nix::libc::{close, intptr_t, EFD_NONBLOCK};
 use nix::sys::event::{EventFilter, EventFlag, FilterFlag, KEvent};
 use nix::unistd::dup;
@@ -105,16 +106,17 @@ impl EventFdNotify {
 
     pub fn notified_sync(&self) {
         let kevent = KEvent::from_read(self.fd);
-        let kq = nix::sys::event::kqueue().unwrap();
+        let kq = nix::sys::event::Kqueue::new().unwrap();
         let out = KEvent::zero();
-        _ = nix::sys::event::kevent_ts(kq, &[kevent], &mut [out], None);
+        kq.wait_events(&[kevent], &mut [out]);
     }
 
     pub fn notified_sync_take_value(&self) -> std::io::Result<u64> {
         let kevent = KEvent::from_read(self.fd);
-        let kq = nix::sys::event::kqueue().unwrap();
+        let kq = nix::sys::event::Kqueue::new().unwrap();
         let out = KEvent::zero();
-        _ = nix::sys::event::kevent_ts(kq, &[kevent], &mut [out], None);
+        kq.wait_events(&[kevent], &mut [out]);
+
         unsafe {
             let mut v = 0u64;
             if eventfd_read(self.fd, &mut v) != 0 {
@@ -145,6 +147,52 @@ impl std::future::Future for EventFdNotified<'_> {
             std::task::Poll::Ready(())
         } else {
             std::task::Poll::Pending
+        }
+    }
+}
+
+pub trait KqueueExt {
+    fn wait_events(&self, changelist: &[KEvent], eventlist: &mut [KEvent]) -> nix::Result<usize>;
+}
+
+pub fn kevent_classic(
+    kq: i32,
+    changelist: &[KEvent],
+    eventlist: &mut [KEvent],
+) -> nix::Result<usize> {
+    loop {
+        let res = unsafe {
+            nix::libc::kevent(
+                kq,
+                changelist.as_ptr() as *const nix::libc::kevent,
+                changelist.len() as i32,
+                eventlist.as_mut_ptr() as *mut nix::libc::kevent,
+                eventlist.len() as i32,
+                std::ptr::null(),
+            )
+        };
+
+        let errno = nix::errno::errno();
+
+        match res {
+            -1 => {
+                if errno != nix::libc::EINTR {
+                    break Err(nix::errno::Errno::from_i32(errno))
+                }
+            }
+            size => break Ok(size as usize),
+        }
+    }
+}
+
+impl KqueueExt for nix::sys::event::Kqueue {
+    fn wait_events(&self, changelist: &[KEvent], eventlist: &mut [KEvent]) -> nix::Result<usize> {
+        loop {
+            match self.kevent(changelist, eventlist, None) {
+                Ok(size) => break Ok(size),
+                Err(errno) if errno != Errno::EINTR => break Err(errno),
+                _ => continue
+            }
         }
     }
 }

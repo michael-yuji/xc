@@ -25,7 +25,7 @@ pub mod ifconfig;
 pub mod pf;
 
 use nix::sys::socket::{getsockopt, XuCred};
-use std::os::fd::AsRawFd;
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 
 #[derive(Debug, Clone)]
@@ -35,8 +35,8 @@ pub struct UnixCredential {
 }
 
 impl UnixCredential {
-    pub fn from_socket(fd: &impl AsRawFd) -> Result<UnixCredential, std::io::Error> {
-        let cred = getsockopt(fd.as_raw_fd(), nix::sys::socket::sockopt::LocalPeerCred)?;
+    pub fn from_socket(fd: &impl AsFd) -> Result<UnixCredential, std::io::Error> {
+        let cred = getsockopt(fd, nix::sys::socket::sockopt::LocalPeerCred)?;
         Ok(UnixCredential {
             uid: cred.uid(),
             gids: cred.groups().to_vec(),
@@ -50,7 +50,7 @@ pub trait UnixStreamExt {
 
 impl UnixStreamExt for UnixStream {
     fn xucred(&self) -> Result<XuCred, std::io::Error> {
-        let cred = getsockopt(self.as_raw_fd(), nix::sys::socket::sockopt::LocalPeerCred)?;
+        let cred = getsockopt(self, nix::sys::socket::sockopt::LocalPeerCred)?;
         Ok(cred)
     }
 }

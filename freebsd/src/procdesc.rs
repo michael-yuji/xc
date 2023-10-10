@@ -24,14 +24,10 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 
-use crate::event::KEventExt;
+use crate::event::{KEventExt, KqueueExt};
 
-use nix::poll::{poll, PollFlags};
-use nix::sys::event::{kevent_ts, kqueue, KEvent};
-use std::future::Future;
+use nix::sys::event::{KEvent, Kqueue};
 use std::os::unix::io::AsRawFd;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 pub struct ProcFd(i32);
 
@@ -40,41 +36,16 @@ extern "C" {
 }
 
 pub fn pdwait(fd: i32) -> nix::Result<()> {
-    let kq = kqueue()?;
+    let kq = Kqueue::new()?;
     let change_list = vec![KEvent::from_wait_pfd(fd)];
     let mut event_list = vec![KEvent::zero()];
-    kevent_ts(kq, &change_list, &mut event_list, None)?;
+    kq.wait_events(&change_list, &mut event_list)?;
     Ok(())
 }
 
 impl AsRawFd for ProcFd {
     fn as_raw_fd(&self) -> i32 {
         self.0
-    }
-}
-
-pub struct PollProcFd {
-    fd: i32,
-}
-
-impl Future for PollProcFd {
-    type Output = nix::Result<()>;
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut pollfd = [nix::poll::PollFd::new(self.fd, PollFlags::POLLHUP)];
-        if poll(&mut pollfd, 0)? > 0 {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
-    }
-}
-
-impl ProcFd {
-    pub async fn exited(&self) -> nix::Result<()> {
-        PollProcFd { fd: self.0 }.await
-    }
-    pub fn close(self) -> nix::Result<()> {
-        nix::unistd::close(self.0)
     }
 }
 

@@ -39,6 +39,7 @@ use nix::pty::OpenptyResult;
 use nix::sys::stat::Mode;
 use nix::unistd::{chdir, close, dup2, setgid, setsid, setuid};
 use serde::Deserialize;
+use std::os::fd::AsRawFd;
 use std::os::raw::{c_int, c_uint};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -398,8 +399,8 @@ impl FreeBSDTokioCommandExt for tokio::process::Command {
     }
 
     fn pty(&mut self, pty: &OpenptyResult) -> &mut tokio::process::Command {
-        let primary = pty.master;
-        let replica = pty.slave;
+        let primary = pty.master.as_raw_fd();
+        let replica = pty.slave.as_raw_fd();
         unsafe {
             self.pre_exec(move || {
                 // detach from the controlling terminal
@@ -407,7 +408,7 @@ impl FreeBSDTokioCommandExt for tokio::process::Command {
                     ioctl(fd, TIOCNOTTY);
                 }
                 setsid().expect("Cannot setsid");
-                if ioctl(replica, TIOCSCTTY) == -1 {
+                if ioctl(replica.as_raw_fd(), TIOCSCTTY) == -1 {
                     Err(std::io::Error::last_os_error())?;
                 }
                 close(primary)?;
@@ -455,8 +456,8 @@ impl FreeBSDCommandExt for std::process::Command {
     }
 
     fn pty(&mut self, pty: &OpenptyResult) -> &mut Command {
-        let primary = pty.master;
-        let replica = pty.slave;
+        let primary = pty.master.as_raw_fd();
+        let replica = pty.slave.as_raw_fd();
         unsafe {
             self.pre_exec(move || {
                 // detach from the controlling terminal
