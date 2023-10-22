@@ -160,20 +160,20 @@ fn _realpath(
     let path = path.as_ref().to_path_buf();
     let mut current = PathBuf::new();
     let mut real_path = root.clone();
-    let mut directed = 0;
+    let mut redirected = 0;
 
     let mut components: VecDeque<_> = path.components().map(PathComp::from).collect();
 
     while let Some(head) = components.pop_front() {
-        if max_redirect <= directed {
+        if max_redirect <= redirected {
             return Ok(None);
         }
-
         match head {
             PathComp::RootDir => {
                 current.push(head);
                 real_path = root.clone();
-            }
+                continue
+            },
             PathComp::CurDir => continue,
             PathComp::ParentDir => {
                 if !current.pop() {
@@ -182,23 +182,18 @@ fn _realpath(
                 real_path.pop();
             }
             PathComp::Normal(ent) => {
-                current.push(&ent);
-                real_path.push(&ent);
-            }
-        }
-
-        if real_path.is_symlink() {
-            directed += 1;
-            let link = real_path.read_link()?;
-            let link_components = link.components();
-            let mut link_components_rev_iter = link_components.rev();
-
-            let first = link_components_rev_iter.next().unwrap();
-            if !matches!(first, Component::Normal(_)) {
-                components.push_front(PathComp::from(first));
-            }
-            for component in link_components_rev_iter {
-                components.push_front(PathComp::from(component));
+                let mut try_path = real_path.clone();
+                try_path.push(&ent);
+                if !try_path.is_symlink() {
+                    real_path.push(&ent);
+                    current.push(&ent);
+                } else {
+                    redirected += 1;
+                    let link = try_path.read_link()?;
+                    for component in link.components().rev() {
+                        components.push_front(PathComp::from(component));
+                    }
+                }
             }
         }
     }
@@ -321,6 +316,7 @@ pub fn mk_string(
 #[cfg(test)]
 mod tests {
     use super::mk_string;
+    use super::realpath;
     /*
     #[test]
     fn test_to_hex() {
@@ -344,5 +340,26 @@ mod tests {
         assert_eq!(mk_string(&["a"], "[", ",", "]"), "[a]".to_string());
         let empty = Vec::<String>::new();
         assert_eq!(mk_string(&empty, "[", ",", "]"), "[]".to_string());
+    }
+
+    #[test]
+    fn test_realpath() {
+        let parent = realpath("tests/find_exec", "/bin/parent").unwrap();
+        assert_eq!(parent.to_str().unwrap(), "tests/find_exec/bin/sh");
+        let sibling = realpath("tests/find_exec", "/bin/sibling").unwrap();
+        assert_eq!(sibling.to_str().unwrap(), "tests/find_exec/bin/sh");
+        let link = realpath("tests/find_exec", "/bin/link").unwrap();
+        assert_eq!(link.to_str().unwrap(), "tests/find_exec/bin/sh");
+        let sh = realpath("tests/find_exec", "/bin/sh").unwrap();
+        assert_eq!(sh.to_str().unwrap(), "tests/find_exec/bin/sh");
+
+        let x_parent = realpath("tests/find_exec", "/xbin/parent").unwrap();
+        assert_eq!(x_parent.to_str().unwrap(), "tests/find_exec/bin/sh");
+        let x_sibling = realpath("tests/find_exec", "/xbin/sibling").unwrap();
+        assert_eq!(x_sibling.to_str().unwrap(), "tests/find_exec/bin/sh");
+        let x_link = realpath("tests/find_exec", "/xbin/link").unwrap();
+        assert_eq!(x_link.to_str().unwrap(), "tests/find_exec/bin/sh");
+        let x_sh = realpath("tests/find_exec", "/xbin/sh").unwrap();
+        assert_eq!(x_sh.to_str().unwrap(), "tests/find_exec/bin/sh");
     }
 }
