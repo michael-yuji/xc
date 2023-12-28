@@ -27,7 +27,7 @@ use crate::container::request::Mount;
 use crate::container::ContainerManifest;
 use crate::models::exec::Jexec;
 use crate::models::jail_image::JailImage;
-use crate::models::network::{DnsSetting, IpAssign};
+use crate::models::network::{DnsSetting, IpAssign, MainAddressSelector};
 use crate::util::realpath;
 
 use anyhow::Context;
@@ -91,6 +91,8 @@ pub struct RunningContainer {
     pub started: Option<u64>,
 
     pub jailed_datasets: Vec<PathBuf>,
+
+    pub main_ip_selector: Option<MainAddressSelector>,
 }
 
 impl RunningContainer {
@@ -156,6 +158,36 @@ impl RunningContainer {
         Ok(())
     }
 
+    pub fn main_address(&self) -> Option<IpAddr> {
+        match &self.main_ip_selector {
+            Some(MainAddressSelector::Ip(address)) => Some(*address),
+            Some(MainAddressSelector::Network(network)) => {
+                for alloc in self.ip_alloc.iter() {
+                    match alloc.network.as_ref() {
+                        Some(_network) if network == _network => {
+                            match alloc.addresses.first() {
+                                None => continue,
+                                Some(addr) => return Some(addr.addr())
+                            }
+                        },
+                        _ => continue
+                    }
+                }
+                None
+            },
+            None => {
+                for alloc in self.ip_alloc.iter() {
+                    if alloc.network.is_some() {
+                        if let Some(address) = alloc.addresses.first() {
+                            return Some(address.addr())
+                        }
+                    }
+                }
+                None
+            },
+        }
+    }
+
     pub fn serialized(&self) -> ContainerManifest {
         let mut processes = HashMap::new();
 
@@ -192,6 +224,7 @@ impl RunningContainer {
             started: self.started,
             finished_at: self.finished_at,
             created: self.created,
+            main_address: self.main_address(),
         }
     }
 }

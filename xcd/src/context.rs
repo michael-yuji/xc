@@ -523,10 +523,10 @@ impl ServerContext {
         rdr: &PortRedirection,
     ) -> Result<(), anyhow::Error> {
         if let Some(container) = self.resolve_container_by_name(name).await {
-            if let Some(main_ip) = container.ip_alloc.first() {
-                let default_ext_ifs = &self.config.ext_ifs;
-                let mut rdr = rdr.clone();
-                rdr.with_host_info(default_ext_ifs, main_ip.addresses.first().unwrap().clone());
+            let default_ext_ifs = &self.config.ext_ifs;
+            let mut rdr = rdr.clone();
+            if let Some(address) = container.main_address {
+                rdr.with_host_info(default_ext_ifs, ipcidr::IpCidr::from_singleton(address));
                 self.port_forward_table.append_rule(&container.id, rdr);
                 self.reload_pf_rdr_anchor()?;
             }

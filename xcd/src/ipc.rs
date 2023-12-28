@@ -53,7 +53,7 @@ use xc::container::request::NetworkAllocRequest;
 use xc::image_store::ImageStoreError;
 use xc::models::exec::{IpcJexec, IpcStdioMode};
 use xc::models::jail_image::JailConfig;
-use xc::models::network::{DnsSetting, IpAssign, PortRedirection};
+use xc::models::network::{DnsSetting, IpAssign, PortRedirection, MainAddressSelector};
 use xc::util::{gen_id, CompressionFormat, CompressionFormatExt};
 
 #[derive(FromPacket, Debug)]
@@ -237,6 +237,7 @@ pub struct InstantiateRequest {
     pub jail_datasets: Vec<PathBuf>,
     pub children_max: u32,
     pub netgroups: Vec<String>,
+    pub main_ip_selector: Option<MainAddressSelector>,
 }
 
 impl InstantiateRequest {
@@ -296,6 +297,7 @@ impl Default for InstantiateRequest {
             jail_datasets: Vec::new(),
             children_max: 0,
             netgroups: Vec::new(),
+            main_ip_selector: None,
         }
     }
 }

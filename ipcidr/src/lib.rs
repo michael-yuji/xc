@@ -108,6 +108,12 @@ impl IpCidr {
         }
     }
 
+    pub fn from_singleton(address: IpAddr) -> IpCidr {
+        match address {
+            IpAddr::V4(address) => Self::V4(Ipv4Cidr { address, mask: 32 }),
+            IpAddr::V6(address) => Self::V6(Ipv6Cidr { address, mask: 128 }),
+        }
+    }
     pub fn from_addr(addr: IpAddr, mask: u8) -> Option<Self> {
         match addr {
             IpAddr::V4(addr) if mask <= 32 => Some(Self::V4(Ipv4Cidr {

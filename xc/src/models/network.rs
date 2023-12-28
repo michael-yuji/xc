@@ -157,6 +157,66 @@ pub struct HostEntry {
     pub hostname: String,
 }
 
+#[derive(Clone, Debug)]
+pub enum MainAddressSelector {
+    Network(String),
+    Ip(IpAddr)
+}
+
+impl std::fmt::Display for MainAddressSelector {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MainAddressSelector::Ip(ip) => formatter.write_fmt(format_args!("ipadd/{ip}")),
+            MainAddressSelector::Network(network) => formatter.write_fmt(format_args!("network/{network}"))
+        }
+    }
+}
+
+impl std::str::FromStr for MainAddressSelector {
+    type Err = anyhow::Error;
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        input.split_once('/').ok_or(anyhow::anyhow!("malformed")).and_then(|(proto, val)| {
+            match proto {
+                "ipaddr" => val.parse::<IpAddr>()
+                    .map_err(anyhow::Error::new)
+                    .map(MainAddressSelector::Ip),
+                "network" => Ok(MainAddressSelector::Network(val.to_string())),
+                _ => Err(anyhow::anyhow!("malformed"))
+            }
+        })
+    }
+}
+
+impl Serialize for MainAddressSelector {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::ser::Serializer
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+struct MainAddressSelectorVisitor;
+
+impl<'de> serde::de::Visitor<'de> for MainAddressSelectorVisitor {
+    type Value = MainAddressSelector;
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("expecting ip/<ipadr> or network/<network-name>")
+    }
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where E: serde::de::Error
+    {
+        value.parse().map_err(|e| E::custom(format!("{e:?}")))
+    }
+}
+
+impl<'de> Deserialize<'de> for MainAddressSelector {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where D: serde::de::Deserializer<'de>
+    {
+        deserializer.deserialize_str(MainAddressSelectorVisitor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{NetProto, PortNum, PortRedirection};

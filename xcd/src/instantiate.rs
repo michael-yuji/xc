@@ -42,7 +42,7 @@ use xc::errx;
 use xc::format::devfs_rules::DevfsRule;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
-use xc::models::network::{DnsSetting, IpAssign};
+use xc::models::network::{DnsSetting, IpAssign, MainAddressSelector};
 use xc::models::EnforceStatfs;
 
 pub struct AppliedInstantiateRequest {
@@ -304,6 +304,7 @@ pub struct InstantiateBlueprint {
     pub enforce_statfs: EnforceStatfs,
     pub jailed_datasets: Vec<std::path::PathBuf>,
     pub children_max: u32,
+    pub main_ip_selector: Option<MainAddressSelector>,
 }
 
 impl InstantiateBlueprint {
@@ -524,6 +525,7 @@ impl InstantiateBlueprint {
             enforce_statfs: request.enforce_statfs,
             jailed_datasets: request.request.jail_datasets,
             children_max: request.request.children_max,
+            main_ip_selector: request.request.main_ip_selector,
         })
     }
 }

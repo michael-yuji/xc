@@ -447,6 +447,7 @@ impl Site {
                     enforce_statfs: blueprint.enforce_statfs,
                     jailed_datasets: blueprint.jailed_datasets,
                     children_max: blueprint.children_max,
+                    main_ip_selector: blueprint.main_ip_selector,
                 };
 
                 let running_container = container

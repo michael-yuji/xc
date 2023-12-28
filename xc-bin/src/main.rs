@@ -620,8 +620,6 @@ fn main() -> Result<(), ActionError> {
             };
 
             if let Ok(res) = res {
-                eprintln!("required_cleanerce: {:?}", res.require_clearence.clone());
-
                 if !res.require_clearence.is_empty() {
                     println!(
                         "this container require exposing these additional device nodes (y/n):"

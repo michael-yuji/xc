@@ -308,9 +308,12 @@ impl JailConfig {
     }
 
     pub fn to_oci(&self) -> OciInnerConfig {
+        /*
         let mut config = OciInnerConfig::default();
         // TODO: implement the translations
         config
+        */
+        OciInnerConfig::default()
     }
 
     pub fn from_json(value: serde_json::Value) -> Option<JailImage> {

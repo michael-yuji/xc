@@ -46,7 +46,7 @@ pub enum NetworkAllocRequest {
 }
 
 impl NetworkAllocRequest {
-    pub fn network<'a>(&'a self) -> &'a String {
+    pub fn network(&self) -> &String {
         match self {
             Self::Any { network } => network,
             Self::Explicit { network, .. } => network,

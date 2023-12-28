@@ -33,7 +33,7 @@ use self::process::ProcessStat;
 use crate::container::running::RunningContainer;
 use crate::models::exec::Jexec;
 use crate::models::jail_image::JailImage;
-use crate::models::network::IpAssign;
+use crate::models::network::{IpAssign, MainAddressSelector};
 use crate::models::EnforceStatfs;
 use crate::util::realpath;
 
@@ -106,6 +106,8 @@ pub struct CreateContainer {
     pub jailed_datasets: Vec<PathBuf>,
 
     pub children_max: u32,
+
+    pub main_ip_selector: Option<MainAddressSelector>,
 }
 
 impl CreateContainer {
@@ -411,6 +413,7 @@ impl CreateContainer {
             started: None,
             finished_at: None,
             jailed_datasets: self.jailed_datasets,
+            main_ip_selector: None,
         })
     }
 }
@@ -445,6 +448,7 @@ pub struct ContainerManifest {
     pub created: Option<u64>,
     pub started: Option<u64>,
     pub finished_at: Option<u64>,
+    pub main_address: Option<IpAddr>,
 }
 
 impl ContainerManifest {

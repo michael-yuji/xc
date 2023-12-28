@@ -32,7 +32,7 @@ use oci_util::image_reference::ImageReference;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::path::PathBuf;
 use xc::container::request::NetworkAllocRequest;
-use xc::models::network::DnsSetting;
+use xc::models::network::{DnsSetting, MainAddressSelector};
 use xcd::ipc::{CopyFile, InstantiateRequest, MountReq};
 
 #[derive(Parser, Debug)]
@@ -146,6 +146,9 @@ pub(crate) struct CreateArgs {
     /// Enable DTrace USDT registration from container
     #[arg(long = "usdt")]
     pub(crate) usdt: bool,
+
+    #[arg(long = "main-address")]
+    pub(crate) main_address_selector: Option<MainAddressSelector>,
 }
 
 impl CreateArgs {
@@ -259,6 +262,7 @@ impl CreateArgs {
             jail_datasets,
             enable_usdt: self.usdt,
             netgroups: self.netgroups,
+            main_ip_selector: self.main_address_selector,
             ..InstantiateRequest::default()
         })
     }
