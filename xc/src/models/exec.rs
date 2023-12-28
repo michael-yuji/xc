@@ -260,10 +260,6 @@ impl Exec {
             for arg in self.default_args.iter() {
                 argv.push(arg.apply(&resolved_envs));
             }
-        } else {
-            for arg in args {
-                argv.push(arg.to_string());
-            }
         }
 
         let uid = self.user.as_ref().and_then(|user| user.parse::<u32>().ok());
