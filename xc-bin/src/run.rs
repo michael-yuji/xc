@@ -149,6 +149,12 @@ pub(crate) struct CreateArgs {
 
     #[arg(long = "main-address")]
     pub(crate) main_address_selector: Option<MainAddressSelector>,
+
+    #[arg(long = "tap")]
+    pub(crate) tap_ifaces: Vec<String>,
+
+    #[arg(long = "tun")]
+    pub(crate) tun_ifaces: Vec<String>,
 }
 
 impl CreateArgs {
@@ -263,6 +269,8 @@ impl CreateArgs {
             enable_usdt: self.usdt,
             netgroups: self.netgroups,
             main_ip_selector: self.main_address_selector,
+            tun_interfaces: Some(self.tun_ifaces),
+            tap_interfaces: Some(self.tap_ifaces),
             ..InstantiateRequest::default()
         })
     }

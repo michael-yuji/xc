@@ -45,31 +45,40 @@ use xc::models::jail_image::JailImage;
 use xc::models::network::{DnsSetting, IpAssign, MainAddressSelector};
 use xc::models::EnforceStatfs;
 
-pub struct AppliedInstantiateRequest {
+pub struct CheckedInstantiateRequest {
     pub(crate) request: InstantiateRequest,
     pub(crate) devfs_rules: Vec<DevfsRule>,
-    init: Vec<Jexec>,
-    deinit: Vec<Jexec>,
-    main: Option<Jexec>,
-    envs: HashMap<String, String>,
     allowing: Vec<String>,
     copies: Vec<xc::container::request::CopyFileReq>,
     enforce_statfs: EnforceStatfs,
     pub(crate) image: JailImage,
 }
 
-impl AppliedInstantiateRequest {
+impl CheckedInstantiateRequest {
     pub(crate) fn new(
         mut request: InstantiateRequest,
         oci_config: &JailImage,
         cred: &Credential,
         resources: &mut Resources,
-    ) -> anyhow::Result<AppliedInstantiateRequest> {
+    ) -> anyhow::Result<CheckedInstantiateRequest> {
         let existing_ifaces = freebsd::net::ifconfig::interfaces()?;
         let available_allows = xc::util::jail_allowables();
         let config = oci_config.jail_config();
 
         let mut envs = request.envs.clone();
+
+        if let Some(ifaces) = request.tun_interfaces.as_ref() {
+            for tun in ifaces.iter() {
+                envs.insert(tun.to_string(), "dummy".to_string());
+            }
+        }
+
+        if let Some(ifaces) = request.tap_interfaces.as_ref() {
+            for tun in ifaces.iter() {
+                envs.insert(tun.to_string(), "dummy".to_string());
+            }
+        }
+
         for (key, env_spec) in config.envs.iter() {
             let key_string = key.to_string();
             if !request.envs.contains_key(&key_string) {
@@ -89,54 +98,6 @@ impl AppliedInstantiateRequest {
             }
         }
 
-        let main = match &request.entry_point {
-            Some(spec) => {
-                let args = {
-                    let mut args = Vec::new();
-                    for arg in spec.entry_point_args.iter() {
-                        args.push(arg.parse::<InterpolatedString>().context("invalid arg")?);
-                    }
-                    args
-                };
-
-                let selected_entry = match &spec.entry_point {
-                    Some(name) => name.to_string(),
-                    None => config
-                        .default_entry_point
-                        .unwrap_or_else(|| "main".to_string()),
-                };
-
-                let mut entry_point =
-                    if let Some(entry_point) = config.entry_points.get(&selected_entry) {
-                        entry_point.clone()
-                    } else {
-                        xc::models::exec::Exec {
-                            exec: selected_entry,
-                            args,
-                            default_args: Vec::new(),
-                            environ: HashMap::new(),
-                            work_dir: None,
-                            required_envs: Vec::new(),
-                            clear_env: false,
-                            user: request.user.clone(),
-                            group: request.group.clone(),
-                        }
-                    };
-
-                if request.user.is_some() {
-                    entry_point.user = request.user.clone();
-                }
-
-                if request.group.is_some() {
-                    entry_point.group = request.group.clone();
-                }
-
-                let mut jexec = entry_point.resolve_args(&envs, &spec.entry_point_args)?;
-                jexec.output_mode = StdioMode::Terminal;
-                Some(jexec)
-            }
-            None => None,
-        };
 
         for assign in request.ips.iter() {
             let iface = &assign.interface;
@@ -210,15 +171,15 @@ impl AppliedInstantiateRequest {
 
         for req in request.ipreq.iter() {
             let network = req.network();
-            if !resources.has_network(&network) {
+            if !resources.has_network(network) {
                 errx!(ENOENT, "no such network: {network}");
             }
         }
 
-        for group in request.netgroups.iter() {
+        'iter_groups: for group in request.netgroups.iter() {
             for req in request.ipreq.iter() {
                 if req.network() == group {
-                    continue;
+                    continue 'iter_groups;
                 }
             }
             errx!(
@@ -226,20 +187,6 @@ impl AppliedInstantiateRequest {
                 "cannot add container to netgroup {group} as network {group} does not exist"
             )
         }
-
-        let init = config
-            .init
-            .clone()
-            .into_iter()
-            .map(|s| s.resolve_args(&envs, &[]))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let deinit = config
-            .deinit
-            .clone()
-            .into_iter()
-            .map(|s| s.resolve_args(&envs, &[]))
-            .collect::<Result<Vec<_>, _>>()?;
 
         let mut devfs_rules = Vec::new();
         for rule in config.devfs_rules.iter() {
@@ -252,14 +199,10 @@ impl AppliedInstantiateRequest {
             }
         }
 
-        Ok(AppliedInstantiateRequest {
+        Ok(CheckedInstantiateRequest {
             request,
             copies,
             devfs_rules,
-            init,
-            deinit,
-            main,
-            envs,
             allowing,
             enforce_statfs,
             image: oci_config.clone(),
@@ -305,12 +248,13 @@ pub struct InstantiateBlueprint {
     pub jailed_datasets: Vec<std::path::PathBuf>,
     pub children_max: u32,
     pub main_ip_selector: Option<MainAddressSelector>,
+    pub created_interfaces: Vec<String>,
 }
 
 impl InstantiateBlueprint {
     pub(crate) fn new(
         id: &str,
-        request: AppliedInstantiateRequest,
+        request: CheckedInstantiateRequest,
         devfs_store: &mut DevfsRulesetStore,
         cred: &Credential,
         resources: &mut Resources,
@@ -330,9 +274,30 @@ impl InstantiateBlueprint {
                 }
             }
         };
+
         let hostname = request.request.hostname.unwrap_or_else(|| name.to_string());
         let vnet = request.request.vnet || config.vnet;
-        let envs = request.envs.clone();
+        let mut tuntap_ifaces = Vec::new();
+        let mut envs = request.request.envs.clone();
+
+        for (key, env_spec) in config.envs.iter() {
+            let key_string = key.to_string();
+            if !request.request.envs.contains_key(&key_string) {
+                if let Some(value) = &env_spec.default_value {
+                    envs.insert(key_string, value.clone());
+                } else if env_spec.required {
+                    let extra_info = env_spec
+                        .description
+                        .as_ref()
+                        .map(|d| format!(" - {d}"))
+                        .unwrap_or_default();
+                    errx!(
+                        ENOENT,
+                        "missing required environment variable: {key}{extra_info}"
+                    );
+                }
+            }
+        }
 
         if config.linux {
             if !freebsd::exists_kld("linux64") {
@@ -390,6 +355,20 @@ impl InstantiateBlueprint {
             };
         }
 
+        for tap in request.request.tap_interfaces.unwrap_or_default() {
+            let interface = freebsd::net::ifconfig::create_tap()?;
+            tuntap_ifaces.push(interface.to_string());
+            envs.insert(tap, interface.clone());
+            ip_alloc.push(IpAssign { network: None, addresses: Vec::new(), interface });
+        }
+
+        for tun in request.request.tun_interfaces.unwrap_or_default() {
+            let interface = freebsd::net::ifconfig::create_tap()?;
+            tuntap_ifaces.push(interface.to_string());
+            envs.insert(tun, interface.clone());
+            ip_alloc.push(IpAssign { network: None, addresses: Vec::new(), interface });
+        }
+
         let mut mount_req = Vec::new();
 
         for special_mount in config.special_mounts.iter() {
@@ -425,14 +404,13 @@ impl InstantiateBlueprint {
                     Maybe::None => errx!(ENOENT, "missing evidence"),
                     Maybe::Some(fd) => {
                         let Ok(stat) = freebsd::nix::sys::stat::fstat(fd.as_raw_fd()) else {
-                            println!("cannot stat evidence");
                             errx!(ENOENT, "cannot stat evidence")
                         };
                         let check_stat = freebsd::nix::sys::stat::stat(source_path).unwrap();
                         if stat.st_ino != check_stat.st_ino {
                             errx!(ENOENT, "evidence inode mismatch")
                         }
-                        freebsd::nix::unistd::close(fd.as_raw_fd());
+                        _ = freebsd::nix::unistd::close(fd.as_raw_fd());
                         Volume::adhoc(source_path)
                     }
                 }
@@ -476,9 +454,74 @@ impl InstantiateBlueprint {
             devfs_rules.push(rule.to_string());
         }
 
+        for name in tuntap_ifaces.iter() {
+            devfs_rules.push(format!("path {name} unhide"));
+        }
+
         let devfs_ruleset_id = devfs_store.get_ruleset_id(&devfs_rules);
 
-        println!("devfs_ruleset_id: {devfs_ruleset_id}");
+        let main = match &request.request.entry_point {
+            Some(spec) => {
+                let args = {
+                    let mut args = Vec::new();
+                    for arg in spec.entry_point_args.iter() {
+                        args.push(arg.parse::<InterpolatedString>().context("invalid arg")?);
+                    }
+                    args
+                };
+
+                let selected_entry = match &spec.entry_point {
+                    Some(name) => name.to_string(),
+                    None => config
+                        .default_entry_point
+                        .unwrap_or_else(|| "main".to_string()),
+                };
+
+                let mut entry_point =
+                    if let Some(entry_point) = config.entry_points.get(&selected_entry) {
+                        entry_point.clone()
+                    } else {
+                        xc::models::exec::Exec {
+                            exec: selected_entry,
+                            args,
+                            default_args: Vec::new(),
+                            environ: HashMap::new(),
+                            work_dir: None,
+                            required_envs: Vec::new(),
+                            clear_env: false,
+                            user: request.request.user.clone(),
+                            group: request.request.group.clone(),
+                        }
+                    };
+
+                if request.request.user.is_some() {
+                    entry_point.user = request.request.user.clone();
+                }
+
+                if request.request.group.is_some() {
+                    entry_point.group = request.request.group.clone();
+                }
+
+                let mut jexec = entry_point.resolve_args(&envs, &spec.entry_point_args)?;
+                jexec.output_mode = StdioMode::Terminal;
+                Some(jexec)
+            }
+            None => None,
+        };
+
+        let init = config
+            .init
+            .clone()
+            .into_iter()
+            .map(|s| s.resolve_args(&envs, &[]))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let deinit = config
+            .deinit
+            .clone()
+            .into_iter()
+            .map(|s| s.resolve_args(&envs, &[]))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let extra_layers = request
             .request
@@ -493,10 +536,10 @@ impl InstantiateBlueprint {
             hostname,
             id: id.to_string(),
             vnet,
-            init: request.init,
-            deinit: request.deinit,
+            init,
+            deinit,
             extra_layers,
-            main: request.main,
+            main,
             ips: request.request.ips,
             ipreq: request.request.ipreq,
             mount_req,
@@ -526,6 +569,7 @@ impl InstantiateBlueprint {
             jailed_datasets: request.request.jail_datasets,
             children_max: request.request.children_max,
             main_ip_selector: request.request.main_ip_selector,
+            created_interfaces: tuntap_ifaces
         })
     }
 }

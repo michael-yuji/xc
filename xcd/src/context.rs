@@ -28,7 +28,7 @@ use crate::database::Database;
 use crate::devfs_store::DevfsRulesetStore;
 use crate::image::pull::PullImageError;
 use crate::image::ImageManager;
-use crate::instantiate::{AppliedInstantiateRequest, InstantiateBlueprint};
+use crate::instantiate::{CheckedInstantiateRequest, InstantiateBlueprint};
 use crate::ipc::InstantiateRequest;
 use crate::port::PortForwardTable;
 use crate::registry::JsonRegistryProvider;
@@ -82,7 +82,7 @@ pub struct ServerContext {
 
     pub(crate) resources: Arc<RwLock<Resources>>,
 
-    pub(crate) ins_queue: HashMap<String, AppliedInstantiateRequest>,
+    pub(crate) ins_queue: HashMap<String, CheckedInstantiateRequest>,
 }
 
 impl ServerContext {
@@ -537,7 +537,7 @@ impl ServerContext {
     pub(crate) async fn continue_instantiate(
         this: Arc<RwLock<Self>>,
         id: &str,
-        applied: AppliedInstantiateRequest,
+        applied: CheckedInstantiateRequest,
         cred: Credential,
     ) -> anyhow::Result<()> {
         let no_clean = applied.request.no_clean;
@@ -645,7 +645,7 @@ impl ServerContext {
             let resources_ref = this.resources.clone();
             let mut resources = resources_ref.write().await;
 
-            AppliedInstantiateRequest::new(request, image, &cred, &mut resources)?
+            CheckedInstantiateRequest::new(request, image, &cred, &mut resources)?
         };
         if !applied.devfs_rules.is_empty() {
             let rules = applied.devfs_rules.iter().map(|r| r.to_string()).collect();

@@ -450,6 +450,10 @@ impl Site {
                     main_ip_selector: blueprint.main_ip_selector,
                 };
 
+                for iface in blueprint.created_interfaces.iter() {
+                    self.undo.destroy_iface(iface.to_string())?;
+                }
+
                 let running_container = container
                     .create_transactionally(&mut self.undo)
                     .context("fail to start container")?;

@@ -238,6 +238,8 @@ pub struct InstantiateRequest {
     pub children_max: u32,
     pub netgroups: Vec<String>,
     pub main_ip_selector: Option<MainAddressSelector>,
+    pub tap_interfaces: Option<Vec<String>>,
+    pub tun_interfaces: Option<Vec<String>>,
 }
 
 impl InstantiateRequest {
@@ -298,6 +300,8 @@ impl Default for InstantiateRequest {
             children_max: 0,
             netgroups: Vec::new(),
             main_ip_selector: None,
+            tap_interfaces: None,
+            tun_interfaces: None,
         }
     }
 }

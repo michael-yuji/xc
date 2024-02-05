@@ -272,5 +272,13 @@ impl_undos! {
             // unjail will not work.
             Ok::<(), anyhow::Error>(())
         }
+    };
+
+    DestroyIface(iface: String) {
+        "destroy an interface on undo",
+        Ok::<(), anyhow::Error>(()),
+        |_| {
+            freebsd::net::ifconfig::destroy_interface(iface.to_string())
+        }
     }
 }

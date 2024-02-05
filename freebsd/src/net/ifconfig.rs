@@ -53,6 +53,8 @@ pub enum IfconfigError {
     InterfaceDoesNotExist(String),
     #[error("{0}")]
     RunError(std::io::Error),
+    #[error("{0}")]
+    CliError(String),
 }
 
 fn has_whitespace(s: &str) -> bool {
@@ -213,4 +215,26 @@ pub fn remove_from_bridge<A: AsRef<str>, B: AsRef<str>>(
         .status()
         .map_err(IfconfigError::RunError)?;
     Ok(())
+}
+
+pub fn create_tap() -> Result<String, IfconfigError> {
+    let output = cmd!((IFCONFIG_CMD) tap create)
+        .output()
+        .map_err(IfconfigError::RunError)?;
+    if output.status.success() {
+        Ok(std::str::from_utf8(&output.stdout).unwrap().trim_end().to_string())
+    } else {
+        Err(IfconfigError::CliError(std::str::from_utf8(&output.stderr).unwrap().trim_end().to_string()))
+    }
+}
+
+pub fn create_tun<A: AsRef<str>>() -> Result<String, IfconfigError> {
+    let output = cmd!((IFCONFIG_CMD) tap create)
+        .output()
+        .map_err(IfconfigError::RunError)?;
+    if output.status.success() {
+        Ok(std::str::from_utf8(&output.stdout).unwrap().trim_end().to_string())
+    } else {
+        Err(IfconfigError::CliError(std::str::from_utf8(&output.stderr).unwrap().trim_end().to_string()))
+    }
 }
