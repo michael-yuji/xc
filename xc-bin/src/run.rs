@@ -123,6 +123,10 @@ pub(crate) struct CreateArgs {
     #[arg(long = "vnet", action)]
     pub(crate) vnet: bool,
 
+    // When in VNET, Do not create lo0 interface with 127.0.0.1/8 and ::1/128
+    #[arg(long = "no-lo0", action)]
+    pub(crate) no_lo0: bool,
+
     #[arg(long = "ip", action)]
     pub(crate) ips: Vec<IpWant>,
 
@@ -246,6 +250,19 @@ impl CreateArgs {
             }
         }
 
+        let mut ips = self.ips;
+
+        if !self.no_lo0 && !ips.iter().any(|ip| ip.0.interface == "lo0") {
+            ips.push(IpWant(xc::models::network::IpAssign {
+                network: None,
+                interface: "lo0".to_string(),
+                addresses: vec![
+                    "127.0.0.1/8".parse().unwrap(),
+                    "::1/128".parse().unwrap()
+                ]
+            }))
+        }
+
         Ok(InstantiateRequest {
             create_only: true,
             name,
@@ -260,7 +277,7 @@ impl CreateArgs {
             no_clean: self.no_clean,
             persist: self.persist,
             image_reference: self.image_reference,
-            ips: self.ips.into_iter().map(|v| v.0).collect(),
+            ips: ips.into_iter().map(|v| v.0).collect(),
             main_norun: true,
             init_norun: true,
             deinit_norun: true,
