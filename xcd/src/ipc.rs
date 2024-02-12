@@ -30,7 +30,7 @@ use crate::resources::network::Network;
 use crate::resources::volume::{Volume, VolumeDriverKind};
 
 use freebsd::event::EventFdNotify;
-use freebsd::libc::{EINVAL, EIO};
+use freebsd::libc::{EINVAL, EIO, EPERM, ENOENT};
 use ipc::packet::codec::{Fd, FromPacket, List, Maybe};
 use ipc::proto::{enoent, ipc_err, GenericResult};
 use ipc::service::{ConnectionContext, Service};
@@ -779,7 +779,6 @@ pub struct FdImport {
     pub image_reference: ImageReference,
 }
 
-// XXX: Handle loads of error here
 #[ipc_method(method = "fd_import")]
 async fn fd_import(
     context: Arc<RwLock<ServerContext>>,
@@ -796,15 +795,51 @@ async fn fd_import(
         path.push(temp);
         path
     };
-    let tempfile = std::fs::OpenOptions::new()
+
+    let tempfile = match std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .open(&tempfile_path)
-        .unwrap();
+    {
+        Ok(file) => file,
+        Err(error) => {
+            return ipc_err(
+                EPERM,
+                &format!("cannot open file for write and create at {tempfile_path:?}: {error}")
+            )
+        }
+    };
 
-    zfs.create2(&tempdataset, false, false).unwrap();
+    match zfs.create2(&tempdataset, false, false) {
+        Ok(_) => (),
+        Err(error) => {
+            drop(tempfile);
+            _ = std::fs::remove_file(&tempfile_path);
+            error!("cannot create temporary zfs dataset at {tempdataset}: {error}");
+            return ipc_err(
+                EPERM,
+                &format!("cannot create temporary zfs dataset at {tempdataset}: {error}")
+            )
+        }
+    };
 
-    let mountpoint = zfs.mount_point(&tempdataset).unwrap().unwrap();
+    let mountpoint = match zfs.mount_point(&tempdataset) {
+        Ok(Some(mountpoint)) => mountpoint,
+        Ok(None) => {
+            error!("dataset {tempdataset} do not have a mountpoint");
+            return ipc_err(
+                ENOENT,
+                &format!("dataset {tempdataset} do not have a mountpoint")
+            )
+        },
+        Err(error) => {
+            error!("zfs exec failure: {error} when querying mountpoint for {tempdataset}");
+            return ipc_err(
+                EINVAL,
+                &format!("zfs exec failure: {error} when querying mountpoint for {tempdataset}")
+            )
+        }
+    };
 
     let source_fd = request.fd.as_raw_fd();
     let dest_fd = tempfile.as_raw_fd();
@@ -833,7 +868,12 @@ async fn fd_import(
     info!("copy_file_range done");
     drop(tempfile);
 
-    file.rewind();
+    match file.rewind() {
+        Ok(_) => (),
+        Err(error) => {
+            warn!("cannot rewind received fd: {error}");
+        }
+    };
 
     let ocitar_output = std::process::Command::new("ocitar")
         .arg("-xf-")
