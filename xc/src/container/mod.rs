@@ -67,17 +67,29 @@ pub struct CreateContainer {
     pub root: String,
     /// The devfs ruleset id assigned to this container
     pub devfs_ruleset_id: u16,
+
     pub ip_alloc: Vec<IpAssign>,
+
     pub mount_req: Vec<Mount>,
+
     pub vnet: bool,
+
     pub init: Vec<Jexec>,
+
     pub deinit: Vec<Jexec>,
+
     pub main: Option<Jexec>,
+
     pub linux: bool,
+
     pub main_norun: bool,
+
     pub init_norun: bool,
+
     pub deinit_norun: bool,
+
     pub persist: bool,
+
     pub no_clean: bool,
     /// Do not create /proc automatically and abort mounting procfs if the directory is missing.
     pub linux_no_create_proc_dir: bool,
@@ -87,6 +99,7 @@ pub struct CreateContainer {
     pub linux_no_mount_sys: bool,
     /// Do not mount linux procfs
     pub linux_no_mount_proc: bool,
+
     pub zfs_origin: Option<String>,
 
     pub origin_image: Option<JailImage>,
@@ -108,6 +121,8 @@ pub struct CreateContainer {
     pub children_max: u32,
 
     pub main_ip_selector: Option<MainAddressSelector>,
+
+    pub envs: HashMap<String, String>,
 }
 
 impl CreateContainer {
@@ -413,7 +428,8 @@ impl CreateContainer {
             started: None,
             finished_at: None,
             jailed_datasets: self.jailed_datasets,
-            main_ip_selector: None,
+            main_ip_selector: self.main_ip_selector,
+            envs: self.envs
         })
     }
 }

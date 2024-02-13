@@ -460,6 +460,8 @@ impl InstantiateBlueprint {
 
         let devfs_ruleset_id = devfs_store.get_ruleset_id(&devfs_rules);
 
+        envs.insert("XC_DEVFS_RULESET".to_string(), devfs_ruleset_id.to_string());
+
         let main = match &request.request.entry_point {
             Some(spec) => {
                 let args = {

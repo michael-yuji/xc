@@ -27,7 +27,7 @@ use crate::container::request::Mount;
 use crate::container::ContainerManifest;
 use crate::models::exec::Jexec;
 use crate::models::jail_image::JailImage;
-use crate::models::network::{DnsSetting, IpAssign, MainAddressSelector};
+use crate::models::network::{DnsSetting, IpAssign, MainAddressSelector, AssignedAddress};
 use crate::util::realpath;
 
 use anyhow::Context;
@@ -93,6 +93,28 @@ pub struct RunningContainer {
     pub jailed_datasets: Vec<PathBuf>,
 
     pub main_ip_selector: Option<MainAddressSelector>,
+
+    pub envs: HashMap<String, String>,
+}
+
+pub struct ContainerNetworkIter<'a>(std::slice::Iter<'a, IpAssign>);
+
+impl<'a> Iterator for ContainerNetworkIter<'a> {
+    type Item = &'a IpAssign;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.0.next() {
+                None => return None,
+                x@Some(assign) => {
+                    if assign.network.is_none() {
+                        continue
+                    } else {
+                        return x
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl RunningContainer {
@@ -158,34 +180,12 @@ impl RunningContainer {
         Ok(())
     }
 
-    pub fn main_address(&self) -> Option<IpAddr> {
-        match &self.main_ip_selector {
-            Some(MainAddressSelector::Ip(address)) => Some(*address),
-            Some(MainAddressSelector::Network(network)) => {
-                for alloc in self.ip_alloc.iter() {
-                    match alloc.network.as_ref() {
-                        Some(_network) if network == _network => {
-                            match alloc.addresses.first() {
-                                None => continue,
-                                Some(addr) => return Some(addr.addr())
-                            }
-                        },
-                        _ => continue
-                    }
-                }
-                None
-            },
-            None => {
-                for alloc in self.ip_alloc.iter() {
-                    if alloc.network.is_some() {
-                        if let Some(address) = alloc.addresses.first() {
-                            return Some(address.addr())
-                        }
-                    }
-                }
-                None
-            },
-        }
+    pub fn main_address(&self) -> Option<AssignedAddress> {
+        MainAddressSelector::select(&self.main_ip_selector, self.ip_alloc.iter())
+    }
+
+    pub fn networks(&self) -> ContainerNetworkIter<'_> {
+        ContainerNetworkIter(self.ip_alloc.iter())
     }
 
     pub fn serialized(&self) -> ContainerManifest {
@@ -224,7 +224,7 @@ impl RunningContainer {
             started: self.started,
             finished_at: self.finished_at,
             created: self.created,
-            main_address: self.main_address(),
+            main_address: self.main_address().map(|a| a.address),
         }
     }
 }

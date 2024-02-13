@@ -194,9 +194,10 @@ impl ProcessRunner {
         info!("spawn: {exec:#?}");
         container_runner::spawn_process!(|| (self.container.jid, id, exec));
 
+        let mut envs = self.container.envs.clone();
+
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
-        let paths = exec
-            .envs
+        let paths = envs
             .get("PATH")
             .cloned()
             .unwrap_or_else(|| "/bin:/usr/bin:/sbin:/usr/sbin".to_string());
@@ -247,11 +248,48 @@ impl ProcessRunner {
             },
         };
 
+
+        for (key, value) in exec.envs.iter() {
+            envs.insert(key.to_string(), value.to_string());
+        }
+
+        if let Some(address) = self.container.main_address() {
+            // allow faking the environ to make debugging easier
+            if !envs.contains_key("XC_MAIN_IP") {
+                envs.insert("XC_MAIN_IP".to_string(), address.address.to_string());
+            }
+            if !envs.contains_key("XC_MAIN_IFACE") {
+                envs.insert("XC_MAIN_IFACE".to_string(), address.interface);
+            }
+        }
+
+        let mut networks_count = 0;
+        for network in self.container.networks() {
+            networks_count += 1;
+            let network_name = network.network.as_ref().unwrap();
+            envs.insert(
+                format!("XC_NETWORK_{network_name}_ADDR_COUNT"),
+                network.addresses.len().to_string()
+            );
+            envs.insert(
+                format!("XC_NETWORK_{network_name}_IFACE"),
+                network.interface.to_string(),
+            );
+            for (i, addr) in network.addresses.iter().enumerate() {
+                envs.insert(format!("XC_NETWORK_{network_name}_ADDR_{i}"), addr.to_string());
+            }
+        }
+
+        envs.insert("XC_NETWORKS_COUNT".to_string(), networks_count.to_string());
+
+        envs.insert("XC_ID".to_string(), self.container.id.to_string());
+
+
         let mut cmd = std::process::Command::new(&exec.arg0);
 
         cmd.env_clear()
             .args(&exec.args)
-            .envs(&exec.envs)
+            .envs(envs)
             .jail(&jail)
             .juid(uid)
             .jgid(gid);

@@ -448,6 +448,7 @@ impl Site {
                     jailed_datasets: blueprint.jailed_datasets,
                     children_max: blueprint.children_max,
                     main_ip_selector: blueprint.main_ip_selector,
+                    envs: blueprint.envs,
                 };
 
                 for iface in blueprint.created_interfaces.iter() {

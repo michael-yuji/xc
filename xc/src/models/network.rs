@@ -163,6 +163,60 @@ pub enum MainAddressSelector {
     Ip(IpAddr)
 }
 
+pub struct AssignedAddress {
+    pub interface: String,
+    pub address: IpAddr,
+}
+
+impl AssignedAddress {
+    pub fn new(interface: String, address: IpAddr) -> AssignedAddress {
+        AssignedAddress {
+            interface,
+            address,
+        }
+    }
+}
+
+impl MainAddressSelector {
+    pub fn select<'a, I: Iterator<Item = &'a IpAssign>>(selector: &Option<Self>, pool: I) -> Option<AssignedAddress> {
+        match selector {
+            None => {
+                for alloc in pool {
+                    if alloc.network.is_some() {
+                        if let Some(address) = alloc.addresses.first() {
+                            return Some(AssignedAddress::new(alloc.interface.to_string(), address.addr()))
+                        }
+                    }
+                }
+                None
+            },
+            Some(MainAddressSelector::Ip(address)) => /*Some(*address)*/ {
+                for alloc in pool {
+                    if alloc.addresses.iter().any(|addr| addr.addr() == *address) {
+                        return Some(AssignedAddress::new(alloc.interface.to_string(), *address))
+                    }
+                }
+                None
+            },
+            Some(MainAddressSelector::Network(network)) => {
+                for alloc in pool {
+                    match alloc.network.as_ref() {
+                        Some(_network) if network == _network => {
+                            match alloc.addresses.first() {
+                                None => continue,
+                                Some(addr) =>
+                                    return Some(AssignedAddress::new(alloc.interface.to_string(), addr.addr()))
+                            }
+                        },
+                        _ => continue
+                    }
+                }
+                None
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for MainAddressSelector {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
