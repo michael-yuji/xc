@@ -252,7 +252,7 @@ impl CreateArgs {
 
         let mut ips = self.ips;
 
-        if !self.no_lo0 && !ips.iter().any(|ip| ip.0.interface == "lo0") {
+        if self.vnet && !self.no_lo0 && !ips.iter().any(|ip| ip.0.interface == "lo0") {
             ips.push(IpWant(xc::models::network::IpAssign {
                 network: None,
                 interface: "lo0".to_string(),
