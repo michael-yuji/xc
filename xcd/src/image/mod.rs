@@ -587,13 +587,31 @@ impl RootFsRecipe {
             file.push(digest.digest.as_str());
             let file_path = file.to_string_lossy().to_string();
             debug!(file_path, "extracting");
-            _ = tokio::process::Command::new("ocitar")
+            match tokio::process::Command::new("ocitar")
                 .arg("-xf")
                 .arg(&file)
                 .arg("-C")
                 .arg(&root)
                 .status()
-                .await;
+                .await
+            {
+                Ok(status) => {
+                    if !status.success() {
+                        debug!(
+                            file_path,
+                            root=root.to_str(),
+                            exit_code=status.code(),
+                            "failed to extract file to root: ocitar exit with non-zero exit code")
+                    }
+                },
+                Err(error) => {
+                    debug!(
+                        file_path,
+                        root=root.to_str(),
+                        error=error.to_string(),
+                        "failed to extract file to root");
+                }
+            }
             debug!(file_path, "finished");
         }
         handle.snapshot2(target_dataset, "xc")?;

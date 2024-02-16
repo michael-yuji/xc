@@ -406,6 +406,8 @@ impl ProcessRunner {
         use ipc::proto::write_response;
         use ipc::transport::PacketTransport;
 
+        debug!(method, "runloop control stream event");
+
         let packet = if method == "exec" {
             let jexec = IpcJexec::from_packet_failable(request, |value| {
                 serde_json::from_value(value.clone())
@@ -499,7 +501,7 @@ impl ProcessRunner {
             trace!(
                 pid,
                 ancestor,
-                "NOTE_EXIT: {pid} exited; ancestor: {ancestor}"
+                "NOTE_EXIT"
             );
 
             if let Some(pos) = descentdant.iter().position(|x| *x == pid) {
@@ -507,7 +509,7 @@ impl ProcessRunner {
             }
             let descentdant_gone = descentdant.is_empty();
             if descentdant_gone {
-                debug!("all descentdant of pid {ancestor} are gone");
+                debug!(ancestor, "all descentdants are gone");
             }
 
             if ancestor == pid || descentdant_gone {
@@ -515,7 +517,7 @@ impl ProcessRunner {
                     if stat.pid() == ancestor {
                         if ancestor == pid {
                             stat.set_exited(event.data() as i32);
-                            info!("exited: {}", event.data());
+                            info!(pid, exit_code=event.data(), "pid exited");
                             unsafe {
                                 freebsd::nix::libc::waitpid(pid as i32, std::ptr::null_mut(), 0)
                             };
@@ -544,6 +546,7 @@ impl ProcessRunner {
                         if descentdant_gone {
                             stat.set_tree_exited();
                             if stat.id() == "main" {
+                                info!(id=self.container.id, jid=self.container.jid, "main process exited");
                                 self.main_exited = true;
                                 self.container.finished_at = Some(epoch_now_nano());
                                 if (self.container.deinit_norun || self.deinits.is_empty())
@@ -694,14 +697,12 @@ impl ProcessRunner {
                                     }
                                 }
                             }
-                            if self.should_kill {
-                                break 'kq;
-                            }
                         }
                     }
                     EventFilter::EVFILT_USER => {
                         debug!("{event:#?}");
                         if self.container.deinit_norun || self.deinits.is_empty() {
+                            // this is a hard kill
                             break 'kq;
                         } else {
                             debug!("activating deinit queue");
@@ -772,12 +773,18 @@ pub fn run(
     auto_start: bool,
 ) -> (i32, Receiver<ContainerManifest>, Receiver<bool>) {
     let (tx, rx) = channel(container.serialized());
-    let (ltx, lrx) = channel(true);
+    let (ltx, lrx) = channel(false);
     let (parent, sender) = std::os::unix::net::UnixStream::pair().unwrap();
 
     if let Ok(fork_result) = unsafe { freebsd::nix::unistd::fork() } {
+        ltx.send_if_modified(|x| {
+            *x = true;
+            true
+        });
         match fork_result {
             freebsd::nix::unistd::ForkResult::Child => {
+                let title = std::ffi::CString::new(format!("worker jid={}", container.jid)).unwrap();
+                unsafe { freebsd::libc::setproctitle(title.as_ptr()) };
                 let kq = unsafe { freebsd::nix::libc::kqueue() };
                 let mut pr = ProcessRunner::new(kq, container, auto_start);
                 pr.add_control_stream(ControlStream::new(control_stream));
@@ -793,8 +800,11 @@ pub fn run(
                 kevent_classic(kq, &recv_events, &mut []).unwrap();
 
                 let mut control_stream = ControlStream::new(parent);
+                let mut control_stream_closed = false;
+                let mut worker_process_exited = false;
+
                 std::thread::spawn(move || {
-                    'kq: loop {
+                    while !(control_stream_closed && worker_process_exited) {
                         let nenv = kevent_classic(kq, &[], &mut recv_events).unwrap();
                         let events = &recv_events[..nenv];
 
@@ -802,7 +812,7 @@ pub fn run(
                             if event.filter().unwrap() == EventFilter::EVFILT_READ {
                                 let bytes = event.data() as usize;
                                 if bytes == 0 {
-                                    break 'kq;
+                                    control_stream_closed = true;
                                 } else {
                                     match control_stream.try_get_request(event.data() as usize) {
                                         Err(err) => {
@@ -823,12 +833,19 @@ pub fn run(
                                     }
                                 }
                             } else if event.filter().unwrap() == EventFilter::EVFILT_PROC {
-                                break 'kq;
+                                info!("worker process exited with status {}", event.data());
+                                worker_process_exited = true;
                             }
                         }
                     }
+
+                    info!("reap worker process");
+                    unsafe {
+                        freebsd::libc::waitpid(child.as_raw(), core::ptr::null_mut(), 0);
+                    }
+
                     ltx.send_if_modified(|x| {
-                        *x = true;
+                        *x = false;
                         true
                     });
                 });

@@ -552,6 +552,7 @@ impl ServerContext {
             site.stage(&applied.image)?;
             let netgroups = applied.request.netgroups.clone();
 
+            let jailing_datasets = applied.request.jail_datasets.clone();
             let blueprint =
                 InstantiateBlueprint::new(id, applied, &mut this.devfs_store, &cred, &mut res)?;
 
@@ -569,7 +570,16 @@ impl ServerContext {
                 warn!("pf is disabled");
             }
 
-            site.run_container(blueprint)?;
+            match site.run_container(blueprint) {
+                Ok(_) => (),
+                Err(error) => {
+                    for dataset in jailing_datasets.iter() {
+                        res.dataset_tracker.unjail(dataset);
+                    }
+                    return Err(error)
+                }
+            };
+
             let notify = site.container_notify.clone().unwrap();
             let jail = site.container_dump().unwrap();
             let arc_site = Arc::new(RwLock::new(site));

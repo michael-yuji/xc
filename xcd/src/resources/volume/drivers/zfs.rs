@@ -144,7 +144,7 @@ impl VolumeDriver for ZfsDriver {
 
         Ok(Mount {
             options: Vec::from_iter(mount_options),
-            ..Mount::nullfs(&mount_point, &real_dest)
+            ..Mount::nullfs(&mount_point, real_dest)
         })
     }
 }

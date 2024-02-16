@@ -159,6 +159,9 @@ pub(crate) struct CreateArgs {
 
     #[arg(long = "tun")]
     pub(crate) tun_ifaces: Vec<String>,
+
+    #[arg(long = "max.children", default_value="0")]
+    pub(crate) max_children: u32
 }
 
 impl CreateArgs {
@@ -288,6 +291,7 @@ impl CreateArgs {
             main_ip_selector: self.main_address_selector,
             tun_interfaces: Some(self.tun_ifaces),
             tap_interfaces: Some(self.tap_ifaces),
+            children_max: self.max_children,
             ..InstantiateRequest::default()
         })
     }
