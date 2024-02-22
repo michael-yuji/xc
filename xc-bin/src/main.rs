@@ -44,6 +44,7 @@ use crate::volume::{use_volume_action, VolumeAction};
 
 use clap::Parser;
 use freebsd::event::{eventfd, EventFdNotify};
+use freebsd::libc::EXIT_FAILURE;
 use freebsd::procdesc::{pd_fork, pdwait, PdForkResult};
 use ipc::packet::codec::{Fd, Maybe};
 use oci_util::digest::OciDigest;
@@ -57,6 +58,7 @@ use term_table::homogeneous::{TableLayout, TableSource, Title};
 use term_table::{ColumnLayout, Pos};
 use tracing::{debug, error, info};
 use xc::container::request::NetworkAllocRequest;
+use xc::container::runner::process_stat::decode_exit_code;
 use xc::models::jail_image::JailConfig;
 use xc::models::network::DnsSetting;
 use xc::tasks::{ImportImageState, ImportImageStatus};
@@ -593,12 +595,18 @@ fn main() -> Result<(), ActionError> {
 
             let dns = dns.make();
 
-            let (res, notify) = {
+            let (res, main_started_notify, main_exited_notify) = {
                 let main_started_notify = if args.detach {
                     Maybe::None
                 } else {
                     let fd = unsafe { eventfd(0, freebsd::nix::libc::EFD_NONBLOCK) };
                     Maybe::Some(Fd(fd))
+                };
+
+                let main_exited_notify = if args.detach {
+                    None
+                } else {
+                    Some(unsafe { eventfd(0, freebsd::nix::libc::EFD_NONBLOCK) })
                 };
 
                 let reqt = InstantiateRequest {
@@ -612,11 +620,14 @@ fn main() -> Result<(), ActionError> {
                         entry_point: args.entry_point,
                         entry_point_args: args.entry_point_args,
                     }),
+                    main_exited_fd: Maybe::from_option(main_exited_notify.map(Fd)),
+                    port_redirections: publish.into_iter().map(|p| p.to_host_spec()).collect(),
                     ..create.create_request()?
                 };
 
                 let res = do_instantiate(&mut conn, reqt)?;
-                (res, main_started_notify)
+                let exit_notify = main_exited_notify.map(EventFdNotify::from_fd);
+                (res, main_started_notify, exit_notify)
             };
 
             if let Ok(res) = res {
@@ -643,17 +654,8 @@ fn main() -> Result<(), ActionError> {
                     }
                 }
 
-                for publish in publish.iter() {
-                    let redirection = publish.to_host_spec();
-                    let req = DoRdr {
-                        name: res.id.clone(),
-                        redirection,
-                    };
-                    let _res = do_rdr_container(&mut conn, req)?.unwrap();
-                }
-
                 if !args.detach {
-                    if let Maybe::Some(notify) = notify {
+                    if let Maybe::Some(notify) = main_started_notify {
                         EventFdNotify::from_fd(notify.as_raw_fd()).notified_sync();
                     }
                     let id = res.id;
@@ -672,7 +674,16 @@ fn main() -> Result<(), ActionError> {
                                 .and_then(|proc| proc.spawn_info.as_ref())
                                 .expect("process not started yet or not found");
                             if let Some(socket) = &spawn_info.terminal_socket {
-                                _ = attach::run(socket);
+                                if let Ok(exit_by_user) = attach::run(socket) {
+                                    if !exit_by_user {
+                                        if let Some(notify) = main_exited_notify {
+                                            if let Ok(exit_value) = notify.notified_sync_take_value() {
+                                                let exit_status = decode_exit_code(exit_value);
+                                                std::process::exit(exit_status.code().unwrap_or(EXIT_FAILURE))
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
                                 info!("main process is not running with tty");
                             }
@@ -807,8 +818,9 @@ fn main() -> Result<(), ActionError> {
                     if let Some(socket) = response.terminal_socket {
                         _ = attach::run(socket);
                     }
-                    let exit = n.notified_sync_take_value();
-                    std::process::exit((exit.unwrap_or(2) - 1) as i32)
+                    let exit = n.notified_sync_take_value()?;
+                    let exit_status = decode_exit_code(exit);
+                    std::process::exit(exit_status.code().unwrap_or(EXIT_FAILURE))
                 }
                 Err(err) => {
                     eprintln!("{err:?}")

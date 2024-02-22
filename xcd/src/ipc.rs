@@ -240,6 +240,13 @@ pub struct InstantiateRequest {
     pub main_ip_selector: Option<MainAddressSelector>,
     pub tap_interfaces: Option<Vec<String>>,
     pub tun_interfaces: Option<Vec<String>>,
+
+    pub main_exited_fd: Maybe<Fd>,
+    pub stdin: Maybe<Fd>,
+    pub stdout: Maybe<Fd>,
+    pub stderr: Maybe<Fd>,
+
+    pub port_redirections: Vec<PortRedirection>,
 }
 
 impl InstantiateRequest {
@@ -302,6 +309,11 @@ impl Default for InstantiateRequest {
             main_ip_selector: None,
             tap_interfaces: None,
             tun_interfaces: None,
+            main_exited_fd: Maybe::None,
+            stdin: Maybe::None,
+            stdout: Maybe::None,
+            stderr: Maybe::None,
+            port_redirections: Vec::new(),
         }
     }
 }

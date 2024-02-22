@@ -26,7 +26,9 @@ use crate::container::ProcessStat;
 
 use freebsd::event::EventFdNotify;
 use std::sync::Arc;
+use std::os::unix::process::ExitStatusExt;
 use tokio::sync::watch::Sender;
+use tracing::debug;
 
 #[derive(Debug)]
 pub struct ProcessRunnerStat {
@@ -35,6 +37,14 @@ pub struct ProcessRunnerStat {
     pub(super) process_stat: Sender<ProcessStat>,
     pub(super) exit_notify: Option<Arc<EventFdNotify>>,
     pub(super) tree_exit_notify: Option<Arc<EventFdNotify>>,
+}
+
+pub fn encode_exit_code(ec: i32) -> u64 {
+    0x10000000_00000000 | (ec as u64)
+}
+
+pub fn decode_exit_code(v: u64) -> std::process::ExitStatus {
+    std::process::ExitStatus::from_raw((v & 0xffff_ffff) as i32)
 }
 
 impl ProcessRunnerStat {
@@ -46,14 +56,16 @@ impl ProcessRunnerStat {
     }
 
     pub(super) fn set_exited(&mut self, exit_code: i32) {
+        debug!(pid=self.pid, exit_code=exit_code, "set_exited");
         self.process_stat.send_if_modified(|status| {
             status.set_exited(exit_code);
             true
         });
         if let Some(notify) = &self.exit_notify {
+            debug!(pid=self.pid, exit_code=exit_code, "notifing listeners");
             notify
                 .clone()
-                .notify_waiters_with_value(exit_code as u64 + 1);
+                .notify_waiters_with_value(encode_exit_code(exit_code));
         }
     }
 

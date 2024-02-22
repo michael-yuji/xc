@@ -42,7 +42,7 @@ use xc::errx;
 use xc::format::devfs_rules::DevfsRule;
 use xc::models::exec::{Jexec, StdioMode};
 use xc::models::jail_image::JailImage;
-use xc::models::network::{DnsSetting, IpAssign, MainAddressSelector};
+use xc::models::network::{DnsSetting, IpAssign, MainAddressSelector, PortRedirection};
 use xc::models::EnforceStatfs;
 
 pub struct CheckedInstantiateRequest {
@@ -249,6 +249,7 @@ pub struct InstantiateBlueprint {
     pub children_max: u32,
     pub main_ip_selector: Option<MainAddressSelector>,
     pub created_interfaces: Vec<String>,
+    pub port_redirections: Vec<PortRedirection>
 }
 
 impl InstantiateBlueprint {
@@ -313,6 +314,11 @@ impl InstantiateBlueprint {
         let main_started_notify = match request.request.main_started_notify {
             ipc::packet::codec::Maybe::None => None,
             ipc::packet::codec::Maybe::Some(x) => Some(EventFdNotify::from_fd(x.as_raw_fd())),
+        };
+        
+        let main_exited_notify = match request.request.main_exited_fd {
+            ipc::packet::codec::Maybe::None => None,
+            ipc::packet::codec::Maybe::Some(x) => Some(x.as_raw_fd()),
         };
 
         let mut ip_alloc = request.request.ips.clone();
@@ -506,6 +512,8 @@ impl InstantiateBlueprint {
 
                 let mut jexec = entry_point.resolve_args(&envs, &spec.entry_point_args)?;
                 jexec.output_mode = StdioMode::Terminal;
+                jexec.notify = main_exited_notify.map(|a| a.as_raw_fd());
+                tracing::warn!("jexec: {jexec:#?}");
                 Some(jexec)
             }
             None => None,
@@ -571,7 +579,8 @@ impl InstantiateBlueprint {
             jailed_datasets: request.request.jail_datasets,
             children_max: request.request.children_max,
             main_ip_selector: request.request.main_ip_selector,
-            created_interfaces: tuntap_ifaces
+            created_interfaces: tuntap_ifaces,
+            port_redirections: request.request.port_redirections,
         })
     }
 }

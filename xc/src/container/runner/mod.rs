@@ -23,7 +23,7 @@
 // SUCH DAMAGE.
 
 mod control_stream;
-mod process_stat;
+pub mod process_stat;
 
 use self::control_stream::{ControlStream, Readiness};
 use self::process_stat::ProcessRunnerStat;
@@ -193,6 +193,10 @@ impl ProcessRunner {
     ) -> Result<SpawnInfo, ExecError> {
         info!("spawn: {exec:#?}");
         container_runner::spawn_process!(|| (self.container.jid, id, exec));
+
+        let exit_notify = exit_notify.or(exec.notify.map(|e| Arc::new(EventFdNotify::from_fd(e))));
+
+        debug!(exit_notify=format!("{exit_notify:?}"), "==");
 
         let mut envs = self.container.envs.clone();
 
@@ -563,6 +567,8 @@ impl ProcessRunner {
                                     return true;
                                 }
                             }
+                        } else {
+                            debug!(descentdant=format!("{descentdant:?}"), "remaining descentdants");
                         }
                     }
                 }

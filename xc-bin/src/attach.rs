@@ -72,15 +72,15 @@ fn enable_raw(orig: &Termios) -> Result<(), freebsd::nix::Error> {
     tcsetattr(stdin, SetArg::TCSADRAIN, &tio)
 }
 
-fn with_raw_terminal<F>(f: F) -> Result<(), freebsd::nix::Error>
+fn with_raw_terminal<F, R: Copy>(f: F) -> Result<R, freebsd::nix::Error>
 where
-    F: Fn() -> Result<(), freebsd::nix::Error>,
+    F: Fn() -> Result<R, freebsd::nix::Error>,
 {
     let tio = freebsd::nix::sys::termios::tcgetattr(std::io::stdin())?;
     enable_raw(&tio)?;
-    f()?;
+    let res = f()?;
     tcsetattr(std::io::stdin(), SetArg::TCSAFLUSH, &tio)?;
-    Ok(())
+    Ok(res)
 }
 
 struct ForwardState {
@@ -112,7 +112,7 @@ impl ForwardState {
                 } else {
                     self.escaped = false;
                 }
-            } else if byte == &0x10 {
+            } else if byte == &0x10 /* ctrl-p */ {
                 self.escaped = true;
             } else {
                 self.local_to_stream.push(*byte);
@@ -122,7 +122,7 @@ impl ForwardState {
     }
 }
 
-pub fn run(path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
+pub fn run(path: impl AsRef<std::path::Path>) -> Result<bool, std::io::Error> {
     let path = path.as_ref();
     //    let path = "/var/run/xc.abcde";
     let stream = UnixStream::connect(path)?;
@@ -136,6 +136,8 @@ pub fn run(path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
         ];
         let mut events = [KEvent::zero(); 4];
         let mut state = ForwardState::new();
+
+        let mut break_by_user = false;
 
         'm: loop {
             let n_ev = kq.wait_events(&add_events, &mut events)?;
@@ -169,6 +171,7 @@ pub fn run(path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
                 } else if event.ident() == STDIN_FILENO as usize {
                     let n_read = read(STDIN_FILENO, &mut state.buffer[..event.data() as usize])?;
                     if state.process_local_to_stream(n_read).is_some() {
+                        break_by_user = true;
                         break 'm;
                     }
                 } else if event.ident() == STDOUT_FILENO as usize {
@@ -196,6 +199,6 @@ pub fn run(path: impl AsRef<std::path::Path>) -> Result<(), std::io::Error> {
 
         // flush everything stream to local here
 
-        Ok(())
+        Ok(break_by_user)
     })?)
 }

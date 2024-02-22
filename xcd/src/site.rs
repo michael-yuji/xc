@@ -112,7 +112,6 @@ impl Site {
             notify: Arc::new(Notify::new()),
             main_notify: None,
             container_notify: None,
-            //            ctl_channel: None,
             state: SiteState::Empty,
             main_started_interests: Vec::new(),
             control_stream: None,
