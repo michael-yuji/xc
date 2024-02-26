@@ -177,7 +177,7 @@ pub fn kevent_classic(
         match res {
             -1 => {
                 if errno != nix::libc::EINTR {
-                    break Err(nix::errno::Errno::from_i32(errno))
+                    break Err(nix::errno::Errno::from_i32(errno));
                 }
             }
             size => break Ok(size as usize),
@@ -191,7 +191,7 @@ impl KqueueExt for nix::sys::event::Kqueue {
             match self.kevent(changelist, eventlist, None) {
                 Ok(size) => break Ok(size),
                 Err(errno) if errno != Errno::EINTR => break Err(errno),
-                _ => continue
+                _ => continue,
             }
         }
     }

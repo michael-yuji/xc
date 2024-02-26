@@ -95,6 +95,12 @@ pub(crate) struct RunArg {
     pub(crate) entry_point: Option<String>,
 
     pub(crate) entry_point_args: Vec<String>,
+
+    #[arg(short = 't', action)]
+    pub(crate) terminal: bool,
+
+    #[arg(short = 'i', long = "interactive", action)]
+    pub(crate) interactive: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -160,8 +166,11 @@ pub(crate) struct CreateArgs {
     #[arg(long = "tun")]
     pub(crate) tun_ifaces: Vec<String>,
 
-    #[arg(long = "max.children", default_value="0")]
-    pub(crate) max_children: u32
+    #[arg(long = "enable-pf", default_value_t)]
+    pub(crate) enable_pf: bool,
+
+    #[arg(long = "max.children", default_value = "0")]
+    pub(crate) max_children: u32,
 }
 
 impl CreateArgs {
@@ -259,10 +268,7 @@ impl CreateArgs {
             ips.push(IpWant(xc::models::network::IpAssign {
                 network: None,
                 interface: "lo0".to_string(),
-                addresses: vec![
-                    "127.0.0.1/8".parse().unwrap(),
-                    "::1/128".parse().unwrap()
-                ]
+                addresses: vec!["127.0.0.1/8".parse().unwrap(), "::1/128".parse().unwrap()],
             }))
         }
 
@@ -292,6 +298,7 @@ impl CreateArgs {
             tun_interfaces: Some(self.tun_ifaces),
             tap_interfaces: Some(self.tap_ifaces),
             children_max: self.max_children,
+            enable_pf: self.enable_pf,
             ..InstantiateRequest::default()
         })
     }

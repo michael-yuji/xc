@@ -183,14 +183,34 @@ impl FromStr for ImageReference {
 
 #[cfg(test)]
 mod tests {
-    use super::ImageReference;
+    use super::{ImageReference, ImageTag};
+    use crate::digest::OciDigest;
     use std::str::FromStr;
 
     #[test]
-    fn test_parser() {
+    fn test_to_string() {
         let input = "127.0.0.1/helloworld:1234567";
         let output = ImageReference::from_str(input).unwrap();
-        eprintln!("output: {output:#?}");
         assert_eq!(output.to_string(), input.to_string())
+    }
+
+    #[test]
+    fn test_parse_localhost() {
+        let input = "localhost:5000/helloworld:1234567";
+        let reference = ImageReference::from_str(input).unwrap();
+        assert_eq!(reference.hostname, Some("localhost:5000".to_string()))
+    }
+
+    #[test]
+    fn test_parse_multiple_components() {
+        let digest = "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+        let input = format!("a/b/c/d/e/f/g@{digest}");
+        let reference = ImageReference::from_str(&input).unwrap();
+        assert_eq!(reference.hostname, None);
+        assert_eq!(reference.name, "a/b/c/d/e/f/g");
+        assert_eq!(
+            reference.tag,
+            ImageTag::Digest(OciDigest::from_str(digest).unwrap())
+        );
     }
 }

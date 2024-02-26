@@ -429,7 +429,7 @@ impl CreateContainer {
             finished_at: None,
             jailed_datasets: self.jailed_datasets,
             main_ip_selector: self.main_ip_selector,
-            envs: self.envs
+            envs: self.envs,
         })
     }
 }

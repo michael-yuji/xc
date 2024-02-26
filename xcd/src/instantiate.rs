@@ -98,7 +98,6 @@ impl CheckedInstantiateRequest {
             }
         }
 
-
         for assign in request.ips.iter() {
             let iface = &assign.interface;
             if !existing_ifaces.contains(iface) {
@@ -249,7 +248,7 @@ pub struct InstantiateBlueprint {
     pub children_max: u32,
     pub main_ip_selector: Option<MainAddressSelector>,
     pub created_interfaces: Vec<String>,
-    pub port_redirections: Vec<PortRedirection>
+    pub port_redirections: Vec<PortRedirection>,
 }
 
 impl InstantiateBlueprint {
@@ -315,7 +314,7 @@ impl InstantiateBlueprint {
             ipc::packet::codec::Maybe::None => None,
             ipc::packet::codec::Maybe::Some(x) => Some(EventFdNotify::from_fd(x.as_raw_fd())),
         };
-        
+
         let main_exited_notify = match request.request.main_exited_fd {
             ipc::packet::codec::Maybe::None => None,
             ipc::packet::codec::Maybe::Some(x) => Some(x.as_raw_fd()),
@@ -365,14 +364,22 @@ impl InstantiateBlueprint {
             let interface = freebsd::net::ifconfig::create_tap()?;
             tuntap_ifaces.push(interface.to_string());
             envs.insert(tap, interface.clone());
-            ip_alloc.push(IpAssign { network: None, addresses: Vec::new(), interface });
+            ip_alloc.push(IpAssign {
+                network: None,
+                addresses: Vec::new(),
+                interface,
+            });
         }
 
         for tun in request.request.tun_interfaces.unwrap_or_default() {
             let interface = freebsd::net::ifconfig::create_tap()?;
             tuntap_ifaces.push(interface.to_string());
             envs.insert(tun, interface.clone());
-            ip_alloc.push(IpAssign { network: None, addresses: Vec::new(), interface });
+            ip_alloc.push(IpAssign {
+                network: None,
+                addresses: Vec::new(),
+                interface,
+            });
         }
 
         let mut mount_req = Vec::new();
@@ -456,6 +463,10 @@ impl InstantiateBlueprint {
             devfs_rules.push("path dtrace/helper unhide".to_string());
         }
 
+        if request.request.enable_pf {
+            devfs_rules.push("path pf unhide".to_string());
+        }
+
         for rule in request.devfs_rules.iter() {
             devfs_rules.push(rule.to_string());
         }
@@ -511,7 +522,15 @@ impl InstantiateBlueprint {
                 }
 
                 let mut jexec = entry_point.resolve_args(&envs, &spec.entry_point_args)?;
-                jexec.output_mode = StdioMode::Terminal;
+                if request.request.use_tty {
+                    jexec.output_mode = StdioMode::Terminal;
+                } else {
+                    jexec.output_mode = StdioMode::Forward {
+                        stdin: request.request.stdin.to_option().map(|fd| fd.as_raw_fd()),
+                        stdout: request.request.stdout.to_option().map(|fd| fd.as_raw_fd()),
+                        stderr: request.request.stderr.to_option().map(|fd| fd.as_raw_fd()),
+                    };
+                }
                 jexec.notify = main_exited_notify.map(|a| a.as_raw_fd());
                 tracing::warn!("jexec: {jexec:#?}");
                 Some(jexec)

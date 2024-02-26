@@ -37,7 +37,6 @@ pub trait RegistriesProvider {
 }
 
 pub struct JsonRegistryProvider {
-    //    file: std::fs::File,
     path: std::path::PathBuf,
     data: RegistriesJsonScheme,
 }

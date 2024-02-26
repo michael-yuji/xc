@@ -35,7 +35,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tokio::sync::watch::Sender;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -57,6 +57,8 @@ pub enum ClientError {
     IoError(std::io::Error),
     #[error("Missing Bearer Token")]
     MissingBearerToken,
+    #[error("No credential")]
+    MissingCredential,
     #[error("digest mismatch, expected: {0}, got: {1}")]
     DigestMismatched(OciDigest, OciDigest),
 }
@@ -192,6 +194,7 @@ impl Registry {
         Session {
             registry: self.clone(),
             repository,
+            use_basic_auth: false,
             bearer_token: None,
         }
     }
@@ -201,6 +204,7 @@ impl Registry {
 pub struct Session {
     registry: Registry,
     repository: String,
+    use_basic_auth: bool,
     bearer_token: Option<crate::models::DockerAuthToken>,
 }
 
@@ -238,17 +242,15 @@ impl Session {
             if let Some(basic_auth) = self.registry.basic_auth.clone() {
                 request = request.basic_auth(basic_auth.username, Some(basic_auth.password));
             }
-            debug!("try_authenticate request: {request:#?}");
             let response = request.send().await?;
-            debug!("try_authenticate response: {response:#?}");
             let auth_token: crate::models::DockerAuthToken = response.json().await?;
-            debug!("try_authenticate auth_token: {auth_token:#?}");
             if auth_token.token().is_none() {
                 return Err(ClientError::MissingBearerToken);
             } else {
-                debug!("try_authenticate setting bearer token: {auth_token:#?}");
                 self.bearer_token = Some(auth_token);
             }
+        } else if fields.get("Basic realm").is_some() {
+            self.use_basic_auth = true;
         }
         Ok(())
     }
@@ -257,6 +259,17 @@ impl Session {
         let mut req = request;
         if let Some(bearer) = self.bearer_token.clone() {
             req = req.bearer_auth(bearer.token().unwrap());
+        } else if self.use_basic_auth {
+            if let Some(basic_auth) = self.registry.basic_auth.clone() {
+                debug!(
+                    username = basic_auth.username,
+                    password = basic_auth.password,
+                    "using basic auth"
+                );
+                req = req.basic_auth(basic_auth.username, Some(basic_auth.password));
+            } else {
+                return Err(ClientError::MissingCredential);
+            }
         }
         Ok(req.send().await?)
     }
@@ -272,7 +285,7 @@ impl Session {
         let response = self.request(request).await?;
         if response.status().as_u16() == 401 {
             if let Some(www_auth) = response.headers().get("www-authenticate") {
-                debug!("www-auth: {www_auth:#?}");
+                debug!("www-authenticate: {www_auth:#?}");
                 self.try_authenticate(www_auth.to_str()?).await?;
                 Ok(self.request(cloned).await?)
             } else {
@@ -383,6 +396,8 @@ impl Session {
         }
     }
 
+    /// Attempt to upload a layer with known OciDigest, returns Ok(None) if we can found the layer
+    /// on the registry (skips upload), or Ok(Some(descriptor)) if the upload is successful
     pub async fn upload_content_known_digest(
         &mut self,
         progress: Option<Sender<UploadStat>>,
@@ -411,6 +426,7 @@ impl Session {
             .await?;
 
         if !init_res.status().is_success() {
+            error!("unsuccessful response");
             return Err(ClientError::UnsuccessfulResponse(init_res));
         }
 

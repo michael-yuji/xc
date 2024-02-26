@@ -23,7 +23,7 @@
 // SUCH DAMAGE.
 use freebsd::event::{KEventExt, KqueueExt};
 use freebsd::nix::libc::{STDIN_FILENO, STDOUT_FILENO, VMIN, VTIME};
-use freebsd::nix::sys::event::{Kqueue, EventFilter, EventFlag, KEvent};
+use freebsd::nix::sys::event::{EventFilter, EventFlag, KEvent, Kqueue};
 use freebsd::nix::sys::socket::{recv, send, MsgFlags};
 use freebsd::nix::sys::termios::{tcsetattr, InputFlags, LocalFlags, OutputFlags, SetArg, Termios};
 use freebsd::nix::unistd::{read, write};
@@ -112,7 +112,9 @@ impl ForwardState {
                 } else {
                     self.escaped = false;
                 }
-            } else if byte == &0x10 /* ctrl-p */ {
+            } else if byte == &0x10
+            /* ctrl-p */
+            {
                 self.escaped = true;
             } else {
                 self.local_to_stream.push(*byte);

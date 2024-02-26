@@ -36,7 +36,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch::Receiver;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 #[derive(Error, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PushImageError {
@@ -62,7 +62,7 @@ pub struct PushImageStatusDesc {
     pub fault: Option<String>,
 
     pub bytes: Option<usize>,
-    pub duration_secs: Option<u64>,
+    pub duration_ms: Option<u128>,
     pub current_layer_size: Option<usize>,
 }
 
@@ -81,13 +81,13 @@ pub struct PushImageStatus {
 
 impl PushImageStatus {
     pub(super) fn to_desc(&self) -> PushImageStatusDesc {
-        let (bytes, duration_secs) = match &self.upload_status {
+        let (bytes, duration_ms) = match &self.upload_status {
             None => (None, None),
             Some(receiver) => {
                 let stat = receiver.borrow();
                 if let Some((bytes, elapsed)) = stat.started_at.and_then(|started_at| {
                     stat.uploaded
-                        .map(|bytes| (bytes, started_at.elapsed().unwrap().as_secs()))
+                        .map(|bytes| (bytes, started_at.elapsed().unwrap().as_millis()))
                 }) {
                     (Some(bytes), Some(elapsed))
                 } else {
@@ -104,10 +104,190 @@ impl PushImageStatus {
             fault: self.fault.clone(),
             current_layer_size: self.current_layer_size,
             bytes,
-            duration_secs,
+            duration_ms,
         }
     }
 }
+
+async fn push_image_impl(
+    this: Arc<RwLock<ImageManager>>,
+    registry: Registry,
+    record: super::ImageRecord,
+    name: String,
+    tag: String,
+    layers_dir: std::path::PathBuf,
+    emitter: &mut TaskHandle<String, PushImageStatus>,
+) -> Result<(), anyhow::Error> {
+    let mut session = registry.new_session(name.to_string());
+    let layers = record.manifest.layers().clone();
+    let mut selections = Vec::new();
+
+    #[allow(unreachable_code)]
+    'layer_loop: for layer in layers.iter() {
+        let maps = {
+            let this = this.clone();
+            let this = this.read().await;
+            this.query_archives(layer).await?
+        };
+
+        for map in maps.iter() {
+            let layer_file_path = {
+                let mut path = layers_dir.to_path_buf();
+                path.push(map.archive_digest.as_str());
+                path
+            };
+            if layer_file_path.exists() {
+                selections.push(map.clone());
+                continue 'layer_loop;
+            }
+        }
+
+        // XXX: we actually can recover by generating those layers, just not in this version
+        {
+            tracing::error!("cannot find archive layer for {layer}");
+            emitter.set_faulted(&format!("cannot find archive layer for {layer}"));
+            anyhow::bail!("cannot find archive layer for {layer}");
+        }
+
+        break;
+    }
+
+    _ = emitter.use_try(|state| {
+        state.layers = layers.clone();
+        Ok(())
+    });
+
+    if layers.len() != selections.len() {
+        todo!()
+    }
+
+    let mut uploads = Vec::new();
+    for map in selections.iter() {
+        let content_type = match map.algorithm.as_str() {
+            "gzip" => "application/vnd.oci.image.layer.v1.tar+gzip",
+            "zstd" => "application/vnd.oci.image.layer.v1.tar+zstd",
+            "plain" => "application/vnd.oci.image.layer.v1.tar",
+            _ => unreachable!(),
+        };
+
+        let mut path = layers_dir.to_path_buf();
+        path.push(map.archive_digest.as_str());
+        let file = std::fs::OpenOptions::new().read(true).open(&path)?;
+        let metadata = file.metadata().unwrap();
+        let layer_size = metadata.len() as usize;
+
+        let dedup_check = session.exists_digest(&map.archive_digest).await;
+
+        _ = emitter.use_try(|state| {
+            if state.current_upload_idx.is_none() {
+                state.current_upload_idx = Some(0);
+            }
+            state.current_layer_size = Some(layer_size);
+            Ok(())
+        });
+
+        let descriptor = if dedup_check.is_ok() && dedup_check.unwrap() {
+            _ = emitter.use_try(|state| {
+                if state.current_upload_idx.is_none() {
+                    state.current_upload_idx = Some(0);
+                }
+                Ok(())
+            });
+
+            Descriptor {
+                digest: map.archive_digest.clone(),
+                media_type: content_type.to_string(),
+                size: layer_size,
+            }
+        } else {
+            info!("pushing {path:?}");
+            let (tx, upload_status) = tokio::sync::watch::channel(UploadStat::default());
+            _ = emitter.use_try(|state| {
+                state.upload_status = Some(upload_status.clone());
+                Ok(())
+            });
+
+            match session
+                .upload_content_known_digest(
+                    Some(tx),
+                    &map.archive_digest,
+                    content_type.to_string(),
+                    true,
+                    map.origin.clone(),
+                    file,
+                )
+                .await?
+            {
+                Some(descriptor) => descriptor,
+                None => Descriptor {
+                    digest: map.archive_digest.clone(),
+                    media_type: content_type.to_string(),
+                    size: layer_size,
+                },
+            }
+        };
+        uploads.push(descriptor);
+        _ = emitter.use_try(|state| {
+            state.current_upload_idx = Some(state.current_upload_idx.unwrap() + 1);
+            Ok(())
+        });
+    }
+
+    // upload config
+    let config = serde_json::to_vec(&record.manifest)?;
+    _ = emitter.use_try(|state| {
+        state.push_config = true;
+        Ok(())
+    });
+
+    debug!("pushing config");
+    let config_descriptor = session
+        .upload_content(
+            None,
+            "application/vnd.oci.image.config.v1+json".to_string(),
+            config.as_slice(),
+        )
+        .await?;
+
+    let manifest = oci_util::models::ImageManifest {
+        schema_version: 2,
+        media_type: "application/vnd.oci.image.manifest.v1+json".to_owned(),
+        config: config_descriptor, //,config.unwrap(),
+        layers: uploads,
+    };
+
+    debug!("Registering manifest: {manifest:#?}");
+    _ = emitter.use_try(|state| {
+        state.push_manifest = true;
+        Ok(())
+    });
+    debug!("Registering manifest: {manifest:#?}");
+
+    let arch = record.manifest.architecture();
+    let arch_tag = format!("{tag}-{arch}");
+    let platform = Platform {
+        os: record.manifest.os().to_string(),
+        architecture: arch.to_string(),
+        os_version: None,
+        os_features: Vec::new(),
+        variant: None,
+        features: Vec::new(),
+    };
+    let descriptor = session.register_manifest(&arch_tag, &manifest).await?;
+
+    session
+        .merge_manifest_list(&descriptor, &platform, &tag)
+        .await?;
+
+    _ = emitter.use_try(|state| {
+        state.done = true;
+        Ok(())
+    });
+    emitter.set_completed();
+
+    Ok::<(), anyhow::Error>(())
+}
+
 pub async fn push_image(
     this: Arc<RwLock<ImageManager>>,
     layers_dir: impl AsRef<std::path::Path>,
@@ -115,7 +295,7 @@ pub async fn push_image(
     remote_reference: ImageReference,
 ) -> Result<Receiver<Task<String, PushImageStatus>>, PushImageError> {
     let id = format!("{reference}->{remote_reference}");
-    info!("push image: {id}");
+    info!(id, "push image");
     let name = remote_reference.name;
     let tag = remote_reference.tag.to_string();
 
@@ -129,10 +309,14 @@ pub async fn push_image(
             .await
             .map_err(|_| PushImageError::NoSuchLocalReference)?;
 
-        let registry = remote_reference
-            .hostname
-            .and_then(|registry| reg.get_registry_by_name(&registry))
-            .ok_or(PushImageError::RegistryNotFound)?;
+        let registry = match remote_reference.hostname {
+            None => reg
+                .default_registry()
+                .ok_or(PushImageError::RegistryNotFound)?,
+            Some(hostname) => reg
+                .get_registry_by_name(&hostname)
+                .unwrap_or_else(|| Registry::new(hostname.to_string(), None)),
+        };
 
         (registry, record)
     };
@@ -150,179 +334,31 @@ pub async fn push_image(
     let layers_dir = layers_dir.as_ref().to_path_buf();
 
     tokio::spawn(async move {
-        let this = this.clone();
-        let mut session = registry.new_session(name.to_string());
-        let layers = record.manifest.layers().clone();
-        let mut selections = Vec::new();
-        //            let (tx, upload_status) = tokio::sync::watch::channel(UploadStat::default());
-
-        #[allow(unreachable_code)]
-        'layer_loop: for layer in layers.iter() {
-            let maps = {
-                let this = this.clone();
-                let this = this.read().await;
-                this.query_archives(layer).await?
-            };
-
-            for map in maps.iter() {
-                /*
-                let layer_file = format!("{}/{}", layers_dir, map.archive_digest);
-                let layer_file_path = std::path::Path::new(&layer_file);
-                */
-                let layer_file_path = {
-                    let mut path = layers_dir.to_path_buf();
-                    path.push(map.archive_digest.as_str());
-                    path
-                };
-                if layer_file_path.exists() {
-                    selections.push(map.clone());
-                    continue 'layer_loop;
-                }
-            }
-
-            // XXX: we actually can recover by generating those layers, just not in this version
-            {
-                tracing::error!("cannot find archive layer for {layer}");
-                emitter.set_faulted(&format!("cannot find archive layer for {layer}"));
-                anyhow::bail!("cannot find archive layer for {layer}");
-            }
-
-            break;
-        }
-
-        _ = emitter.use_try(|state| {
-            state.layers = layers.clone();
-            Ok(())
-        });
-
-        if layers.len() != selections.len() {
-            todo!()
-        }
-
-        let mut uploads = Vec::new();
-        for map in selections.iter() {
-            let content_type = match map.algorithm.as_str() {
-                "gzip" => "application/vnd.oci.image.layer.v1.tar+gzip",
-                "zstd" => "application/vnd.oci.image.layer.v1.tar+zstd",
-                "plain" => "application/vnd.oci.image.layer.v1.tar",
-                _ => unreachable!(),
-            };
-
-            let mut path = layers_dir.to_path_buf();
-            path.push(map.archive_digest.as_str());
-            let file = std::fs::OpenOptions::new().read(true).open(&path)?;
-            let metadata = file.metadata().unwrap();
-            let layer_size = metadata.len() as usize;
-
-            let dedup_check = session.exists_digest(&map.archive_digest).await;
-
-            _ = emitter.use_try(|state| {
-                if state.current_upload_idx.is_none() {
-                    state.current_upload_idx = Some(0);
-                }
-                state.current_layer_size = Some(layer_size);
-                Ok(())
-            });
-
-            let descriptor = if dedup_check.is_ok() && dedup_check.unwrap() {
+        match push_image_impl(
+            this.clone(),
+            registry,
+            record,
+            name.to_string(),
+            tag.to_string(),
+            layers_dir,
+            &mut emitter,
+        )
+        .await
+        {
+            Ok(_) => {
                 _ = emitter.use_try(|state| {
-                    if state.current_upload_idx.is_none() {
-                        state.current_upload_idx = Some(0);
-                    }
+                    state.done = true;
                     Ok(())
                 });
-
-                Descriptor {
-                    digest: map.archive_digest.clone(),
-                    media_type: content_type.to_string(),
-                    size: layer_size,
-                }
-            } else {
-                info!("pushing {path:?}");
-                let (tx, upload_status) = tokio::sync::watch::channel(UploadStat::default());
+            }
+            Err(error) => {
                 _ = emitter.use_try(|state| {
-                    state.upload_status = Some(upload_status.clone());
-                    Ok(())
+                    state.fault = Some(format!("Upload failed: {error}"));
+                    state.done = true;
+                    Err::<(), String>(error.to_string())
                 });
-
-                let maybe_descriptor = session
-                    .upload_content_known_digest(
-                        Some(tx),
-                        &map.archive_digest,
-                        content_type.to_string(),
-                        true,
-                        map.origin.clone(),
-                        file,
-                    )
-                    .await?;
-
-                if let Some(descriptor) = maybe_descriptor {
-                    descriptor
-                } else {
-                    Descriptor {
-                        digest: map.archive_digest.clone(),
-                        media_type: content_type.to_string(),
-                        size: layer_size,
-                    }
-                }
-            };
-            uploads.push(descriptor);
-            _ = emitter.use_try(|state| {
-                state.current_upload_idx = Some(state.current_upload_idx.unwrap() + 1);
-                Ok(())
-            });
+            }
         }
-        // upload config
-        let config = serde_json::to_vec(&record.manifest)?;
-        _ = emitter.use_try(|state| {
-            state.push_config = true;
-            Ok(())
-        });
-        debug!("pushing config");
-        let config_descriptor = session
-            .upload_content(
-                None,
-                "application/vnd.oci.image.config.v1+json".to_string(),
-                config.as_slice(),
-            )
-            .await?;
-        let manifest = oci_util::models::ImageManifest {
-            schema_version: 2,
-            media_type: "application/vnd.oci.image.manifest.v1+json".to_owned(),
-            config: config_descriptor, //,config.unwrap(),
-            layers: uploads,
-        };
-
-        debug!("Registering manifest: {manifest:#?}");
-        _ = emitter.use_try(|state| {
-            state.push_manifest = true;
-            Ok(())
-        });
-        debug!("Registering manifest: {manifest:#?}");
-
-        let arch = record.manifest.architecture();
-        let arch_tag = format!("{tag}-{arch}");
-        let platform = Platform {
-            os: record.manifest.os().to_string(),
-            architecture: arch.to_string(),
-            os_version: None,
-            os_features: Vec::new(),
-            variant: None,
-            features: Vec::new(),
-        };
-        let descriptor = session.register_manifest(&arch_tag, &manifest).await?;
-        session
-            .merge_manifest_list(&descriptor, &platform, &tag)
-            .await?;
-
-        _ = emitter.use_try(|state| {
-            state.done = true;
-            Ok(())
-        });
-        emitter.set_completed();
-
-        Ok::<(), anyhow::Error>(())
     });
-
     Ok(rx)
 }

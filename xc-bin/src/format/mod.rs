@@ -263,9 +263,9 @@ pub fn format_capacity(size: usize) -> String {
     }
 }
 
-pub fn format_bandwidth(size: usize, secs: u64) -> String {
+pub fn format_bandwidth(size: usize, ms: u128) -> String {
     let bits = (size * 8) as f64;
-    let ss = secs as f64;
+    let ss = (ms as f64) / 1000.0;
     if size > GB {
         format!("{:.2} gbps", bits / GB_F64 / ss)
     } else if size > MB {

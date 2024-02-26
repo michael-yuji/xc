@@ -570,11 +570,16 @@ impl ServerContext {
                 warn!("pf is disabled");
             }
 
-            if let Some(address) = MainAddressSelector::select(&blueprint.main_ip_selector, blueprint.ip_alloc.iter()) {
+            if let Some(address) =
+                MainAddressSelector::select(&blueprint.main_ip_selector, blueprint.ip_alloc.iter())
+            {
                 if !blueprint.port_redirections.is_empty() {
                     for rdr in blueprint.port_redirections.iter() {
                         let mut rdr = rdr.clone();
-                        rdr.with_host_info(&this.config.ext_ifs, ipcidr::IpCidr::from_singleton(address.address));
+                        rdr.with_host_info(
+                            &this.config.ext_ifs,
+                            ipcidr::IpCidr::from_singleton(address.address),
+                        );
                         this.port_forward_table.append_rule(id, rdr);
                     }
                     this.reload_pf_rdr_anchor()?;
@@ -587,7 +592,7 @@ impl ServerContext {
                     for dataset in jailing_datasets.iter() {
                         res.dataset_tracker.unjail(dataset);
                     }
-                    return Err(error)
+                    return Err(error);
                 }
             };
 

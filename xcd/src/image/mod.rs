@@ -599,17 +599,19 @@ impl RootFsRecipe {
                     if !status.success() {
                         debug!(
                             file_path,
-                            root=root.to_str(),
-                            exit_code=status.code(),
-                            "failed to extract file to root: ocitar exit with non-zero exit code")
+                            root = root.to_str(),
+                            exit_code = status.code(),
+                            "failed to extract file to root: ocitar exit with non-zero exit code"
+                        )
                     }
-                },
+                }
                 Err(error) => {
                     debug!(
                         file_path,
-                        root=root.to_str(),
-                        error=error.to_string(),
-                        "failed to extract file to root");
+                        root = root.to_str(),
+                        error = error.to_string(),
+                        "failed to extract file to root"
+                    );
                 }
             }
             debug!(file_path, "finished");

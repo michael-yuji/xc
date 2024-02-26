@@ -24,7 +24,7 @@
 use crate::buffer::Buffer;
 use freebsd::event::{KEventExt, KqueueExt};
 use freebsd::nix::pty::openpty;
-use freebsd::nix::sys::event::{Kqueue, EventFilter, EventFlag, KEvent};
+use freebsd::nix::sys::event::{EventFilter, EventFlag, KEvent, Kqueue};
 use freebsd::FreeBSDCommandExt;
 use std::io::Write;
 use std::os::fd::OwnedFd;

@@ -25,8 +25,8 @@
 use crate::container::ProcessStat;
 
 use freebsd::event::EventFdNotify;
-use std::sync::Arc;
 use std::os::unix::process::ExitStatusExt;
+use std::sync::Arc;
 use tokio::sync::watch::Sender;
 use tracing::debug;
 
@@ -56,13 +56,13 @@ impl ProcessRunnerStat {
     }
 
     pub(super) fn set_exited(&mut self, exit_code: i32) {
-        debug!(pid=self.pid, exit_code=exit_code, "set_exited");
+        debug!(pid = self.pid, exit_code = exit_code, "set_exited");
         self.process_stat.send_if_modified(|status| {
             status.set_exited(exit_code);
             true
         });
         if let Some(notify) = &self.exit_notify {
-            debug!(pid=self.pid, exit_code=exit_code, "notifing listeners");
+            debug!(pid = self.pid, exit_code = exit_code, "notifing listeners");
             notify
                 .clone()
                 .notify_waiters_with_value(encode_exit_code(exit_code));

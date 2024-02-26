@@ -490,6 +490,10 @@ fn main() -> Result<(), ActionError> {
             match do_push_image(&mut conn, req)? {
                 Ok(_) => {
                     let mut lines_count = 0;
+                    let mut last_pulled_ms: Option<u128> = None;
+                    let mut last_pulled_bytes: std::collections::HashMap<OciDigest, usize> =
+                        std::collections::HashMap::new();
+                    //                    let mut last_pulled_ms: std::collections::HashMap<OciDigest, u128> = std::collections::HashMap::new();
                     loop {
                         std::thread::sleep(std::time::Duration::from_millis(500));
                         if lines_count > 0 {
@@ -519,18 +523,48 @@ fn main() -> Result<(), ActionError> {
                                     Ordering::Equal => {
                                         let uploaded =
                                             res.bytes.map(format_capacity).unwrap_or_default();
-                                        let bandwidth = res
+
+                                        let (avg, bandwidth) = res
                                             .bytes
                                             .and_then(|bytes| {
-                                                res.duration_secs
-                                                    .map(|sec| format_bandwidth(bytes, sec))
+                                                let b = bytes
+                                                    - last_pulled_bytes.get(digest).unwrap_or(&0);
+                                                last_pulled_bytes.insert(digest.clone(), bytes);
+                                                res.duration_ms.map(|ms| {
+                                                    (
+                                                        format_bandwidth(bytes, ms),
+                                                        format_bandwidth(
+                                                            b,
+                                                            ms - last_pulled_ms.unwrap_or_default(),
+                                                        ),
+                                                    )
+                                                })
                                             })
                                             .unwrap_or_default();
+
+                                        /*
+                                                                                let (avg, bandwidth) = res
+                                                                                    .bytes
+                                                                                    .and_then(|bytes| {
+                                                                                        let b = last_pulled_bytes.get(digest).map(|b| bytes - b).unwrap_or(*bytes);
+                                                                                        let (avg, s) = res.duration_ms
+                                                                                            .map(|ms| {
+                                                                                                (
+                                                                                                    format_bandwidth(bytes, ms),
+                                                                                                    format_bandwidth(b, last_pulled_ms.map(|l| ms - l).unwrap_or_else(|| ms))
+                                                                                                )
+                                                                                            });
+                                        //                                                    .map(|ms| format_bandwidth(bytes, ms));
+                                                                                        last_pulled_bytes.insert(digest.clone(), bytes);
+                                                                                        (avg, s)
+                                                                                    })
+                                                                                    .unwrap_or_default();
+                                                                                */
                                         let total = res
                                             .current_layer_size
                                             .map(format_capacity)
                                             .unwrap_or_default();
-                                        eprintln!("{digest} ... uploading {uploaded}/{total} @ {bandwidth}");
+                                        eprintln!("{digest} ... uploading {uploaded}/{total} @ {bandwidth} (avg {avg})");
                                     }
                                     Ordering::Greater => eprintln!("{digest}"),
                                 };
@@ -545,6 +579,9 @@ fn main() -> Result<(), ActionError> {
                             } else {
                                 eprintln!("Image manifest")
                             }
+                        }
+                        if let Some(ms) = res.duration_ms {
+                            last_pulled_ms = Some(ms);
                         }
                     }
                 }
@@ -609,7 +646,13 @@ fn main() -> Result<(), ActionError> {
                     Some(unsafe { eventfd(0, freebsd::nix::libc::EFD_NONBLOCK) })
                 };
 
-                let reqt = InstantiateRequest {
+                let stdin = if args.detach || !args.interactive {
+                    Maybe::None
+                } else {
+                    Maybe::Some(Fd::stdin())
+                };
+
+                let mut reqt = InstantiateRequest {
                     dns,
                     create_only: false,
                     main_norun: false,
@@ -622,8 +665,26 @@ fn main() -> Result<(), ActionError> {
                     }),
                     main_exited_fd: Maybe::from_option(main_exited_notify.map(Fd)),
                     port_redirections: publish.into_iter().map(|p| p.to_host_spec()).collect(),
+                    use_tty: args.terminal,
+                    stdin,
+                    stdout: if args.detach {
+                        Maybe::None
+                    } else {
+                        Maybe::Some(Fd::stdout())
+                    },
+                    stderr: if args.detach {
+                        Maybe::None
+                    } else {
+                        Maybe::Some(Fd::stderr())
+                    },
                     ..create.create_request()?
                 };
+
+                if args.terminal {
+                    if let Ok(term) = std::env::var("TERM") {
+                        reqt.envs.insert("TERM".to_string(), term.to_string());
+                    }
+                }
 
                 let res = do_instantiate(&mut conn, reqt)?;
                 let exit_notify = main_exited_notify.map(EventFdNotify::from_fd);
@@ -660,36 +721,47 @@ fn main() -> Result<(), ActionError> {
                     }
                     let id = res.id;
 
-                    if let Ok(container) =
-                        do_show_container_nocache(&mut conn, ShowContainerRequest { id })?
-                    {
-                        if let Some(reason) = container.running_container.fault {
-                            error!("Container faulted {reason}");
-                        } else {
-                            let spawn_info = container
-                                .running_container
-                                .processes
-                                .get("main")
-                                .as_ref()
-                                .and_then(|proc| proc.spawn_info.as_ref())
-                                .expect("process not started yet or not found");
-                            if let Some(socket) = &spawn_info.terminal_socket {
-                                if let Ok(exit_by_user) = attach::run(socket) {
-                                    if !exit_by_user {
-                                        if let Some(notify) = main_exited_notify {
-                                            if let Ok(exit_value) = notify.notified_sync_take_value() {
-                                                let exit_status = decode_exit_code(exit_value);
-                                                std::process::exit(exit_status.code().unwrap_or(EXIT_FAILURE))
+                    if args.terminal {
+                        if let Ok(container) =
+                            do_show_container_nocache(&mut conn, ShowContainerRequest { id })?
+                        {
+                            if let Some(reason) = container.running_container.fault {
+                                error!("Container faulted {reason}");
+                            } else {
+                                let spawn_info = container
+                                    .running_container
+                                    .processes
+                                    .get("main")
+                                    .as_ref()
+                                    .and_then(|proc| proc.spawn_info.as_ref())
+                                    .expect("process not started yet or not found");
+                                if let Some(socket) = &spawn_info.terminal_socket {
+                                    if let Ok(exit_by_user) = attach::run(socket) {
+                                        if !exit_by_user {
+                                            if let Some(notify) = main_exited_notify {
+                                                if let Ok(exit_value) =
+                                                    notify.notified_sync_take_value()
+                                                {
+                                                    let exit_status = decode_exit_code(exit_value);
+                                                    std::process::exit(
+                                                        exit_status.code().unwrap_or(EXIT_FAILURE),
+                                                    )
+                                                }
                                             }
                                         }
                                     }
+                                } else {
+                                    info!("main process is not running with tty");
                                 }
-                            } else {
-                                info!("main process is not running with tty");
                             }
+                        } else {
+                            panic!("cannot find container");
                         }
-                    } else {
-                        panic!("cannot find container");
+                    } else if let Some(notify) = main_exited_notify {
+                        if let Ok(exit_value) = notify.notified_sync_take_value() {
+                            let exit_status = decode_exit_code(exit_value);
+                            std::process::exit(exit_status.code().unwrap_or(EXIT_FAILURE))
+                        }
                     }
                 }
             } else {
@@ -795,17 +867,17 @@ fn main() -> Result<(), ActionError> {
                 stdin: if terminal {
                     Maybe::None
                 } else {
-                    Maybe::Some(ipc::packet::codec::Fd(0))
+                    Maybe::Some(Fd::stdin())
                 },
                 stdout: if terminal {
                     Maybe::None
                 } else {
-                    Maybe::Some(ipc::packet::codec::Fd(1))
+                    Maybe::Some(Fd::stdout())
                 },
                 stderr: if terminal {
                     Maybe::None
                 } else {
-                    Maybe::Some(ipc::packet::codec::Fd(2))
+                    Maybe::Some(Fd::stderr())
                 },
                 user,
                 group,

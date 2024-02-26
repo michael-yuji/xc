@@ -27,7 +27,7 @@ use crate::container::request::Mount;
 use crate::container::ContainerManifest;
 use crate::models::exec::Jexec;
 use crate::models::jail_image::JailImage;
-use crate::models::network::{DnsSetting, IpAssign, MainAddressSelector, AssignedAddress};
+use crate::models::network::{AssignedAddress, DnsSetting, IpAssign, MainAddressSelector};
 use crate::util::realpath;
 
 use anyhow::Context;
@@ -105,11 +105,11 @@ impl<'a> Iterator for ContainerNetworkIter<'a> {
         loop {
             match self.0.next() {
                 None => return None,
-                x@Some(assign) => {
+                x @ Some(assign) => {
                     if assign.network.is_none() {
-                        continue
+                        continue;
                     } else {
-                        return x
+                        return x;
                     }
                 }
             }

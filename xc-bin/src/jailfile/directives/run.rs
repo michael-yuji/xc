@@ -228,7 +228,8 @@ impl Directive for RunDirective {
                                 let bytes_to_write =
                                     writer.read_to(&mut write_buf[..writable.min(8192)]);
 
-                                match freebsd::nix::unistd::write(fd, &write_buf[..bytes_to_write]) {
+                                match freebsd::nix::unistd::write(fd, &write_buf[..bytes_to_write])
+                                {
                                     Err(err) => {
                                         error!("cannot write to remote process stdin: {err}");
                                         _ = freebsd::nix::unistd::close(fd);

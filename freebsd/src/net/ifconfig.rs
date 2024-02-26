@@ -222,9 +222,17 @@ pub fn create_tap() -> Result<String, IfconfigError> {
         .output()
         .map_err(IfconfigError::RunError)?;
     if output.status.success() {
-        Ok(std::str::from_utf8(&output.stdout).unwrap().trim_end().to_string())
+        Ok(std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .trim_end()
+            .to_string())
     } else {
-        Err(IfconfigError::CliError(std::str::from_utf8(&output.stderr).unwrap().trim_end().to_string()))
+        Err(IfconfigError::CliError(
+            std::str::from_utf8(&output.stderr)
+                .unwrap()
+                .trim_end()
+                .to_string(),
+        ))
     }
 }
 
@@ -233,8 +241,16 @@ pub fn create_tun<A: AsRef<str>>() -> Result<String, IfconfigError> {
         .output()
         .map_err(IfconfigError::RunError)?;
     if output.status.success() {
-        Ok(std::str::from_utf8(&output.stdout).unwrap().trim_end().to_string())
+        Ok(std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .trim_end()
+            .to_string())
     } else {
-        Err(IfconfigError::CliError(std::str::from_utf8(&output.stderr).unwrap().trim_end().to_string()))
+        Err(IfconfigError::CliError(
+            std::str::from_utf8(&output.stderr)
+                .unwrap()
+                .trim_end()
+                .to_string(),
+        ))
     }
 }

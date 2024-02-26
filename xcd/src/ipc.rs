@@ -30,7 +30,7 @@ use crate::resources::network::Network;
 use crate::resources::volume::{Volume, VolumeDriverKind};
 
 use freebsd::event::EventFdNotify;
-use freebsd::libc::{EINVAL, EIO, EPERM, ENOENT};
+use freebsd::libc::{EINVAL, EIO, ENOENT, EPERM};
 use ipc::packet::codec::{Fd, FromPacket, List, Maybe};
 use ipc::proto::{enoent, ipc_err, GenericResult};
 use ipc::service::{ConnectionContext, Service};
@@ -53,7 +53,7 @@ use xc::container::request::NetworkAllocRequest;
 use xc::image_store::ImageStoreError;
 use xc::models::exec::{IpcJexec, IpcStdioMode};
 use xc::models::jail_image::JailConfig;
-use xc::models::network::{DnsSetting, IpAssign, PortRedirection, MainAddressSelector};
+use xc::models::network::{DnsSetting, IpAssign, MainAddressSelector, PortRedirection};
 use xc::util::{gen_id, CompressionFormat, CompressionFormatExt};
 
 #[derive(FromPacket, Debug)]
@@ -245,8 +245,11 @@ pub struct InstantiateRequest {
     pub stdin: Maybe<Fd>,
     pub stdout: Maybe<Fd>,
     pub stderr: Maybe<Fd>,
+    pub use_tty: bool,
 
     pub port_redirections: Vec<PortRedirection>,
+
+    pub enable_pf: bool,
 }
 
 impl InstantiateRequest {
@@ -313,7 +316,9 @@ impl Default for InstantiateRequest {
             stdin: Maybe::None,
             stdout: Maybe::None,
             stderr: Maybe::None,
+            use_tty: false,
             port_redirections: Vec::new(),
+            enable_pf: false,
         }
     }
 }
@@ -817,7 +822,7 @@ async fn fd_import(
         Err(error) => {
             return ipc_err(
                 EPERM,
-                &format!("cannot open file for write and create at {tempfile_path:?}: {error}")
+                &format!("cannot open file for write and create at {tempfile_path:?}: {error}"),
             )
         }
     };
@@ -830,8 +835,8 @@ async fn fd_import(
             error!("cannot create temporary zfs dataset at {tempdataset}: {error}");
             return ipc_err(
                 EPERM,
-                &format!("cannot create temporary zfs dataset at {tempdataset}: {error}")
-            )
+                &format!("cannot create temporary zfs dataset at {tempdataset}: {error}"),
+            );
         }
     };
 
@@ -841,15 +846,15 @@ async fn fd_import(
             error!("dataset {tempdataset} do not have a mountpoint");
             return ipc_err(
                 ENOENT,
-                &format!("dataset {tempdataset} do not have a mountpoint")
-            )
-        },
+                &format!("dataset {tempdataset} do not have a mountpoint"),
+            );
+        }
         Err(error) => {
             error!("zfs exec failure: {error} when querying mountpoint for {tempdataset}");
             return ipc_err(
                 EINVAL,
-                &format!("zfs exec failure: {error} when querying mountpoint for {tempdataset}")
-            )
+                &format!("zfs exec failure: {error} when querying mountpoint for {tempdataset}"),
+            );
         }
     };
 

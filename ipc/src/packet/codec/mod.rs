@@ -25,6 +25,7 @@ pub mod json;
 
 use crate::packet::TypedPacket;
 
+use freebsd::libc::{STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::os::fd::{AsRawFd, RawFd};
@@ -34,6 +35,18 @@ pub struct FdRef(usize);
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize)]
 pub struct Fd(pub RawFd);
+
+impl Fd {
+    pub fn stdout() -> Fd {
+        Fd(STDOUT_FILENO)
+    }
+    pub fn stderr() -> Fd {
+        Fd(STDERR_FILENO)
+    }
+    pub fn stdin() -> Fd {
+        Fd(STDIN_FILENO)
+    }
+}
 
 impl FromPacket for Fd {
     type Dual = FdRef;

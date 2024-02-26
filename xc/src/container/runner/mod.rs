@@ -196,7 +196,7 @@ impl ProcessRunner {
 
         let exit_notify = exit_notify.or(exec.notify.map(|e| Arc::new(EventFdNotify::from_fd(e))));
 
-        debug!(exit_notify=format!("{exit_notify:?}"), "==");
+        debug!(exit_notify = format!("{exit_notify:?}"), "==");
 
         let mut envs = self.container.envs.clone();
 
@@ -252,7 +252,6 @@ impl ProcessRunner {
             },
         };
 
-
         for (key, value) in exec.envs.iter() {
             envs.insert(key.to_string(), value.to_string());
         }
@@ -273,21 +272,23 @@ impl ProcessRunner {
             let network_name = network.network.as_ref().unwrap();
             envs.insert(
                 format!("XC_NETWORK_{network_name}_ADDR_COUNT"),
-                network.addresses.len().to_string()
+                network.addresses.len().to_string(),
             );
             envs.insert(
                 format!("XC_NETWORK_{network_name}_IFACE"),
                 network.interface.to_string(),
             );
             for (i, addr) in network.addresses.iter().enumerate() {
-                envs.insert(format!("XC_NETWORK_{network_name}_ADDR_{i}"), addr.to_string());
+                envs.insert(
+                    format!("XC_NETWORK_{network_name}_ADDR_{i}"),
+                    addr.to_string(),
+                );
             }
         }
 
         envs.insert("XC_NETWORKS_COUNT".to_string(), networks_count.to_string());
 
         envs.insert("XC_ID".to_string(), self.container.id.to_string());
-
 
         let mut cmd = std::process::Command::new(&exec.arg0);
 
@@ -502,11 +503,7 @@ impl ProcessRunner {
             self.parent_map.remove(&pid);
 
             let descentdant = self.descentdant_map.get_mut(&ancestor).unwrap();
-            trace!(
-                pid,
-                ancestor,
-                "NOTE_EXIT"
-            );
+            trace!(pid, ancestor, "NOTE_EXIT");
 
             if let Some(pos) = descentdant.iter().position(|x| *x == pid) {
                 descentdant.remove(pos);
@@ -521,7 +518,7 @@ impl ProcessRunner {
                     if stat.pid() == ancestor {
                         if ancestor == pid {
                             stat.set_exited(event.data() as i32);
-                            info!(pid, exit_code=event.data(), "pid exited");
+                            info!(pid, exit_code = event.data(), "pid exited");
                             unsafe {
                                 freebsd::nix::libc::waitpid(pid as i32, std::ptr::null_mut(), 0)
                             };
@@ -550,7 +547,11 @@ impl ProcessRunner {
                         if descentdant_gone {
                             stat.set_tree_exited();
                             if stat.id() == "main" {
-                                info!(id=self.container.id, jid=self.container.jid, "main process exited");
+                                info!(
+                                    id = self.container.id,
+                                    jid = self.container.jid,
+                                    "main process exited"
+                                );
                                 self.main_exited = true;
                                 self.container.finished_at = Some(epoch_now_nano());
                                 if (self.container.deinit_norun || self.deinits.is_empty())
@@ -568,7 +569,10 @@ impl ProcessRunner {
                                 }
                             }
                         } else {
-                            debug!(descentdant=format!("{descentdant:?}"), "remaining descentdants");
+                            debug!(
+                                descentdant = format!("{descentdant:?}"),
+                                "remaining descentdants"
+                            );
                         }
                     }
                 }
@@ -789,7 +793,8 @@ pub fn run(
         });
         match fork_result {
             freebsd::nix::unistd::ForkResult::Child => {
-                let title = std::ffi::CString::new(format!("worker jid={}", container.jid)).unwrap();
+                let title =
+                    std::ffi::CString::new(format!("worker jid={}", container.jid)).unwrap();
                 unsafe { freebsd::libc::setproctitle(title.as_ptr()) };
                 let kq = unsafe { freebsd::nix::libc::kqueue() };
                 let mut pr = ProcessRunner::new(kq, container, auto_start);

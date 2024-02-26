@@ -160,7 +160,7 @@ pub struct HostEntry {
 #[derive(Clone, Debug)]
 pub enum MainAddressSelector {
     Network(String),
-    Ip(IpAddr)
+    Ip(IpAddr),
 }
 
 pub struct AssignedAddress {
@@ -170,45 +170,52 @@ pub struct AssignedAddress {
 
 impl AssignedAddress {
     pub fn new(interface: String, address: IpAddr) -> AssignedAddress {
-        AssignedAddress {
-            interface,
-            address,
-        }
+        AssignedAddress { interface, address }
     }
 }
 
 impl MainAddressSelector {
-    pub fn select<'a, I: Iterator<Item = &'a IpAssign>>(selector: &Option<Self>, pool: I) -> Option<AssignedAddress> {
+    pub fn select<'a, I: Iterator<Item = &'a IpAssign>>(
+        selector: &Option<Self>,
+        pool: I,
+    ) -> Option<AssignedAddress> {
         match selector {
             None => {
                 for alloc in pool {
                     if alloc.network.is_some() {
                         if let Some(address) = alloc.addresses.first() {
-                            return Some(AssignedAddress::new(alloc.interface.to_string(), address.addr()))
+                            return Some(AssignedAddress::new(
+                                alloc.interface.to_string(),
+                                address.addr(),
+                            ));
                         }
                     }
                 }
                 None
-            },
-            Some(MainAddressSelector::Ip(address)) => /*Some(*address)*/ {
+            }
+            Some(MainAddressSelector::Ip(address)) =>
+            /*Some(*address)*/
+            {
                 for alloc in pool {
                     if alloc.addresses.iter().any(|addr| addr.addr() == *address) {
-                        return Some(AssignedAddress::new(alloc.interface.to_string(), *address))
+                        return Some(AssignedAddress::new(alloc.interface.to_string(), *address));
                     }
                 }
                 None
-            },
+            }
             Some(MainAddressSelector::Network(network)) => {
                 for alloc in pool {
                     match alloc.network.as_ref() {
-                        Some(_network) if network == _network => {
-                            match alloc.addresses.first() {
-                                None => continue,
-                                Some(addr) =>
-                                    return Some(AssignedAddress::new(alloc.interface.to_string(), addr.addr()))
+                        Some(_network) if network == _network => match alloc.addresses.first() {
+                            None => continue,
+                            Some(addr) => {
+                                return Some(AssignedAddress::new(
+                                    alloc.interface.to_string(),
+                                    addr.addr(),
+                                ))
                             }
                         },
-                        _ => continue
+                        _ => continue,
                     }
                 }
                 None
@@ -221,7 +228,9 @@ impl std::fmt::Display for MainAddressSelector {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MainAddressSelector::Ip(ip) => formatter.write_fmt(format_args!("ipadd/{ip}")),
-            MainAddressSelector::Network(network) => formatter.write_fmt(format_args!("network/{network}"))
+            MainAddressSelector::Network(network) => {
+                formatter.write_fmt(format_args!("network/{network}"))
+            }
         }
     }
 }
@@ -229,21 +238,24 @@ impl std::fmt::Display for MainAddressSelector {
 impl std::str::FromStr for MainAddressSelector {
     type Err = anyhow::Error;
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        input.split_once('/').ok_or(anyhow::anyhow!("malformed")).and_then(|(proto, val)| {
-            match proto {
-                "ipaddr" => val.parse::<IpAddr>()
+        input
+            .split_once('/')
+            .ok_or(anyhow::anyhow!("malformed"))
+            .and_then(|(proto, val)| match proto {
+                "ipaddr" => val
+                    .parse::<IpAddr>()
                     .map_err(anyhow::Error::new)
                     .map(MainAddressSelector::Ip),
                 "network" => Ok(MainAddressSelector::Network(val.to_string())),
-                _ => Err(anyhow::anyhow!("malformed"))
-            }
-        })
+                _ => Err(anyhow::anyhow!("malformed")),
+            })
     }
 }
 
 impl Serialize for MainAddressSelector {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: serde::ser::Serializer
+    where
+        S: serde::ser::Serializer,
     {
         serializer.serialize_str(&self.to_string())
     }
@@ -257,7 +269,8 @@ impl<'de> serde::de::Visitor<'de> for MainAddressSelectorVisitor {
         formatter.write_str("expecting ip/<ipadr> or network/<network-name>")
     }
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-        where E: serde::de::Error
+    where
+        E: serde::de::Error,
     {
         value.parse().map_err(|e| E::custom(format!("{e:?}")))
     }
@@ -265,7 +278,8 @@ impl<'de> serde::de::Visitor<'de> for MainAddressSelectorVisitor {
 
 impl<'de> Deserialize<'de> for MainAddressSelector {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where D: serde::de::Deserializer<'de>
+    where
+        D: serde::de::Deserializer<'de>,
     {
         deserializer.deserialize_str(MainAddressSelectorVisitor)
     }

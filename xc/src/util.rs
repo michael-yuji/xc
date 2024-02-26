@@ -172,8 +172,8 @@ fn _realpath(
             PathComp::RootDir => {
                 current.push(head);
                 real_path = root.clone();
-                continue
-            },
+                continue;
+            }
             PathComp::CurDir => continue,
             PathComp::ParentDir => {
                 if !current.pop() {
