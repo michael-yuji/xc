@@ -1227,6 +1227,7 @@ async fn run_main(
 pub struct PushImageRequest {
     pub image_reference: ImageReference,
     pub remote_reference: ImageReference,
+    pub insecure: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1239,7 +1240,7 @@ async fn push_image(
     request: PushImageRequest,
 ) -> Result<PushImageResponse, ipc::proto::ErrResponse<PushImageError>> {
     let ctx = context.read().await;
-    ctx.push_image(request.image_reference, request.remote_reference)
+    ctx.push_image(request.image_reference, request.remote_reference, request.insecure)
         .await
         .map(|_| PushImageResponse {})
         .map_err(|err| ipc::proto::ErrResponse {

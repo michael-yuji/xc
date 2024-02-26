@@ -687,12 +687,14 @@ impl ServerContext {
         &self,
         reference: ImageReference,
         remote_reference: ImageReference,
+        insecure: bool,
     ) -> Result<(), crate::image::push::PushImageError> {
         _ = crate::image::push::push_image(
             self.image_manager.clone(),
             &self.config.layers_dir,
             reference,
             remote_reference,
+            insecure,
         )
         .await?;
         Ok(())

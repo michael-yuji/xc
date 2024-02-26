@@ -168,6 +168,8 @@ enum Action {
     },
     /// Upload a locally available image to the remote registry
     Push {
+        #[arg(long = "insecure", default_value_t)]
+        insecure: bool,
         /// The local image to push
         image_reference: ImageReference,
         /// Destination of the upload
@@ -480,12 +482,14 @@ fn main() -> Result<(), ActionError> {
         }
 
         Action::Push {
+            insecure,
             image_reference,
             new_image_reference,
         } => {
             let req = PushImageRequest {
                 image_reference: image_reference.clone(),
                 remote_reference: new_image_reference.clone(),
+                insecure,
             };
             match do_push_image(&mut conn, req)? {
                 Ok(_) => {
@@ -542,24 +546,6 @@ fn main() -> Result<(), ActionError> {
                                             })
                                             .unwrap_or_default();
 
-                                        /*
-                                                                                let (avg, bandwidth) = res
-                                                                                    .bytes
-                                                                                    .and_then(|bytes| {
-                                                                                        let b = last_pulled_bytes.get(digest).map(|b| bytes - b).unwrap_or(*bytes);
-                                                                                        let (avg, s) = res.duration_ms
-                                                                                            .map(|ms| {
-                                                                                                (
-                                                                                                    format_bandwidth(bytes, ms),
-                                                                                                    format_bandwidth(b, last_pulled_ms.map(|l| ms - l).unwrap_or_else(|| ms))
-                                                                                                )
-                                                                                            });
-                                        //                                                    .map(|ms| format_bandwidth(bytes, ms));
-                                                                                        last_pulled_bytes.insert(digest.clone(), bytes);
-                                                                                        (avg, s)
-                                                                                    })
-                                                                                    .unwrap_or_default();
-                                                                                */
                                         let total = res
                                             .current_layer_size
                                             .map(format_capacity)

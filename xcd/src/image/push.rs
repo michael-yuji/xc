@@ -293,6 +293,7 @@ pub async fn push_image(
     layers_dir: impl AsRef<std::path::Path>,
     reference: ImageReference,
     remote_reference: ImageReference,
+    insecure: bool,
 ) -> Result<Receiver<Task<String, PushImageStatus>>, PushImageError> {
     let id = format!("{reference}->{remote_reference}");
     info!(id, "push image");
@@ -315,7 +316,14 @@ pub async fn push_image(
                 .ok_or(PushImageError::RegistryNotFound)?,
             Some(hostname) => reg
                 .get_registry_by_name(&hostname)
-                .unwrap_or_else(|| Registry::new(hostname.to_string(), None)),
+                .unwrap_or_else(|| {
+                    let base_url = if insecure {
+                        format!("http://{hostname}")
+                    } else {
+                        format!("https://{hostname}")
+                    };
+                    Registry::new(base_url, None)
+                }),
         };
 
         (registry, record)
