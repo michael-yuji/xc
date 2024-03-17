@@ -89,7 +89,8 @@ macro_rules! guard {
     ($self:expr, $e:expr) => {
         match { $e } {
             Err(e) => {
-                $self.unwind()?;
+                // TODO: handle unwind errors
+                _ = $self.unwind();
                 Err(e)
             }
             Ok(t) => Ok(t),
@@ -261,10 +262,10 @@ impl Site {
     }
 
     pub fn unwind(&mut self) -> anyhow::Result<()> {
-        self.undo.pop_all().context("failure on undo")?;
+        let failures = self.undo.pop_all().context("failure on undo");
         self.state = SiteState::Terminated;
         self.notify.notify_waiters();
-        Ok(())
+        failures
     }
 
     pub fn exec(

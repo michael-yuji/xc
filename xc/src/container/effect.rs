@@ -22,6 +22,7 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use anyhow::Result;
+use thiserror::Error;
 use freebsd::fs::zfs::ZfsHandle;
 use freebsd::net::ifconfig::{
     add_to_bridge, create_alias, interface_up, move_to_jail, remove_alias, remove_from_bridge,
@@ -39,6 +40,15 @@ pub struct UndoStack {
     pub undos: Vec<Undo>,
 }
 
+#[derive(Error, Debug)]
+pub struct UnwindFailures(Vec<anyhow::Error>);
+impl std::fmt::Display for UnwindFailures {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::fmt::Debug;
+        self.0.fmt(fmt)
+    }
+}
+
 impl UndoStack {
     pub fn new() -> UndoStack {
         UndoStack::default()
@@ -53,10 +63,18 @@ impl UndoStack {
     }
 
     pub fn pop_all(&mut self) -> Result<()> {
+        let mut failures = Vec::new();
         while let Some(undo) = self.undos.pop() {
-            undo.run()?;
+            if let Err(error) = undo.run() {
+                error!(error=format!("{error:?}"), "error encountered poping undo stack");
+                failures.push(error);
+            }
         }
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(UnwindFailures(failures).into())
+        }
     }
 }
 
