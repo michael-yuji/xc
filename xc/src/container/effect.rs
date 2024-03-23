@@ -22,7 +22,6 @@
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
 use anyhow::Result;
-use thiserror::Error;
 use freebsd::fs::zfs::ZfsHandle;
 use freebsd::net::ifconfig::{
     add_to_bridge, create_alias, interface_up, move_to_jail, remove_alias, remove_from_bridge,
@@ -33,6 +32,7 @@ use paste::paste;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::path::PathBuf;
+use thiserror::Error;
 use tracing::{debug, error};
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -66,7 +66,10 @@ impl UndoStack {
         let mut failures = Vec::new();
         while let Some(undo) = self.undos.pop() {
             if let Err(error) = undo.run() {
-                error!(error=format!("{error:?}"), "error encountered poping undo stack");
+                error!(
+                    error = format!("{error:?}"),
+                    "error encountered poping undo stack"
+                );
                 failures.push(error);
             }
         }

@@ -124,7 +124,7 @@ impl VolumeDriver for LocalDriver {
 
         Ok(Mount {
             options: Vec::from_iter(mount_options),
-            ..Mount::nullfs(source_path, &real_dest)
+            ..Mount::nullfs(source_path, real_dest)
         })
     }
 }

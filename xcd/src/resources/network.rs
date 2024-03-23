@@ -46,6 +46,8 @@ pub(crate) enum Error {
     InvalidAddress(IpAddr, String),
     #[error("no such network {0}")]
     NoSuchNetwork(String),
+    #[error("unsupported operation network")]
+    Unsupported,
     #[error("{0}")]
     Other(anyhow::Error),
 }
@@ -65,9 +67,9 @@ impl From<anyhow::Error> for Error {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Network {
     pub ext_if: Option<String>,
-    pub alias_iface: String,
-    pub bridge_iface: String,
-    pub subnet: IpCidr,
+    pub alias_iface: Option<String>,
+    pub bridge_iface: Option<String>,
+    pub subnet: Option<IpCidr>,
     pub start_addr: Option<IpAddr>,
     pub end_addr: Option<IpAddr>,
     pub default_router: Option<IpAddr>,
@@ -78,21 +80,22 @@ impl Network {
         &'b self,
         name: &str,
         store: &'a A,
-    ) -> Netpool<'a, 'b, A> {
+    ) -> Option<Netpool<'a, 'b, A>> {
         let last_addr = store.last_allocated_adddress(name).unwrap();
         let name = name.to_string();
-        Netpool {
+
+        let Some(subnet) = &self.subnet else {
+            return None;
+        };
+
+        Some(Netpool {
             network: self,
             store,
             last_addr,
-            start_addr: self
-                .start_addr
-                .unwrap_or_else(|| self.subnet.network_addr()),
-            end_addr: self
-                .end_addr
-                .unwrap_or_else(|| self.subnet.broadcast_addr()),
+            start_addr: self.start_addr.unwrap_or_else(|| subnet.network_addr()),
+            end_addr: self.end_addr.unwrap_or_else(|| subnet.broadcast_addr()),
             name,
-        }
+        })
     }
 }
 
@@ -116,13 +119,17 @@ pub struct Netpool<'a, 'b, A: AddressStore> {
 
 #[allow(dead_code)]
 impl<'a, 'b, A: AddressStore> Netpool<'a, 'b, A> {
+    pub fn subnet(&self) -> IpCidr {
+        self.network.subnet.clone().unwrap()
+    }
+
     pub fn all_allocated_addresses(&self) -> rusqlite::Result<Vec<IpAddr>> {
         self.store.all_allocated_addresses(&self.name)
     }
 
     pub fn next_cidr(&mut self, token: &str) -> rusqlite::Result<Option<IpCidr>> {
         self.next_address(token)
-            .map(|x| x.and_then(|a| IpCidr::from_addr(a, self.network.subnet.mask())))
+            .map(|x| x.and_then(|a| IpCidr::from_addr(a, self.subnet().mask())))
     }
     pub fn next_address(&mut self, token: &str) -> rusqlite::Result<Option<IpAddr>> {
         macro_rules! next_addr {
@@ -141,8 +148,8 @@ impl<'a, 'b, A: AddressStore> Netpool<'a, 'b, A> {
 
                 loop {
                     let addr = IpAddr::$ipv((start + offset).into());
-                    if addr != self.network.subnet.network_addr()
-                        && addr != self.network.subnet.broadcast_addr()
+                    if addr != self.subnet().network_addr()
+                        && addr != self.subnet().broadcast_addr()
                         && !self.store.is_address_allocated(&self.name, &addr)?
                     {
                         self.last_addr = Some(addr);
@@ -184,25 +191,36 @@ impl<'a, 'b, A: AddressStore> Netpool<'a, 'b, A> {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct NetworkInfo {
     pub name: String,
-    pub subnet: IpCidr,
-    pub start_addr: IpAddr,
-    pub end_addr: IpAddr,
+    pub subnet: Option<IpCidr>,
+    pub start_addr: Option<IpAddr>,
+    pub end_addr: Option<IpAddr>,
     pub last_addr: Option<IpAddr>,
-    pub alias_iface: String,
-    pub bridge_iface: String,
+    pub alias_iface: Option<String>,
+    pub bridge_iface: Option<String>,
 }
 
 impl NetworkInfo {
     fn new(db: &impl AddressStore, name: String, network: &Network) -> NetworkInfo {
-        let netpool = network.parameterize(&name, db);
-        NetworkInfo {
-            name,
-            subnet: netpool.network.subnet.clone(),
-            start_addr: netpool.start_addr,
-            end_addr: netpool.end_addr,
-            last_addr: netpool.last_addr,
-            alias_iface: network.alias_iface.clone(),
-            bridge_iface: network.bridge_iface.clone(),
+        if let Some(netpool) = network.parameterize(&name, db) {
+            NetworkInfo {
+                name,
+                subnet: netpool.network.subnet.clone(),
+                start_addr: Some(netpool.start_addr),
+                end_addr: Some(netpool.end_addr),
+                last_addr: netpool.last_addr,
+                alias_iface: network.alias_iface.clone(),
+                bridge_iface: network.bridge_iface.clone(),
+            }
+        } else {
+            NetworkInfo {
+                name,
+                subnet: None,
+                start_addr: None,
+                end_addr: None,
+                last_addr: None,
+                alias_iface: network.alias_iface.clone(),
+                bridge_iface: network.bridge_iface.clone(),
+            }
         }
     }
 }
@@ -267,51 +285,74 @@ impl Resources {
             .clone();
 
         let interface = if vnet {
-            network.bridge_iface.to_string()
+            let Some(bridge_iface) = network.bridge_iface.as_ref() else {
+                return Err(Error::Unsupported);
+            };
+            bridge_iface
         } else {
-            network.alias_iface.to_string()
+            let Some(alias_iface) = network.alias_iface.as_ref() else {
+                return Err(Error::Unsupported);
+            };
+            alias_iface
         };
 
         let db: &Database = &self.db;
 
-        let mut netpool = network.parameterize(&network_name, db);
-
-        match req {
-            NetworkAllocRequest::Any { .. } => {
-                let Some(address) = netpool.next_cidr(token)? else {
-                    return Err(Error::AllocationFailure(network_name));
-                };
-
-                self.insert_to_cache(token, &network_name, &address.addr());
-
-                Ok((
+        if network.subnet.is_none() {
+            match req {
+                NetworkAllocRequest::Explicit { ip, .. } => Ok((
                     IpAssign {
                         network: Some(network_name),
-                        interface,
-                        addresses: vec![address],
+                        interface: interface.to_string(),
+                        addresses: vec![ip.clone()],
                     },
-                    network.default_router,
-                ))
+                    None,
+                )),
+                _ => Err(Error::Unsupported),
             }
-            NetworkAllocRequest::Explicit { ip, .. } => {
-                let address = IpCidr::from_addr(*ip, netpool.network.subnet.mask()).unwrap();
-                if netpool.network.subnet.network_addr() == address.network_addr() {
-                    if netpool.is_address_consumed(ip)? {
-                        return Err(Error::AddressUsed(*ip));
-                    }
-                    netpool.register_address(ip, token)?;
-                    self.insert_to_cache(token, &network_name, ip);
+        } else {
+            let Some(mut netpool) = network.parameterize(&network_name, db) else {
+                return Err(Error::Unsupported);
+            };
+
+            match req {
+                NetworkAllocRequest::Any { .. } => {
+                    let Some(address) = netpool.next_cidr(token)? else {
+                        return Err(Error::AllocationFailure(network_name));
+                    };
+
+                    self.insert_to_cache(token, &network_name, &address.addr());
 
                     Ok((
                         IpAssign {
                             network: Some(network_name),
-                            interface,
+                            interface: interface.to_string(),
                             addresses: vec![address],
                         },
                         network.default_router,
                     ))
-                } else {
-                    Err(Error::InvalidAddress(*ip, network_name))
+                }
+                NetworkAllocRequest::Explicit { ip, .. } => {
+                    let addr = ip.addr();
+
+                    if netpool.subnet().network_addr() == ip.network_addr() {
+                        if netpool.is_address_consumed(&addr)? {
+                            return Err(Error::AddressUsed(addr));
+                        }
+                        netpool.register_address(&addr, token)?;
+                        self.insert_to_cache(token, &network_name, &addr);
+
+                        Ok((
+                            IpAssign {
+                                network: Some(network_name),
+                                interface: interface.to_string(),
+                                addresses: vec![ip.clone()],
+                            },
+                            network.default_router,
+                        ))
+                    } else {
+                        Err(Error::InvalidAddress(addr, network_name))
+                    }
                 }
             }
         }
@@ -345,9 +386,9 @@ mod tests {
         let network = Network {
             ext_if: None,
             default_router: None,
-            alias_iface: "jeth0".to_string(),
-            bridge_iface: "jeth0".to_string(),
-            subnet: "192.168.2.0/24".parse().unwrap(),
+            alias_iface: Some("jeth0".to_string()),
+            bridge_iface: Some("jeth0".to_string()),
+            subnet: "192.168.2.0/24".parse().ok(),
             start_addr: Some("192.168.2.5".parse().unwrap()),
             end_addr: None,
         };
@@ -358,7 +399,7 @@ mod tests {
 
         let db = Database::from(conn);
 
-        let mut pool = network.parameterize("testtest", &db);
+        let mut pool = network.parameterize("testtest", &db).expect("should be able to create a pool");
 
         let addr1 = pool.next_address("1")?.unwrap();
         let addr2 = pool.next_address("1")?.unwrap();
@@ -383,3 +424,4 @@ mod tests {
         Ok(())
     }
 }
+

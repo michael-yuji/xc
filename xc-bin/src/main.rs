@@ -879,7 +879,7 @@ fn main() -> Result<(), ActionError> {
                     debug!("waiting for process to exit");
                     let exit = n.notified_sync_take_value()?;
                     let exit_status = decode_exit_code(exit);
-                    debug!(exit_status=exit_status.code(), "process exited");
+                    debug!(exit_status = exit_status.code(), "process exited");
                     std::process::exit(exit_status.code().unwrap_or(EXIT_FAILURE))
                 }
                 Err(err) => {

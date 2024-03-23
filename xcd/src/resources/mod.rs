@@ -31,7 +31,7 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub(crate) mod network;
+pub mod network;
 pub mod volume;
 
 pub(crate) struct Resources {

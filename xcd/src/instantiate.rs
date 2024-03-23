@@ -356,6 +356,9 @@ impl InstantiateBlueprint {
                     crate::resources::network::Error::Other(error) => {
                         Err(error).context("error occured during address allocation")?;
                     }
+                    crate::resources::network::Error::Unsupported => {
+                        Err(error).context("this network does not support such operation")?;
+                    }
                 },
             };
         }

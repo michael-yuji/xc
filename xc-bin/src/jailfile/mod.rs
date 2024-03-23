@@ -124,7 +124,7 @@ impl JailContext {
             image.set_config(&config);
 
             // XXX: handle effect error
-            _ = std::fs::rename(local_id, &response.commit_id);
+            _ = std::fs::rename(local_id, response.commit_id);
             _ = std::fs::write("jail.json", serde_json::to_string_pretty(&image).unwrap());
         } else {
             crate::image::patch_image(&mut conn, &image_reference, |config| {

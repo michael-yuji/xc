@@ -603,9 +603,9 @@ async fn list_networks(
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateNetworkRequest {
     pub name: String,
-    pub alias_iface: String,
-    pub bridge_iface: String,
-    pub subnet: ipcidr::IpCidr,
+    pub alias_iface: Option<String>,
+    pub bridge_iface: Option<String>,
+    pub subnet: Option<ipcidr::IpCidr>,
     pub start_addr: Option<IpAddr>,
     pub end_addr: Option<IpAddr>,
     pub default_router: Option<IpAddr>,
@@ -619,28 +619,42 @@ async fn create_network(
 ) -> GenericResult<()> {
     let context = context.write().await;
     let config = context.inventory().await;
-    let existing_ifaces = freebsd::net::ifconfig::interfaces().unwrap();
+
     if config.networks.contains_key(&request.name) {
         ipc_err(EINVAL, "Network with such name already exists")
     } else {
-        let nm = context.resources.clone();
-        let mut nm = nm.write().await;
-
-        if !existing_ifaces.contains(&request.alias_iface) {
-            return enoent(format!("interface {} not found", request.alias_iface).as_str());
-        } else if !existing_ifaces.contains(&request.bridge_iface) {
-            return enoent(format!("interface {} not found", request.bridge_iface).as_str());
+        if request.alias_iface.is_some() || request.bridge_iface.is_some() {
+            let existing_ifaces = freebsd::net::ifconfig::interfaces().unwrap();
+            if request
+                .alias_iface
+                .as_ref()
+                .map(|iface| !existing_ifaces.contains(iface))
+                .unwrap_or(false)
+            {
+                return enoent("interface not found");
+            }
+            if request
+                .bridge_iface
+                .as_ref()
+                .map(|iface| !existing_ifaces.contains(iface))
+                .unwrap_or(false)
+            {
+                return enoent("interface not found");
+            }
         }
 
         let network = Network {
             ext_if: None,
-            alias_iface: request.alias_iface.to_string(),
-            bridge_iface: request.bridge_iface.to_string(),
+            alias_iface: request.alias_iface.clone(),
+            bridge_iface: request.bridge_iface.clone(),
             subnet: request.subnet,
             start_addr: request.start_addr,
             end_addr: request.end_addr,
             default_router: request.default_router,
         };
+
+        let nm = context.resources.clone();
+        let mut nm = nm.write().await;
 
         match nm.create_network(&request.name, &network) {
             Ok(_) => {
@@ -1240,13 +1254,17 @@ async fn push_image(
     request: PushImageRequest,
 ) -> Result<PushImageResponse, ipc::proto::ErrResponse<PushImageError>> {
     let ctx = context.read().await;
-    ctx.push_image(request.image_reference, request.remote_reference, request.insecure)
-        .await
-        .map(|_| PushImageResponse {})
-        .map_err(|err| ipc::proto::ErrResponse {
-            value: err,
-            errno: 1,
-        })
+    ctx.push_image(
+        request.image_reference,
+        request.remote_reference,
+        request.insecure,
+    )
+    .await
+    .map(|_| PushImageResponse {})
+    .map_err(|err| ipc::proto::ErrResponse {
+        value: err,
+        errno: 1,
+    })
 }
 
 #[derive(Serialize, Deserialize, Debug)]

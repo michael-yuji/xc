@@ -21,9 +21,9 @@
 // LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
 // OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 // SUCH DAMAGE.
+use ipcidr::IpCidr;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -42,7 +42,7 @@ pub struct CopyFileReq {
 #[derive(Serialize, Clone, Deserialize, Debug)]
 pub enum NetworkAllocRequest {
     Any { network: String },
-    Explicit { network: String, ip: IpAddr },
+    Explicit { network: String, ip: IpCidr },
 }
 
 impl NetworkAllocRequest {
@@ -59,7 +59,7 @@ impl FromStr for NetworkAllocRequest {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_once('|') {
             Some((network, spec)) => {
-                let ip: IpAddr = spec.parse().map_err(|_| {
+                let ip: IpCidr = spec.parse().map_err(|_| {
                     std::io::Error::new(std::io::ErrorKind::Other, "cannot parse address")
                 })?;
                 Ok(Self::Explicit {

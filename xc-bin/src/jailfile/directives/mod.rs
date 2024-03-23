@@ -237,7 +237,7 @@ impl Directive for ConfigMod {
                     .to_string();
                 let arg0 = action
                     .args
-                    .get(0)
+                    .first()
                     .context("entry point requires one variable")?;
                 Ok(ConfigMod::WorkDir(entry_point, arg0.to_string()))
             }
@@ -284,7 +284,7 @@ impl Directive for ConfigMod {
             "NODEINIT" => Ok(ConfigMod::NoDeinit),
             "SYSVIPC" => Ok(ConfigMod::SysV(action.args.clone())),
             "MOUNT" => {
-                let fstype = action.args.get(0).context("cannot get fstype")?;
+                let fstype = action.args.first().context("cannot get fstype")?;
                 let mountpoint = action.args.get(1).context("cannot get mountpoint")?;
                 Ok(ConfigMod::Mount(fstype.to_string(), mountpoint.to_string()))
             }

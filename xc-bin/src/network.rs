@@ -24,6 +24,8 @@
 use clap::Subcommand;
 use std::net::IpAddr;
 use std::os::unix::net::UnixStream;
+use term_table::homogeneous::{TableLayout, TableSource, Title};
+use term_table::{ColumnLayout, Pos};
 use tracing::error;
 use xcd::ipc::*;
 
@@ -31,17 +33,24 @@ use xcd::ipc::*;
 pub(crate) enum NetworkAction {
     Create {
         name: String,
-        subnet: ipcidr::IpCidr,
+        subnet: Option<ipcidr::IpCidr>,
         start_addr: Option<IpAddr>,
         end_addr: Option<IpAddr>,
         #[arg(long = "bridge")]
-        bridge_iface: String,
+        bridge_iface: Option<String>,
         #[arg(long = "alias")]
-        alias_iface: String,
+        alias_iface: Option<String>,
         #[arg(long = "default-router")]
         default_router: Option<IpAddr>,
     },
-    List,
+    List {
+        #[arg(
+            short = 'f',
+            long = "format",
+            default_value = "name,l2iface,l3iface,subnet"
+        )]
+        format: String,
+    },
     // add a container to a network group
     Tag {
         #[arg(long = "no-commit", action)]
@@ -84,10 +93,26 @@ pub(crate) fn use_network_action(
                 error!("Cannot commit netgroup {network}: {err:?}")
             }
         }
-        NetworkAction::List => {
+        NetworkAction::List { format } => {
             let req = ListNetworkRequest {};
             let res = do_list_networks(conn, req)?;
-            eprintln!("{res:#?}");
+            if let Ok(response) = res {
+                fn make_standard_column() -> ColumnLayout {
+                    ColumnLayout::align(Pos::Left, ' ')
+                }
+                let title = format
+                    .split(",")
+                    .map(|title| {
+                        let title = Title::new(&title.to_uppercase(), &title.to_uppercase());
+                        (title, make_standard_column())
+                    })
+                    .collect::<Vec<_>>();
+                let mut layout = TableLayout::new(" ", true, title);
+                for network in response.network_info.iter() {
+                    layout.append_data(PrintNetwork(network));
+                }
+                println!("{}", layout.flush());
+            }
         }
         NetworkAction::Create {
             name,
@@ -112,4 +137,16 @@ pub(crate) fn use_network_action(
         }
     }
     Ok(())
+}
+struct PrintNetwork<'a>(&'a xcd::resources::network::NetworkInfo);
+impl<'a> TableSource for PrintNetwork<'a> {
+    fn value_for_column(&self, column: &str) -> Option<String> {
+        match column {
+            "NAME" => Some(self.0.name.to_string()),
+            "SUBNET" => self.0.subnet.clone().map(|n| n.to_string()),
+            "L3Iface" => self.0.alias_iface.clone(),
+            "L2Iface" => self.0.bridge_iface.clone(),
+            _ => None,
+        }
+    }
 }

@@ -314,16 +314,14 @@ pub async fn push_image(
             None => reg
                 .default_registry()
                 .ok_or(PushImageError::RegistryNotFound)?,
-            Some(hostname) => reg
-                .get_registry_by_name(&hostname)
-                .unwrap_or_else(|| {
-                    let base_url = if insecure {
-                        format!("http://{hostname}")
-                    } else {
-                        format!("https://{hostname}")
-                    };
-                    Registry::new(base_url, None)
-                }),
+            Some(hostname) => reg.get_registry_by_name(&hostname).unwrap_or_else(|| {
+                let base_url = if insecure {
+                    format!("http://{hostname}")
+                } else {
+                    format!("https://{hostname}")
+                };
+                Registry::new(base_url, None)
+            }),
         };
 
         (registry, record)

@@ -421,8 +421,13 @@ impl ProcessRunner {
 
             let jexec = jexec.to_local();
 
-//            let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
-            let result = self.spawn_process(&crate::util::gen_id(), &jexec, None/* Some(notify)*/, None);
+            //            let notify = Arc::new(EventFdNotify::from_fd(jexec.notify.unwrap()));
+            let result = self.spawn_process(
+                &crate::util::gen_id(),
+                &jexec,
+                None, /* Some(notify)*/
+                None,
+            );
 
             match result {
                 Ok(spawn_info) => write_response(0, spawn_info).unwrap(),

@@ -346,7 +346,7 @@ impl JailConfig {
                     })
                     .collect()
             })
-            .unwrap_or_else(HashMap::new);
+            .unwrap_or_default();
 
         let ports = config
             .config
