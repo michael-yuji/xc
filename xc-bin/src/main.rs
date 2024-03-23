@@ -233,7 +233,15 @@ fn main() -> Result<(), ActionError> {
         return Ok(());
     }
 
-    let mut conn = UnixStream::connect(path)?;
+    let mut conn = match UnixStream::connect(&path) {
+        Ok(conn) => conn,
+        Err(error) => {
+            let raw_os_error = error.raw_os_error();
+            let ec_msg = error.raw_os_error().map(|i| i.to_string()).unwrap_or("?".to_string());
+            eprintln!("cannot connect to remote socket at {path}: (errno={ec_msg})");
+            std::process::exit(EXIT_FAILURE)
+        }
+    };
 
     match arg.action {
         Action::Attach { name } => {
