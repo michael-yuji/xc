@@ -198,7 +198,7 @@ impl ProcessRunner {
 
         debug!(exit_notify = format!("{exit_notify:?}"), "==");
 
-        let mut envs = self.container.envs.clone();
+        let mut envs = exec.envs.clone();
 
         let jail = freebsd::jail::RunningJail::from_jid_unchecked(self.container.jid);
         let paths = envs
