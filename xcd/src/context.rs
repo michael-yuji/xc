@@ -82,6 +82,7 @@ pub struct ServerContext {
 
     pub(crate) resources: Arc<RwLock<Resources>>,
 
+    // a map of instantiate request that passed checks
     pub(crate) ins_queue: HashMap<String, CheckedInstantiateRequest>,
 }
 
@@ -141,6 +142,7 @@ impl ServerContext {
             .clone()
     }
 
+    // Establish a external RPC channel
     pub(crate) fn create_channel(
         this: Arc<RwLock<ServerContext>>,
         path: impl AsRef<std::path::Path>,
@@ -207,6 +209,7 @@ impl ServerContext {
         Some(result)
     }
 
+    /// Find a terminated container given an ID
     pub async fn find_corpse(&self, id: &str) -> Option<ContainerManifest> {
         for (cid, container) in self.terminated_sites.iter().rev() {
             if cid == id {
@@ -221,7 +224,7 @@ impl ServerContext {
         self.sites.get(id).cloned()
     }
 
-    pub(super) async fn update_hosts(&mut self, network: &str) {
+    pub(super) async fn update_host_file_for_containers_using_network(&mut self, network: &str) {
         let mut hosts = Vec::new();
         if let Some(jails) = self.ng2jails.get(network) {
             for jail in jails.iter() {
@@ -395,7 +398,7 @@ impl ServerContext {
     }
 
     pub(crate) async fn destroy_context(&mut self, id: &str) -> Result<(), anyhow::Error> {
-        info!("destroy conetxt: {id}");
+        info!(id, "destroy conetxt");
         if let Some(site) = self.sites.remove(&id.to_string()) {
             if let Err(err) = site.write().await.unwind() {
                 error!("error on unwind: {err:#?}");
@@ -616,7 +619,7 @@ impl ServerContext {
                         .insert(netgroup.to_string(), vec![id.to_string()]);
                 }
                 this.jail2ngs.get_mut(id).unwrap().push(netgroup.clone());
-                this.update_hosts(&netgroup).await;
+                this.update_host_file_for_containers_using_network(&netgroup).await;
             }
 
             (arc_site, notify)

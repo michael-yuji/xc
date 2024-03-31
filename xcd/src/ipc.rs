@@ -398,10 +398,13 @@ async fn continue_instantiate(
         return enoent("no such instantiate request");
     };
     let credential = Credential::from_conn_ctx(local_context);
-    ServerContext::continue_instantiate(context, &request.id, applied, credential)
-        .await
-        .expect("todo");
-    Ok(ContinueInstantiateResponse { id: request.id })
+    match ServerContext::continue_instantiate(context, &request.id, applied, credential).await {
+        Ok(_) => Ok(ContinueInstantiateResponse { id: request.id }),
+        Err(error) => {
+            error!(error=error.to_string(), "failed to instantiate container");
+            ipc_err(EIO, "failed to instantiate container: {error:?}")
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1148,7 +1151,7 @@ async fn commit_netgroup(
     context
         .write()
         .await
-        .update_hosts(&request.netgroup_name)
+        .update_host_file_for_containers_using_network(&request.netgroup_name)
         .await;
     Ok(())
 }
@@ -1192,7 +1195,7 @@ async fn add_container_to_netgroup(
         };
 
         if request.commit_immediately {
-            context.update_hosts(&ng_name).await;
+            context.update_host_file_for_containers_using_network(&ng_name).await;
         }
         Ok(())
     } else {
