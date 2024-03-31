@@ -885,15 +885,9 @@ async fn fd_import(
 
     info!("import: content_type is {content_type}");
 
-    unsafe {
-        freebsd::nix::libc::copy_file_range(
-            source_fd,
-            std::ptr::null_mut(),
-            dest_fd,
-            std::ptr::null_mut(),
-            file_len,
-            0,
-        );
+    if let Err(error) = freebsd::copy_file_range(source_fd, 0, dest_fd, 0, file_len) {
+        error!(error=error.to_string(), "copy_file_range failed");
+        return ipc_err(EIO, "failed to copyin archive")
     }
 
     info!("copy_file_range done");
@@ -922,8 +916,8 @@ async fn fd_import(
     let diff_id = OciDigest::new_unchecked(output_lines[0].trim());
     let archive_digest = OciDigest::new_unchecked(output_lines[1].trim());
 
-    info!("diff_id: {diff_id}");
-    info!("archive_digest: {archive_digest}");
+    info!(diff_id=diff_id.as_str(), "diff_id");
+    info!(archive_digest=archive_digest.as_str(), "archive_digest");
 
     let path = {
         let mut path = config.layers_dir.to_path_buf();

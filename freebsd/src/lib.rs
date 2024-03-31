@@ -489,3 +489,30 @@ impl FreeBSDCommandExt for std::process::Command {
         self
     }
 }
+
+pub fn copy_file_range(source_fd: i32, s_offset: i64, dest_fd: i32, d_offset: i64, max_len: usize) -> nix::Result<usize> {
+    unsafe {
+        let mut source_offset = s_offset;
+        let mut dest_offset = d_offset;
+        let mut remaining_len = max_len;
+        let mut copied_len = 0usize;
+        loop {
+            match nix::libc::copy_file_range(source_fd, &mut source_offset, dest_fd, &mut dest_offset, remaining_len, 0) {
+                0 => {
+                    break Ok(copied_len)
+                },
+                -1 => {
+                    break Err(nix::Error::last())
+                },
+                m => {
+                    assert!(m.is_positive());
+                    let n = m as usize;
+                    assert!(n <= remaining_len);
+                    remaining_len -= n;
+                    copied_len += n;
+                }
+            }
+        }
+    }
+}
+
